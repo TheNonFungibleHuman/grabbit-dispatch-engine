@@ -19,10 +19,13 @@ function extractDelivery(payload: KiloWebhookPayload): {
   accessCode?: string;
 } {
   const delivery =
+    payload.data?.object ??
     payload.delivery ??
-    payload.data?.delivery ??
-    (payload.data && "id" in payload.data
-      ? (payload.data as { id?: string; status?: string; access_code?: string })
+    (payload.data &&
+    typeof payload.data === "object" &&
+    "delivery" in payload.data
+      ? (payload.data as { delivery?: { id?: string; status?: string; access_code?: string | null } })
+          .delivery
       : undefined);
 
   if (!delivery) {

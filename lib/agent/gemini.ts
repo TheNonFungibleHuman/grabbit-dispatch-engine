@@ -5,19 +5,16 @@ import {
   getPreviousInteractionId,
   setPreviousInteractionId,
 } from "./sessions";
-import {
-  BOOK_KILO_DELIVERY_TOOL,
-  buildPhotoContextNote,
-  executeAgentTool,
-} from "./tools";
+import { AGENT_TOOLS, buildAgentContextNote, executeAgentTool } from "./tools";
 
 const DEFAULT_MODEL = "gemini-3.6-flash";
-const MAX_TOOL_ROUNDS = 3;
+const MAX_TOOL_ROUNDS = 4;
 
 export interface GenerateAgentReplyInput {
   sender: string;
   text: string;
   messageId: string;
+  pushName?: string;
 }
 
 export interface GenerateAgentReplyResult {
@@ -60,7 +57,6 @@ function getFunctionCalls(interaction: InteractionLike) {
 /**
  * Generate a Grabbit WhatsApp reply via Gemini Interactions API.
  * History is scoped per sender phone via previous_interaction_id.
- * @see https://ai.google.dev/gemini-api/docs/interactions-overview
  */
 export async function generateAgentReply(
   input: GenerateAgentReplyInput,
@@ -68,14 +64,17 @@ export async function generateAgentReply(
   const ai = getGeminiClient();
   const model = getModel();
   const previousInteractionId = getPreviousInteractionId(input.sender);
-  const photoNote = await buildPhotoContextNote(input.sender);
-  const userInput = `${photoNote}\n\nCustomer message:\n${input.text}`;
+  const contextNote = await buildAgentContextNote({
+    senderPhone: input.sender,
+    pushName: input.pushName,
+  });
+  const userInput = `${contextNote}\n\nCustomer message:\n${input.text}`;
 
   let interaction = (await ai.interactions.create({
     model,
     input: userInput,
     system_instruction: buildGrabbitSystemInstruction(),
-    tools: [BOOK_KILO_DELIVERY_TOOL],
+    tools: AGENT_TOOLS,
     ...(previousInteractionId
       ? { previous_interaction_id: previousInteractionId }
       : {}),
@@ -95,6 +94,7 @@ export async function generateAgentReply(
         name: call.name!,
         toolArguments: call.arguments,
         senderPhone: input.sender,
+        pushName: input.pushName,
         messageId: input.messageId,
       });
 
@@ -110,7 +110,7 @@ export async function generateAgentReply(
       model,
       previous_interaction_id: interaction.id,
       input: toolResults,
-      tools: [BOOK_KILO_DELIVERY_TOOL],
+      tools: AGENT_TOOLS,
     })) as InteractionLike;
 
     if (interaction.id) {

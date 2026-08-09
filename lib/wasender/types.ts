@@ -76,5 +76,6 @@ export interface IncomingUserMessage {
   sender: string;
   remoteJid: string;
   text: string;
+  pushName?: string;
   raw: WasenderIncomingMessage;
 }

@@ -45,12 +45,16 @@ export async function processIncomingUserMessage(
             sender: message.sender,
             text: caption,
             messageId: message.messageId,
+            pushName: message.pushName,
           });
           await sendTextMessage({ to, text: reply.text });
         } else {
+          const name = message.pushName?.trim();
           await sendTextMessage({
             to,
-            text: `Got your photo (${draft.packageImages.length}/6). Send another if needed, or tell me the pickup and drop-off details 🙂`,
+            text: name
+              ? `Got it ${name}. Photo saved (${draft.packageImages.length}/6). Send another if needed, or tell me pickup and drop-off 🙂`
+              : `Got your photo (${draft.packageImages.length}/6). Send another if needed, or tell me the pickup and drop-off details 🙂`,
           });
         }
 
@@ -83,6 +87,7 @@ export async function processIncomingUserMessage(
     sender: message.sender,
     text: message.text,
     messageId: message.messageId,
+    pushName: message.pushName,
   });
 
   await sendTextMessage({

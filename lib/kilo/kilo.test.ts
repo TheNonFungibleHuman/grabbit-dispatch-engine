@@ -1,8 +1,15 @@
 import assert from "node:assert/strict";
 import { createHmac } from "node:crypto";
 import { describe, it } from "node:test";
+import {
+  composeServiceLocationAddress,
+  expandUnitOptions,
+  matchServiceLocations,
+  resolveUnitFollowUp,
+} from "./locations.ts";
 import { mapDraftToCreateDeliveryInput } from "./map-order.ts";
 import { statusMessageForCustomer } from "./status-messages.ts";
+import type { KiloServiceLocation } from "./types.ts";
 import { verifyKiloSignature } from "./verify.ts";
 
 describe("verifyKiloSignature", () => {
@@ -100,6 +107,39 @@ describe("mapDraftToCreateDeliveryInput", () => {
         }),
       /real geocoded/,
     );
+  });
+});
+
+describe("service locations helpers", () => {
+  const sample: KiloServiceLocation = {
+    id: "loc_1",
+    name: "Queen's Hall",
+    address: "Triolet Road",
+    category: "hostel",
+    coords: { lng: 57.55, lat: -20.05 },
+    countryCode: "MU",
+    stateCode: null,
+    countryName: "Mauritius",
+    stateName: null,
+    unit: {
+      label: "Room",
+      mode: "list",
+      ranges: [{ prefix: "R", suffix: "", start: 1, end: 3, pad: 2 }],
+      values: ["R10"],
+      allowCustom: false,
+      required: true,
+    },
+  };
+
+  it("matches place names and expands units", () => {
+    const matches = matchServiceLocations("queens hall", [sample]);
+    assert.equal(matches[0]?.id, "loc_1");
+    assert.deepEqual(expandUnitOptions(sample.unit), ["R01", "R02", "R03", "R10"]);
+    assert.equal(
+      composeServiceLocationAddress(sample, "R02"),
+      "Queen's Hall — Triolet Road — R02",
+    );
+    assert.equal(resolveUnitFollowUp(sample.unit).status, "ask_list");
   });
 });
 

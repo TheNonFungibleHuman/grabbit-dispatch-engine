@@ -1,8 +1,14 @@
 import type {
+  CancelDeliveryResponse,
+  CapabilitiesResponse,
   CreateKiloDeliveryInput,
   CreateKiloDeliveryResponse,
+  GetDeliveryResponse,
   KiloDelivery,
+  KiloErrorResponse,
   ListKiloDeliveriesResponse,
+  ServiceLocationsResponse,
+  WarehousesResponse,
 } from "./types";
 import { KiloApiError } from "./types";
 
@@ -22,10 +28,25 @@ function getApiKey(): string {
   return key;
 }
 
-async function kiloFetch<T>(
-  path: string,
-  init: RequestInit = {},
-): Promise<T> {
+function toApiError(statusCode: number, body: unknown): KiloApiError {
+  if (body && typeof body === "object") {
+    const err = body as Partial<KiloErrorResponse> & { message?: string };
+    const message =
+      (typeof err.error === "string" && err.error) ||
+      (typeof err.message === "string" && err.message) ||
+      `Kilo API ${statusCode}`;
+    return new KiloApiError(
+      message,
+      statusCode,
+      body,
+      typeof err.code === "string" ? err.code : undefined,
+      err.fieldErrors,
+    );
+  }
+  return new KiloApiError(`Kilo API ${statusCode}`, statusCode, body);
+}
+
+async function kiloFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
   const response = await fetch(`${getBaseUrl()}${path}`, {
     ...init,
     headers: {
@@ -38,17 +59,31 @@ async function kiloFetch<T>(
   const body = await response.json().catch(() => null);
 
   if (!response.ok) {
-    const message =
-      (body &&
-        typeof body === "object" &&
-        "message" in body &&
-        typeof body.message === "string" &&
-        body.message) ||
-      `Kilo API ${response.status} for ${path}`;
-    throw new KiloApiError(message, response.status, body);
+    throw toApiError(response.status, body);
+  }
+
+  if (
+    body &&
+    typeof body === "object" &&
+    "ok" in body &&
+    (body as { ok: unknown }).ok === false
+  ) {
+    throw toApiError(response.status, body);
   }
 
   return body as T;
+}
+
+export async function getCapabilities(): Promise<CapabilitiesResponse> {
+  return kiloFetch<CapabilitiesResponse>("/capabilities");
+}
+
+export async function listWarehouses(): Promise<WarehousesResponse> {
+  return kiloFetch<WarehousesResponse>("/warehouses");
+}
+
+export async function listServiceLocations(): Promise<ServiceLocationsResponse> {
+  return kiloFetch<ServiceLocationsResponse>("/service-locations");
 }
 
 export async function createDelivery(
@@ -61,13 +96,10 @@ export async function createDelivery(
 }
 
 export async function getDelivery(deliveryId: string): Promise<KiloDelivery> {
-  const result = await kiloFetch<{ ok?: boolean; delivery?: KiloDelivery }>(
+  const result = await kiloFetch<GetDeliveryResponse>(
     `/deliveries/${encodeURIComponent(deliveryId)}`,
   );
-  if (result.delivery) {
-    return result.delivery;
-  }
-  return result as unknown as KiloDelivery;
+  return result.delivery;
 }
 
 export async function listDeliveries(params?: {
@@ -88,9 +120,12 @@ export async function listDeliveries(params?: {
 export async function cancelDelivery(
   deliveryId: string,
   reason: string,
-): Promise<unknown> {
-  return kiloFetch(`/deliveries/${encodeURIComponent(deliveryId)}/cancel`, {
-    method: "POST",
-    body: JSON.stringify({ reason }),
-  });
+): Promise<CancelDeliveryResponse> {
+  return kiloFetch<CancelDeliveryResponse>(
+    `/deliveries/${encodeURIComponent(deliveryId)}/cancel`,
+    {
+      method: "POST",
+      body: JSON.stringify({ reason }),
+    },
+  );
 }

@@ -62,6 +62,7 @@ async function handleIncomingMessage(
     sender,
     remoteJid: message.key.remoteJid,
     text,
+    pushName: message.pushName,
     raw: message,
   });
 }

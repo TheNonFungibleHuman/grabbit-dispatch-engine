@@ -3,10 +3,14 @@ import type {
   KiloCollectionMethod,
   KiloDeliveryMode,
   KiloPackageSize,
+  KiloServiceKind,
 } from "./types";
 import type { GeoCoords } from "../geocode";
 
 export interface DeliveryDraftForKilo {
+  serviceKind?: KiloServiceKind;
+  deliveryMode?: KiloDeliveryMode;
+  warehouseId?: string;
   senderName: string;
   senderPhone: string;
   senderEmail?: string;
@@ -20,6 +24,9 @@ export interface DeliveryDraftForKilo {
   pickupContactSameAsSender?: boolean;
   pickupContactName?: string;
   pickupContactPhone?: string;
+  customerCollectionMethod?: KiloCollectionMethod;
+  isPODEnabled?: boolean;
+  podAmount?: number;
   idempotencyKey: string;
 }
 
@@ -27,18 +34,6 @@ export interface MapDraftToCreateInputArgs {
   draft: DeliveryDraftForKilo;
   pickupCoords: GeoCoords;
   deliveryCoords: GeoCoords;
-}
-
-function defaultCollectionMethod(): KiloCollectionMethod {
-  const value = process.env.KILO_COLLECTION_METHOD?.trim();
-  if (value === "online_checkout") return "online_checkout";
-  return "cash_on_delivery";
-}
-
-function defaultDeliveryMode(): KiloDeliveryMode {
-  const value = process.env.KILO_DELIVERY_MODE?.trim();
-  if (value === "warehouse") return "warehouse";
-  return "pickup";
 }
 
 function normalizePhone(phone: string): string {
@@ -66,8 +61,17 @@ function assertHttpsImages(urls: string[]): void {
   }
 }
 
+function assertRealCoords(coords: GeoCoords, label: string): void {
+  if (!Number.isFinite(coords.lng) || !Number.isFinite(coords.lat)) {
+    throw new Error(`${label} are invalid`);
+  }
+  if (coords.lng === 0 && coords.lat === 0) {
+    throw new Error("coords must be real geocoded values, not placeholders");
+  }
+}
+
 /**
- * Map structured bot draft + geocoded coords into a Kilo create payload.
+ * Map structured bot draft + coords into a Kilo create payload.
  * Never pass free-form chat text through here.
  */
 export function mapDraftToCreateDeliveryInput(
@@ -75,26 +79,19 @@ export function mapDraftToCreateDeliveryInput(
 ): CreateKiloDeliveryInput {
   const { draft, pickupCoords, deliveryCoords } = args;
   assertHttpsImages(draft.packageImages);
+  assertRealCoords(pickupCoords, "pickupCoords");
+  assertRealCoords(deliveryCoords, "deliveryCoords");
 
-  if (!Number.isFinite(pickupCoords.lng) || !Number.isFinite(pickupCoords.lat)) {
-    throw new Error("pickupCoords are invalid");
-  }
-  if (
-    !Number.isFinite(deliveryCoords.lng) ||
-    !Number.isFinite(deliveryCoords.lat)
-  ) {
-    throw new Error("deliveryCoords are invalid");
-  }
-  if (
-    (pickupCoords.lng === 0 && pickupCoords.lat === 0) ||
-    (deliveryCoords.lng === 0 && deliveryCoords.lat === 0)
-  ) {
-    throw new Error("coords must be real geocoded values, not placeholders");
-  }
+  const serviceKind = draft.serviceKind ?? "pickup_delivery";
+  const deliveryMode = draft.deliveryMode ?? "pickup";
+  const collection =
+    draft.customerCollectionMethod ??
+    (process.env.KILO_COLLECTION_METHOD?.trim() === "online_checkout"
+      ? "online_checkout"
+      : "cash_on_delivery");
 
-  const deliveryMode = defaultDeliveryMode();
   const payload: CreateKiloDeliveryInput = {
-    serviceKind: "pickup_delivery",
+    serviceKind,
     deliveryMode,
     senderName: draft.senderName.trim(),
     senderPhone: normalizePhone(draft.senderPhone),
@@ -115,9 +112,14 @@ export function mapDraftToCreateDeliveryInput(
     packageDescription: draft.packageDescription.trim(),
     packageSize: draft.packageSize ?? "small",
     packageImages: draft.packageImages,
-    customerCollectionMethod: defaultCollectionMethod(),
+    customerCollectionMethod: collection,
     idempotencyKey: clampIdempotencyKey(draft.idempotencyKey),
   };
+
+  if (draft.isPODEnabled) {
+    payload.isPODEnabled = true;
+    payload.podAmount = draft.podAmount ?? null;
+  }
 
   if (payload.pickupContactSameAsSender === false) {
     if (!draft.pickupContactName?.trim() || !draft.pickupContactPhone?.trim()) {
@@ -130,9 +132,10 @@ export function mapDraftToCreateDeliveryInput(
   }
 
   if (deliveryMode === "warehouse") {
-    const warehouseId = process.env.KILO_WAREHOUSE_ID?.trim();
+    const warehouseId =
+      draft.warehouseId?.trim() || process.env.KILO_WAREHOUSE_ID?.trim();
     if (!warehouseId) {
-      throw new Error("KILO_WAREHOUSE_ID is required when deliveryMode=warehouse");
+      throw new Error("warehouseId is required when deliveryMode=warehouse");
     }
     payload.warehouseId = warehouseId;
   }
