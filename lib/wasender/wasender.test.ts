@@ -1,9 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import {
-  getSenderPhone,
-  parseWasenderWebhookPayload,
-} from "./handlers.ts";
+import { getSenderPhone, parseWasenderWebhookPayload } from "./parse.ts";
 import type { WasenderIncomingMessage } from "./types.ts";
 import { verifyWasenderSignature } from "./verify.ts";
 

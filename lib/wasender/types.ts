@@ -70,3 +70,11 @@ export interface WasenderWebhookEvent<TData = unknown> {
 
 export type MessagesReceivedEvent =
   WasenderWebhookEvent<WasenderMessagesReceivedData>;
+
+export interface IncomingUserMessage {
+  messageId: string;
+  sender: string;
+  remoteJid: string;
+  text: string;
+  raw: WasenderIncomingMessage;
+}

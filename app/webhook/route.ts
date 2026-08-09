@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { after, NextResponse } from "next/server";
 import {
   handleWasenderEvent,
   parseWasenderWebhookPayload,
@@ -60,16 +60,17 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: message }, { status: 400 });
   }
 
-  try {
-    // Acknowledge quickly; Wasender requires 200 within 60 seconds.
-    await handleWasenderEvent(payload);
-  } catch (error) {
-    console.error("[wasender] failed to process webhook event", {
-      event: payload.event,
-      error,
-    });
-    // Still return 200 so Wasender does not endlessly retry on app bugs.
-  }
+  // Ack Wasender immediately; Gemini + outbound send continue in the background.
+  after(async () => {
+    try {
+      await handleWasenderEvent(payload);
+    } catch (error) {
+      console.error("[wasender] failed to process webhook event", {
+        event: payload.event,
+        error,
+      });
+    }
+  });
 
   return NextResponse.json({ received: true });
 }

@@ -1,37 +1,14 @@
+import { processIncomingUserMessage } from "../agent";
+import { sendTextMessage } from "./client";
+import { getSenderPhone } from "./parse";
 import type {
+  IncomingUserMessage,
   MessagesReceivedEvent,
-  WasenderIncomingMessage,
   WasenderWebhookEvent,
 } from "./types";
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-export function parseWasenderWebhookPayload(
-  body: unknown,
-): WasenderWebhookEvent {
-  if (!isRecord(body)) {
-    throw new Error("Webhook body must be a JSON object");
-  }
-
-  const event = body.event;
-  if (typeof event !== "string" || event.length === 0) {
-    throw new Error("Webhook payload is missing a valid event name");
-  }
-
-  return body as unknown as WasenderWebhookEvent;
-}
-
-export function getSenderPhone(message: WasenderIncomingMessage): string {
-  const key = message.key;
-  return (
-    key.cleanedParticipantPn ??
-    key.cleanedSenderPn ??
-    key.senderPn?.replace(/@s\.whatsapp\.net$/, "") ??
-    key.remoteJid.replace(/@.*$/, "")
-  );
-}
+export { getSenderPhone, parseWasenderWebhookPayload } from "./parse";
+export type { IncomingUserMessage } from "./types";
 
 export async function handleWasenderEvent(
   payload: WasenderWebhookEvent,
@@ -80,7 +57,6 @@ async function handleIncomingMessage(
     ),
   });
 
-  // Agent reply logic will plug in here (LLM + wasender send API).
   await onUserMessage({
     messageId: message.key.id,
     sender,
@@ -90,25 +66,26 @@ async function handleIncomingMessage(
   });
 }
 
-export interface IncomingUserMessage {
-  messageId: string;
-  sender: string;
-  remoteJid: string;
-  text: string;
-  raw: WasenderIncomingMessage;
-}
-
-/**
- * Central place for agent/business logic after a verified inbound message.
- * Keep this fast — Wasender expects a 200 within 60s.
- */
 async function onUserMessage(message: IncomingUserMessage): Promise<void> {
-  if (!message.text) {
-    return;
-  }
+  try {
+    await processIncomingUserMessage(message);
+  } catch (error) {
+    console.error("[agent] failed to process inbound message", {
+      sender: message.sender,
+      messageId: message.messageId,
+      error,
+    });
 
-  // Placeholder: acknowledge inbound text while the agent is being built.
-  console.info(
-    `[wasender] ready to process agent reply for ${message.sender}: "${message.text}"`,
-  );
+    try {
+      const to = message.sender.startsWith("+")
+        ? message.sender
+        : `+${message.sender.replace(/\D/g, "")}`;
+      await sendTextMessage({
+        to,
+        text: "Sorry — I’m having a quick technical hiccup. Please resend your message in a moment and we’ll take care of you 💚",
+      });
+    } catch (sendError) {
+      console.error("[agent] failed to send fallback error reply", sendError);
+    }
+  }
 }

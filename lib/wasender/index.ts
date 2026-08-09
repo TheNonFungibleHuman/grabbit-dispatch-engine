@@ -4,7 +4,7 @@ export {
   handleWasenderEvent,
   parseWasenderWebhookPayload,
 } from "./handlers";
-export type { IncomingUserMessage } from "./handlers";
+export type { IncomingUserMessage } from "./types";
 export type {
   MessagesReceivedEvent,
   WasenderIncomingMessage,
