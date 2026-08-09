@@ -234,6 +234,9 @@ export async function bookKiloDeliveryFromChat(args: {
       ok: false,
       error:
         "Need at least 1 package photo. Ask the customer to send a clear photo of the package/order first.",
+      customerGuidance:
+        "Do NOT say the order was received or booked. Ask for a clear package/order photo first.",
+      booked: false,
     };
   }
 

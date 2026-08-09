@@ -28,7 +28,8 @@ describe("buildGrabbitSystemInstruction", () => {
     assert.match(prompt, /Never mention Kilo/i);
     assert.match(prompt, /Trip \(passenger ride\)/i);
     assert.match(prompt, /team will get back/i);
-    assert.match(prompt, /Never break character/i);
+    assert.match(prompt, /Never claim an order\/delivery was placed/i);
+    assert.match(prompt, /ok:false means it was NOT placed/i);
   });
 });
 

@@ -1,5 +1,6 @@
 import { GoogleGenAI } from "@google/genai";
 import { formatError, logError, logInfo, logWarn } from "../log";
+import { customerReplyForFailedBooking } from "./booking-guard";
 import { sanitizeWhatsAppText } from "./format";
 import {
   buildFunctionResultInput,
@@ -75,7 +76,10 @@ async function runToolRound(args: {
   pushName?: string;
   messageId: string;
   round: number;
-}): Promise<InteractionLike | null> {
+}): Promise<{
+  interaction: InteractionLike;
+  bookingFailure: string | null;
+} | null> {
   const calls = getFunctionCalls(args.interaction);
   if (calls.length === 0) {
     if (args.interaction.status === "requires_action") {
@@ -106,6 +110,7 @@ async function runToolRound(args: {
     })),
   });
 
+  let bookingFailure: string | null = null;
   const toolResults = [];
   for (const call of calls) {
     const result = await executeAgentTool({
@@ -123,6 +128,13 @@ async function runToolRound(args: {
       ok,
       preview: JSON.stringify(result).slice(0, 400),
     });
+
+    if (call.name === "book_kilo_delivery" && !ok) {
+      bookingFailure =
+        typeof (result as { error?: unknown }).error === "string"
+          ? (result as { error: string }).error
+          : "Booking failed";
+    }
 
     toolResults.push(
       buildFunctionResultInput({
@@ -146,7 +158,7 @@ async function runToolRound(args: {
     ...summarizeInteraction(next),
   });
 
-  return next;
+  return { interaction: next, bookingFailure };
 }
 
 /**
@@ -215,6 +227,8 @@ export async function generateAgentReply(
     ...summarizeInteraction(interaction),
   });
 
+  let bookingFailure: string | null = null;
+
   for (let round = 0; round < MAX_TOOL_ROUNDS; round += 1) {
     try {
       const next = await runToolRound({
@@ -227,7 +241,10 @@ export async function generateAgentReply(
         round,
       });
       if (!next) break;
-      interaction = next;
+      interaction = next.interaction;
+      if (next.bookingFailure) {
+        bookingFailure = next.bookingFailure;
+      }
     } catch (error) {
       logError("agent", "gemini tool-followup failed", error);
       console.error("[agent] gemini tool-followup detail", {
@@ -271,7 +288,10 @@ export async function generateAgentReply(
           round,
         });
         if (!next) break;
-        retryInteraction = next;
+        retryInteraction = next.interaction;
+        if (next.bookingFailure) {
+          bookingFailure = next.bookingFailure;
+        }
       }
 
       interaction = retryInteraction;
@@ -281,15 +301,26 @@ export async function generateAgentReply(
     }
   }
 
-  if (!text) {
+  if (bookingFailure) {
+    const safeText = customerReplyForFailedBooking(bookingFailure);
+    logWarn("agent", "overriding reply after failed booking", {
+      messageId: input.messageId,
+      bookingFailure,
+      modelReplyPreview: text.slice(0, 160),
+      safeReplyPreview: safeText.slice(0, 160),
+    });
+    text = safeText;
+  } else if (!text) {
     logWarn("agent", "empty gemini output; using fallback reply", {
       messageId: input.messageId,
       ...summarizeInteraction(interaction),
     });
     text =
       "Got you. Mind sending that again in a short line so I can help right away? 🙂";
-  } else if (interaction.id) {
-    // Only advance the persisted history pointer after a real model reply.
+  }
+
+  if (text && interaction.id) {
+    // Only advance the persisted history pointer after a customer-facing reply.
     await setPreviousInteractionId(input.sender, interaction.id);
     logInfo("agent", "session pointer advanced", {
       messageId: input.messageId,
