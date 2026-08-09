@@ -1,6 +1,7 @@
 import { GoogleGenAI } from "@google/genai";
 import { formatError, logError, logInfo, logWarn } from "../log";
 import { customerReplyForFailedBooking } from "./booking-guard";
+import type { BookingFailureDetails } from "./booking-guard";
 import { sanitizeWhatsAppText } from "./format";
 import {
   buildFunctionResultInput,
@@ -78,7 +79,7 @@ async function runToolRound(args: {
   round: number;
 }): Promise<{
   interaction: InteractionLike;
-  bookingFailure: string | null;
+  bookingFailure: BookingFailureDetails | null;
 } | null> {
   const calls = getFunctionCalls(args.interaction);
   if (calls.length === 0) {
@@ -110,7 +111,7 @@ async function runToolRound(args: {
     })),
   });
 
-  let bookingFailure: string | null = null;
+  let bookingFailure: BookingFailureDetails | null = null;
   const toolResults = [];
   for (const call of calls) {
     const result = await executeAgentTool({
@@ -130,10 +131,19 @@ async function runToolRound(args: {
     });
 
     if (call.name === "book_kilo_delivery" && !ok) {
-      bookingFailure =
+      const error =
         typeof (result as { error?: unknown }).error === "string"
           ? (result as { error: string }).error
           : "Booking failed";
+      const fieldErrors =
+        result &&
+        typeof result === "object" &&
+        "fieldErrors" in result &&
+        result.fieldErrors &&
+        typeof result.fieldErrors === "object"
+          ? (result.fieldErrors as Record<string, string[]>)
+          : undefined;
+      bookingFailure = { error, fieldErrors };
     }
 
     toolResults.push(
@@ -227,7 +237,7 @@ export async function generateAgentReply(
     ...summarizeInteraction(interaction),
   });
 
-  let bookingFailure: string | null = null;
+  let bookingFailure: BookingFailureDetails | null = null;
 
   for (let round = 0; round < MAX_TOOL_ROUNDS; round += 1) {
     try {

@@ -15,6 +15,29 @@ describe("booking-guard", () => {
     );
   });
 
+  it("asks for room/unit from structured follow-up errors", () => {
+    assert.match(
+      customerReplyForFailedBooking("Need Room for Songhai."),
+      /Room for Songhai/i,
+    );
+  });
+
+  it("asks for a link on link-errand failures", () => {
+    assert.match(
+      customerReplyForFailedBooking({
+        error: "errandMode=link requires errandLinks",
+        fieldErrors: { errandLinks: ["At least one https link is required"] },
+      }),
+      /link/i,
+    );
+  });
+
+  it("avoids vague missing-detail wording on unknown errors", () => {
+    const reply = customerReplyForFailedBooking("something unexpected exploded");
+    assert.doesNotMatch(reply, /missing detail/i);
+    assert.match(reply, /pickup place|drop-off|resend/i);
+  });
+
   it("detects false booking success wording", () => {
     assert.equal(
       looksLikeFalseBookingSuccess(
