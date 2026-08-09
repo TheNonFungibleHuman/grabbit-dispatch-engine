@@ -39,9 +39,11 @@ export async function processIncomingUserMessage(
     messageId: message.messageId,
     model: reply.model,
     interactionId: reply.interactionId,
+    usedHistory: Boolean(reply.previousInteractionId),
     replyPreview: reply.text.slice(0, 120),
   });
 }
 
 export { generateAgentReply } from "./gemini";
+export { sanitizeWhatsAppText } from "./format";
 export { buildGrabbitSystemInstruction } from "./prompt";

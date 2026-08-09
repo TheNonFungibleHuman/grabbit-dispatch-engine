@@ -1,7 +1,10 @@
 /**
- * Best-effort conversation continuity for serverless.
- * Keys: normalized phone; values: last Gemini interaction id.
- * Lost on cold start — acceptable for v1; swap for Redis/KV later if needed.
+ * Conversation continuity is scoped per customer phone number.
+ * Each sender maps to their own Gemini previous_interaction_id only,
+ * so Customer A and Customer B never share history.
+ *
+ * Note: process memory can reset on cold starts. Gemini still stores the
+ * interaction chain server-side once an id exists for that sender.
  */
 const previousInteractionBySender = new Map<string, string>();
 
@@ -20,6 +23,6 @@ export function clearPreviousInteractionId(sender: string): void {
   previousInteractionBySender.delete(normalizeSender(sender));
 }
 
-function normalizeSender(sender: string): string {
+export function normalizeSender(sender: string): string {
   return sender.replace(/\D/g, "");
 }

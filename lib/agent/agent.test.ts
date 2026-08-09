@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import { sanitizeWhatsAppText } from "./format.ts";
 import { buildGrabbitSystemInstruction } from "./prompt.ts";
 import {
   clearPreviousInteractionId,
@@ -8,19 +9,47 @@ import {
 } from "./sessions.ts";
 
 describe("buildGrabbitSystemInstruction", () => {
-  it("includes Grabbit coverage areas from docs.md", () => {
+  it("includes Grabbit coverage areas and WhatsApp formatting rules", () => {
     const prompt = buildGrabbitSystemInstruction();
     assert.match(prompt, /Grabbit Express/);
     assert.match(prompt, /Pamplemousses/);
     assert.match(prompt, /Triolet/);
     assert.match(prompt, /100% electric/i);
+    assert.match(prompt, /single asterisks/i);
+    assert.match(prompt, /double dashes/i);
+    assert.match(prompt, /this customer only/i);
+  });
+});
+
+describe("sanitizeWhatsAppText", () => {
+  it("converts markdown bold to WhatsApp bold", () => {
+    assert.equal(
+      sanitizeWhatsAppText("Hello **Grabbit** friend"),
+      "Hello *Grabbit* friend",
+    );
+  });
+
+  it("removes double dashes and em dashes", () => {
+    assert.equal(
+      sanitizeWhatsAppText("Thanks -- we got it — pending"),
+      "Thanks, we got it, pending",
+    );
   });
 });
 
 describe("sessions", () => {
-  it("stores previous interaction ids by normalized phone", () => {
+  it("keeps interaction ids isolated per customer phone", () => {
     clearPreviousInteractionId("+99900000028");
-    setPreviousInteractionId("+230 5519 8540", "int_123");
-    assert.equal(getPreviousInteractionId("99900000028"), "int_123");
+    clearPreviousInteractionId("+99900000022");
+
+    setPreviousInteractionId("+230 5519 8540", "int_a");
+    setPreviousInteractionId("+99900000022", "int_b");
+
+    assert.equal(getPreviousInteractionId("99900000028"), "int_a");
+    assert.equal(getPreviousInteractionId("+99900000022"), "int_b");
+    assert.notEqual(
+      getPreviousInteractionId("99900000028"),
+      getPreviousInteractionId("99900000022"),
+    );
   });
 });

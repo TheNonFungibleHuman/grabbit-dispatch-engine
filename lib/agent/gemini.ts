@@ -1,4 +1,5 @@
 import { GoogleGenAI } from "@google/genai";
+import { sanitizeWhatsAppText } from "./format";
 import { buildGrabbitSystemInstruction } from "./prompt";
 import {
   getPreviousInteractionId,
@@ -16,6 +17,7 @@ export interface GenerateAgentReplyResult {
   text: string;
   interactionId?: string;
   model: string;
+  previousInteractionId?: string;
 }
 
 function getGeminiClient(): GoogleGenAI {
@@ -33,6 +35,7 @@ function getModel(): string {
 
 /**
  * Generate a Grabbit WhatsApp reply via Gemini Interactions API.
+ * History is scoped per sender phone via previous_interaction_id.
  * @see https://ai.google.dev/gemini-api/docs/interactions-overview
  */
 export async function generateAgentReply(
@@ -55,7 +58,7 @@ export async function generateAgentReply(
     setPreviousInteractionId(input.sender, interaction.id);
   }
 
-  const text = interaction.output_text?.trim();
+  const text = sanitizeWhatsAppText(interaction.output_text ?? "");
   if (!text) {
     throw new Error("Gemini returned an empty response");
   }
@@ -63,6 +66,7 @@ export async function generateAgentReply(
   return {
     text,
     interactionId: interaction.id,
+    previousInteractionId,
     model,
   };
 }
