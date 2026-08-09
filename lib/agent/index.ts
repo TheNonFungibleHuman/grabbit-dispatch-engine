@@ -1,4 +1,5 @@
 import { generateAgentReply } from "./gemini";
+import { formatError, logError, logInfo, logWarn } from "../log";
 import { persistIncomingPackageImage } from "../media/wasender";
 import { addPackageImageToDraft } from "../orders/store";
 import { sendTextMessage } from "../wasender/client";
@@ -27,6 +28,13 @@ export async function processIncomingUserMessage(
   message: IncomingUserMessage,
 ): Promise<void> {
   const to = toE164(message.sender);
+  logInfo("agent", "process start", {
+    messageId: message.messageId,
+    sender: message.sender,
+    to,
+    hasText: Boolean(message.text),
+    hasImage: hasImageMessage(message),
+  });
 
   if (hasImageMessage(message)) {
     try {
@@ -58,15 +66,23 @@ export async function processIncomingUserMessage(
           });
         }
 
-        console.info("[agent] stored package image", {
+        logInfo("agent", "stored package image", {
           to: message.sender,
           messageId: message.messageId,
           count: draft.packageImages.length,
         });
         return;
       }
+
+      logWarn("agent", "image message had no resolvable url", {
+        messageId: message.messageId,
+      });
     } catch (error) {
-      console.error("[agent] failed to persist package image", error);
+      logError("agent", "failed to persist package image", error);
+      console.error("[agent] image persist detail", {
+        messageId: message.messageId,
+        ...formatError(error),
+      });
       await sendTextMessage({
         to,
         text: "I couldn’t save that photo. Please send it again as an image 💚",
@@ -95,7 +111,7 @@ export async function processIncomingUserMessage(
     text: reply.text,
   });
 
-  console.info("[agent] replied", {
+  logInfo("agent", "replied", {
     to: message.sender,
     messageId: message.messageId,
     model: reply.model,

@@ -48,14 +48,22 @@ export function matchServiceLocations(
     .map((location) => {
       const name = normalizeText(location.name);
       const address = normalizeText(location.address);
+      const haystack = `${name} ${address}`;
       let score = 0;
       if (name === needle) score += 100;
       if (name.includes(needle) || needle.includes(name)) score += 50;
+      if (haystack.includes(needle)) score += 30;
       if (address.includes(needle)) score += 20;
       for (const token of needle.split(" ")) {
-        if (token.length < 3) continue;
-        if (name.includes(token)) score += 8;
-        if (address.includes(token)) score += 3;
+        if (token.length < 2) continue;
+        if (name === token) score += 40;
+        if (name.includes(token)) score += 12;
+        if (address.includes(token)) score += 4;
+        for (const nameToken of name.split(" ")) {
+          if (nameToken.startsWith(token) || token.startsWith(nameToken)) {
+            score += 8;
+          }
+        }
       }
       return { location, score };
     })

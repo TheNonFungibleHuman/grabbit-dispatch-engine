@@ -141,6 +141,20 @@ describe("service locations helpers", () => {
     );
     assert.equal(resolveUnitFollowUp(sample.unit).status, "ask_list");
   });
+
+  it("matches short landmark queries like Songhai", () => {
+    const songhai: KiloServiceLocation = {
+      ...sample,
+      id: "loc_songhai",
+      name: "Songhai Hostel",
+      address: "Near campus gate",
+    };
+    const matches = matchServiceLocations("What about Songhai?", [
+      sample,
+      songhai,
+    ]);
+    assert.equal(matches[0]?.id, "loc_songhai");
+  });
 });
 
 describe("statusMessageForCustomer", () => {

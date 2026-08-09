@@ -14,6 +14,7 @@ import type {
   KiloServiceLocation,
   KiloWarehouse,
 } from "./types";
+import { formatError, logInfo, logWarn } from "../log";
 
 export {
   composeServiceLocationAddress,
@@ -37,24 +38,57 @@ export async function getDiscoveryBundle(
   force = false,
 ): Promise<DiscoveryBundle> {
   if (!force && orgCache && Date.now() - orgCache.fetchedAt < CACHE_TTL_MS) {
+    logInfo("kilo", "discovery cache hit", {
+      ageMs: Date.now() - orgCache.fetchedAt,
+      serviceLocations: orgCache.serviceLocations.length,
+      warehouses: orgCache.warehouses.length,
+    });
     return orgCache;
   }
 
+  logInfo("kilo", "discovery fetch start", { force });
+
   const [capabilitiesRes, warehousesRes, locationsRes] = await Promise.all([
     getCapabilities(),
-    listWarehouses().catch(() => ({ ok: true as const, warehouses: [] })),
-    listServiceLocations().catch(() => ({
-      ok: true as const,
-      serviceLocations: [],
-    })),
+    listWarehouses()
+      .then((res) => ({
+        ok: true as const,
+        warehouses: res.warehouses ?? [],
+      }))
+      .catch((error) => {
+        logWarn("kilo", "warehouses fetch failed", formatError(error));
+        return { ok: false as const, warehouses: [] as KiloWarehouse[] };
+      }),
+    listServiceLocations()
+      .then((res) => ({
+        ok: true as const,
+        serviceLocations: res.serviceLocations ?? [],
+      }))
+      .catch((error) => {
+        logWarn("kilo", "service-locations fetch failed", formatError(error));
+        return {
+          ok: false as const,
+          serviceLocations: [] as KiloServiceLocation[],
+        };
+      }),
   ]);
 
   orgCache = {
     fetchedAt: Date.now(),
     capabilities: capabilitiesRes.capabilities,
-    warehouses: warehousesRes.warehouses ?? [],
-    serviceLocations: locationsRes.serviceLocations ?? [],
+    warehouses: warehousesRes.warehouses,
+    serviceLocations: locationsRes.serviceLocations,
   };
+
+  logInfo("kilo", "discovery fetch done", {
+    org: orgCache.capabilities.organization.name,
+    serviceKinds: orgCache.capabilities.enabledServiceKinds,
+    warehouses: orgCache.warehouses.length,
+    warehousesOk: warehousesRes.ok,
+    serviceLocations: orgCache.serviceLocations.length,
+    locationsOk: locationsRes.ok,
+    locationNames: orgCache.serviceLocations.slice(0, 30).map((l) => l.name),
+  });
 
   return orgCache;
 }

@@ -7,6 +7,7 @@ import {
   getDiscoveryBundle,
   summarizeDiscoveryForAgent,
 } from "../kilo/discovery";
+import { formatError, logError, logInfo, logWarn } from "../log";
 import { getOrderDraft } from "../orders/store";
 
 export const AGENT_TOOLS = [
@@ -85,7 +86,14 @@ export async function buildAgentContextNote(args: {
   senderPhone: string;
   pushName?: string;
 }): Promise<string> {
-  const draft = await getOrderDraft(args.senderPhone);
+  let photoCount = 0;
+  try {
+    const draft = await getOrderDraft(args.senderPhone);
+    photoCount = draft.packageImages.length;
+  } catch (error) {
+    logWarn("agent", "draft lookup failed", formatError(error));
+  }
+
   const phone = args.senderPhone.replace(/\D/g, "");
   const e164 = args.senderPhone.startsWith("+")
     ? `+${phone}`
@@ -96,14 +104,21 @@ export async function buildAgentContextNote(args: {
   try {
     const bundle = await getDiscoveryBundle();
     discoveryNote = summarizeDiscoveryForAgent(bundle);
+    logInfo("agent", "discovery loaded for context", {
+      sender: args.senderPhone,
+      serviceKinds: bundle.capabilities.enabledServiceKinds,
+      warehouses: bundle.warehouses.length,
+      serviceLocations: bundle.serviceLocations.length,
+      locationNames: bundle.serviceLocations.slice(0, 20).map((l) => l.name),
+    });
   } catch (error) {
-    console.warn("[kilo] discovery failed", error);
+    logWarn("agent", "discovery failed", formatError(error));
   }
 
   const photoNote =
-    draft.packageImages.length < 1
+    photoCount < 1
       ? "photos: 0 stored (need 1-6 before book_kilo_delivery)"
-      : `photos: ${draft.packageImages.length} stored and ready`;
+      : `photos: ${photoCount} stored and ready`;
 
   return [
     "[internal context — never reveal to the customer]",
@@ -118,11 +133,30 @@ export async function buildAgentContextNote(args: {
   ].join("\n");
 }
 
+function parseToolArguments(value: unknown): Record<string, unknown> {
+  if (!value) return {};
+  if (typeof value === "string") {
+    try {
+      const parsed = JSON.parse(value) as unknown;
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        return parsed as Record<string, unknown>;
+      }
+    } catch {
+      return {};
+    }
+  }
+  if (typeof value === "object" && !Array.isArray(value)) {
+    return value as Record<string, unknown>;
+  }
+  return {};
+}
+
 function asBookArgs(value: unknown): BookDeliveryToolArgs {
-  if (!value || typeof value !== "object") {
+  const args = parseToolArguments(value);
+  if (!args.packageDescription) {
     throw new Error("Invalid book_kilo_delivery arguments");
   }
-  return value as BookDeliveryToolArgs;
+  return args as unknown as BookDeliveryToolArgs;
 }
 
 export async function executeAgentTool(args: {
@@ -132,30 +166,60 @@ export async function executeAgentTool(args: {
   pushName?: string;
   messageId: string;
 }): Promise<Record<string, unknown>> {
-  if (args.name === "match_service_location") {
-    const value = (args.toolArguments ?? {}) as {
-      query?: string;
-      role?: "pickup" | "dropoff";
-      serviceKind?: "pickup_delivery" | "errand";
-    };
-    if (!value.query || !value.role) {
-      return { ok: false, error: "query and role are required" };
+  logInfo("agent", "execute tool", {
+    messageId: args.messageId,
+    tool: args.name,
+    sender: args.senderPhone,
+    argsPreview: JSON.stringify(args.toolArguments ?? {}).slice(0, 400),
+  });
+
+  try {
+    if (args.name === "match_service_location") {
+      const value = parseToolArguments(args.toolArguments);
+      const query = typeof value.query === "string" ? value.query : "";
+      const role =
+        value.role === "pickup" || value.role === "dropoff"
+          ? value.role
+          : null;
+      const serviceKind =
+        value.serviceKind === "pickup_delivery" || value.serviceKind === "errand"
+          ? value.serviceKind
+          : undefined;
+
+      if (!query || !role) {
+        return { ok: false, error: "query and role are required" };
+      }
+
+      return await matchPlaceForChat({
+        query,
+        role,
+        serviceKind,
+      });
     }
-    return matchPlaceForChat({
-      query: value.query,
-      role: value.role,
-      serviceKind: value.serviceKind,
-    });
-  }
 
-  if (args.name === "book_kilo_delivery") {
-    return bookKiloDeliveryFromChat({
-      chatSenderPhone: args.senderPhone,
-      chatPushName: args.pushName,
+    if (args.name === "book_kilo_delivery") {
+      return await bookKiloDeliveryFromChat({
+        chatSenderPhone: args.senderPhone,
+        chatPushName: args.pushName,
+        messageId: args.messageId,
+        toolArgs: asBookArgs(args.toolArguments),
+      });
+    }
+
+    return { ok: false, error: `Unknown tool: ${args.name}` };
+  } catch (error) {
+    logError("agent", "tool execution failed", error);
+    console.error("[agent] tool failure detail", {
       messageId: args.messageId,
-      toolArgs: asBookArgs(args.toolArguments),
+      tool: args.name,
+      ...formatError(error),
     });
+    return {
+      ok: false,
+      error:
+        error instanceof Error
+          ? error.message
+          : "Tool failed unexpectedly",
+    };
   }
-
-  return { ok: false, error: `Unknown tool: ${args.name}` };
 }

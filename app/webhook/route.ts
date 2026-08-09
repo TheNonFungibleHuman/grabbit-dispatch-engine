@@ -7,6 +7,7 @@ import {
   getWasenderWebhookSecret,
   verifyWasenderSignature,
 } from "@/lib/wasender/verify";
+import { formatError, logError, logInfo, logWarn } from "@/lib/log";
 
 export const runtime = "nodejs";
 
@@ -28,11 +29,12 @@ export async function GET() {
  * Subscribe at least to: messages.received
  */
 export async function POST(request: Request) {
+  const startedAt = Date.now();
   let secret: string;
   try {
     secret = getWasenderWebhookSecret();
   } catch {
-    console.error("[wasender] WASENDER_WEBHOOK_SECRET is missing");
+    logError("webhook", "WASENDER_WEBHOOK_SECRET is missing");
     return NextResponse.json(
       { error: "Webhook secret is not configured" },
       { status: 500 },
@@ -41,6 +43,7 @@ export async function POST(request: Request) {
 
   const signature = request.headers.get("x-webhook-signature");
   if (!verifyWasenderSignature(signature, secret)) {
+    logWarn("webhook", "invalid signature");
     return NextResponse.json({ error: "Invalid signature" }, { status: 401 });
   }
 
@@ -48,6 +51,7 @@ export async function POST(request: Request) {
   try {
     body = await request.json();
   } catch {
+    logWarn("webhook", "invalid JSON body");
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
@@ -57,17 +61,42 @@ export async function POST(request: Request) {
   } catch (error) {
     const message =
       error instanceof Error ? error.message : "Invalid webhook payload";
+    logWarn("webhook", "payload parse failed", { message });
     return NextResponse.json({ error: message }, { status: 400 });
   }
 
+  const eventPreview =
+    payload.event === "messages.received" ||
+    payload.event === "messages-personal.received"
+      ? {
+          event: payload.event,
+          messageId: (payload as { data?: { messages?: { key?: { id?: string } } } })
+            .data?.messages?.key?.id,
+          textPreview: (
+            payload as { data?: { messages?: { messageBody?: string } } }
+          ).data?.messages?.messageBody?.slice(0, 120),
+        }
+      : { event: payload.event };
+
+  logInfo("webhook", "accepted", {
+    ...eventPreview,
+    ackMs: Date.now() - startedAt,
+  });
+
   // Ack Wasender immediately; Gemini + outbound send continue in the background.
   after(async () => {
+    const bgStartedAt = Date.now();
     try {
       await handleWasenderEvent(payload);
-    } catch (error) {
-      console.error("[wasender] failed to process webhook event", {
+      logInfo("webhook", "background processing done", {
         event: payload.event,
-        error,
+        ms: Date.now() - bgStartedAt,
+      });
+    } catch (error) {
+      logError("webhook", "failed to process webhook event", error);
+      console.error("[webhook] background failure detail", {
+        event: payload.event,
+        ...formatError(error),
       });
     }
   });

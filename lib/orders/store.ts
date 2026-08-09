@@ -1,5 +1,6 @@
 import { list, put } from "@vercel/blob";
 import type { KiloPackageSize } from "../kilo/types";
+import { formatError, logWarn } from "../log";
 
 export interface OrderDraft {
   senderPhone: string;
@@ -66,15 +67,23 @@ async function readJson<T>(pathname: string): Promise<T | null> {
     return null;
   }
 
-  const { blobs } = await list({ prefix: pathname, limit: 1 });
-  const match = blobs.find((blob) => blob.pathname === pathname) ?? blobs[0];
-  if (!match?.url) return null;
+  try {
+    const { blobs } = await list({ prefix: pathname, limit: 1 });
+    const match = blobs.find((blob) => blob.pathname === pathname) ?? blobs[0];
+    if (!match?.url) return null;
 
-  const response = await fetch(match.url, { cache: "no-store" });
-  if (!response.ok) return null;
-  const data = (await response.json()) as T;
-  memorySet(pathname, data);
-  return data;
+    const response = await fetch(match.url, { cache: "no-store" });
+    if (!response.ok) return null;
+    const data = (await response.json()) as T;
+    memorySet(pathname, data);
+    return data;
+  } catch (error) {
+    logWarn("orders", "blob read failed; using empty draft", {
+      pathname,
+      ...formatError(error),
+    });
+    return null;
+  }
 }
 
 export async function getOrderDraft(senderPhone: string): Promise<OrderDraft> {

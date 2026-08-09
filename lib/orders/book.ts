@@ -17,6 +17,7 @@ import type {
   KiloPackageSize,
   KiloServiceKind,
 } from "../kilo/types";
+import { logInfo } from "../log";
 import {
   clearOrderDraft,
   getOrderDraft,
@@ -428,6 +429,12 @@ export async function matchPlaceForChat(args: {
   role: "pickup" | "dropoff";
   serviceKind?: KiloServiceKind;
 }): Promise<Record<string, unknown>> {
+  logInfo("kilo", "match_service_location start", {
+    query: args.query,
+    role: args.role,
+    serviceKind: args.serviceKind ?? null,
+  });
+
   const discovery = await getDiscoveryBundle();
   const serviceKind =
     args.serviceKind &&
@@ -435,10 +442,11 @@ export async function matchPlaceForChat(args: {
       ? args.serviceKind
       : discovery.capabilities.defaultServiceKind;
 
-  if (
-    serviceKind === "errand" &&
-    args.role === "pickup"
-  ) {
+  if (serviceKind === "errand" && args.role === "pickup") {
+    logInfo("kilo", "match skipped for errand pickup", {
+      query: args.query,
+      catalogSize: discovery.serviceLocations.length,
+    });
     return {
       ok: true,
       note: "Errand shop side should use errand modes (at_place/link/photo), not service locations.",
@@ -458,6 +466,15 @@ export async function matchPlaceForChat(args: {
     coords: location.coords,
     unit: resolveUnitFollowUp(location.unit),
   }));
+
+  logInfo("kilo", "match_service_location done", {
+    query: args.query,
+    role: args.role,
+    serviceKind,
+    catalogSize: discovery.serviceLocations.length,
+    matchCount: matches.length,
+    matchNames: matches.map((m) => m.name),
+  });
 
   return { ok: true, serviceKind, matches };
 }

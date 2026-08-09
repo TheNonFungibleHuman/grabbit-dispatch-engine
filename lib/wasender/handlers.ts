@@ -1,4 +1,5 @@
 import { processIncomingUserMessage } from "../agent";
+import { formatError, logError, logInfo, logWarn } from "../log";
 import { sendTextMessage } from "./client";
 import { getSenderPhone } from "./parse";
 import type {
@@ -13,16 +14,18 @@ export type { IncomingUserMessage } from "./types";
 export async function handleWasenderEvent(
   payload: WasenderWebhookEvent,
 ): Promise<void> {
+  logInfo("wasender", "event", { event: payload.event });
+
   switch (payload.event) {
     case "messages.received":
     case "messages-personal.received":
       await handleIncomingMessage(payload as MessagesReceivedEvent);
       break;
     case "session.status":
-      console.info("[wasender] session.status", payload.data);
+      logInfo("wasender", "session.status", payload.data);
       break;
     default:
-      console.info(`[wasender] ignored event: ${payload.event}`);
+      logInfo("wasender", `ignored event: ${payload.event}`);
   }
 }
 
@@ -31,23 +34,28 @@ async function handleIncomingMessage(
 ): Promise<void> {
   const message = payload.data?.messages;
   if (!message?.key) {
-    console.warn("[wasender] messages.received without message data");
+    logWarn("wasender", "messages.received without message data");
     return;
   }
 
   // Ignore echoes of our own outbound messages.
   if (message.key.fromMe) {
+    logInfo("wasender", "ignored fromMe echo", {
+      messageId: message.key.id,
+    });
     return;
   }
 
   const sender = getSenderPhone(message);
   const text = message.messageBody?.trim() ?? "";
 
-  console.info("[wasender] message received", {
+  logInfo("wasender", "message received", {
     messageId: message.key.id,
     from: sender,
     remoteJid: message.key.remoteJid,
+    pushName: message.pushName,
     textPreview: text.slice(0, 120),
+    textLength: text.length,
     hasMedia: Boolean(
       message.message &&
         Object.keys(message.message).some((key) =>
@@ -68,13 +76,21 @@ async function handleIncomingMessage(
 }
 
 async function onUserMessage(message: IncomingUserMessage): Promise<void> {
+  const startedAt = Date.now();
   try {
     await processIncomingUserMessage(message);
+    logInfo("wasender", "message processed", {
+      messageId: message.messageId,
+      sender: message.sender,
+      ms: Date.now() - startedAt,
+    });
   } catch (error) {
-    console.error("[agent] failed to process inbound message", {
+    logError("wasender", "failed to process inbound message", error);
+    console.error("[wasender] process failure detail", {
       sender: message.sender,
       messageId: message.messageId,
-      error,
+      textPreview: message.text.slice(0, 160),
+      ...formatError(error),
     });
 
     try {
@@ -85,8 +101,12 @@ async function onUserMessage(message: IncomingUserMessage): Promise<void> {
         to,
         text: "Sorry, I’m having a quick technical hiccup. Please resend your message in a moment and we’ll take care of you 💚",
       });
+      logWarn("wasender", "sent technical hiccup fallback", {
+        messageId: message.messageId,
+        to,
+      });
     } catch (sendError) {
-      console.error("[agent] failed to send fallback error reply", sendError);
+      logError("wasender", "failed to send fallback error reply", sendError);
     }
   }
 }
