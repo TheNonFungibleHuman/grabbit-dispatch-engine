@@ -16,7 +16,7 @@ export {
   resolveUnitFollowUp,
   summarizeDiscoveryForAgent,
 } from "./discovery";
-export { mapDraftToCreateDeliveryInput } from "./map-order";
+export { mapDraftToCreateDeliveryInput, requiresPackageImages, validatePackageImages } from "./map-order";
 export type { DeliveryDraftForKilo } from "./map-order";
 export { statusMessageForCustomer } from "./status-messages";
 export { KiloApiError } from "./types";

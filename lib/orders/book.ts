@@ -14,9 +14,11 @@ import {
 import { KiloApiError } from "../kilo/types";
 import type {
   KiloDeliveryMode,
+  KiloErrandMode,
   KiloPackageSize,
   KiloServiceKind,
 } from "../kilo/types";
+import { requiresPackageImages } from "../kilo/map-order";
 import { logInfo } from "../log";
 import {
   clearOrderDraft,
@@ -48,7 +50,14 @@ export interface BookDeliveryToolArgs {
   senderEmail?: string;
   isPODEnabled?: boolean;
   podAmount?: number;
+  errandMode?: KiloErrandMode;
+  errandLinks?: Array<{ url: string; note?: string; curatedId?: string | null }>;
+  errandBudgetNgn?: string;
+  errandSubstituteOk?: boolean;
+  shopPhone?: string;
+  pickupLocationUnknown?: boolean;
 }
+
 
 function toE164(phone: string): string {
   const digits = phone.replace(/\D/g, "");
@@ -229,16 +238,6 @@ export async function bookKiloDeliveryFromChat(args: {
   toolArgs: BookDeliveryToolArgs;
 }): Promise<Record<string, unknown>> {
   const draftPhotos = await getOrderDraft(args.chatSenderPhone);
-  if (draftPhotos.packageImages.length < 1) {
-    return {
-      ok: false,
-      error:
-        "Need at least 1 package photo. Ask the customer to send a clear photo of the package/order first.",
-      customerGuidance:
-        "Do NOT say the order was received or booked. Ask for a clear package/order photo first.",
-      booked: false,
-    };
-  }
 
   let discovery;
   try {
@@ -267,12 +266,57 @@ export async function bookKiloDeliveryFromChat(args: {
     };
   }
 
+  let errandMode: KiloErrandMode | undefined;
   if (serviceKind === "errand") {
+    const requested = args.toolArgs.errandMode;
+    const enabled = caps.errand.enabledModes;
+    if (requested && enabled.includes(requested)) {
+      errandMode = requested;
+    } else if (enabled.includes(caps.errand.defaultMode)) {
+      errandMode = caps.errand.defaultMode;
+    } else {
+      errandMode = enabled[0];
+    }
+    if (!errandMode) {
+      return { ok: false, error: "No errand modes are enabled for this business." };
+    }
+  }
+
+  if (
+    requiresPackageImages(serviceKind, errandMode) &&
+    draftPhotos.packageImages.length < 1
+  ) {
+    const reason =
+      serviceKind === "errand"
+        ? "Need at least 1 reference photo for this photo errand. Ask the customer to send a clear photo of what to buy/pick up."
+        : "Need at least 1 package photo. Ask the customer to send a clear photo of the package/order first.";
     return {
       ok: false,
-      error:
-        "Errand booking via WhatsApp tool is not fully wired yet. Offer pickup_delivery, or collect errand details for the team.",
+      error: reason,
+      fieldErrors: {
+        packageImages: [reason],
+      },
+      customerGuidance:
+        "Do NOT say the order was received or booked. Ask for a clear photo first.",
+      booked: false,
     };
+  }
+
+  if (serviceKind === "errand" && errandMode === "link") {
+    const links = args.toolArgs.errandLinks ?? [];
+    if (links.length < 1) {
+      return {
+        ok: false,
+        error:
+          "errandMode=link requires at least one errandLinks url. Ask for the product/shop link.",
+        fieldErrors: {
+          errandLinks: ["At least one https link is required for link errands."],
+        },
+        customerGuidance:
+          "Do NOT say the order was received. Ask for the shop/product link.",
+        booked: false,
+      };
+    }
   }
 
   const deliveryMode: KiloDeliveryMode =
@@ -375,6 +419,16 @@ export async function bookKiloDeliveryFromChat(args: {
     isPODEnabled: Boolean(args.toolArgs.isPODEnabled && caps.pod.enabled),
     podAmount: args.toolArgs.podAmount,
     idempotencyKey,
+    errandMode,
+    errandLinks: args.toolArgs.errandLinks?.map((link) => ({
+      url: link.url,
+      note: link.note ?? "",
+      curatedId: link.curatedId ?? null,
+    })),
+    errandBudgetNgn: args.toolArgs.errandBudgetNgn,
+    errandSubstituteOk: args.toolArgs.errandSubstituteOk,
+    shopPhone: args.toolArgs.shopPhone,
+    pickupLocationUnknown: args.toolArgs.pickupLocationUnknown,
   };
 
   try {
@@ -407,14 +461,23 @@ export async function bookKiloDeliveryFromChat(args: {
       deliveryLabel: dropoff.label,
       receiverPhone,
       receiverName,
+      serviceKind,
+      errandMode: errandMode ?? null,
     };
   } catch (error) {
     if (error instanceof KiloApiError) {
+      const packageImageErrors = error.fieldErrors?.packageImages;
       return {
         ok: false,
-        error: error.message,
+        error: packageImageErrors?.length
+          ? `packageImages: ${packageImageErrors.join("; ")}`
+          : error.message,
         code: error.code,
         fieldErrors: error.fieldErrors,
+        customerGuidance: packageImageErrors?.length
+          ? "Do NOT say the order was booked. Ask for the required photo(s)."
+          : undefined,
+        booked: false,
       };
     }
     return {
@@ -423,6 +486,7 @@ export async function bookKiloDeliveryFromChat(args: {
         error instanceof Error
           ? error.message
           : "Failed to create Kilo delivery",
+      booked: false,
     };
   }
 }

@@ -2,10 +2,52 @@ import type {
   CreateKiloDeliveryInput,
   KiloCollectionMethod,
   KiloDeliveryMode,
+  KiloErrandMode,
   KiloPackageSize,
   KiloServiceKind,
 } from "./types";
 import type { GeoCoords } from "../geocode";
+
+/** Photos required: pickup_delivery, or errand with errandMode=photo. */
+export function requiresPackageImages(
+  serviceKind: KiloServiceKind,
+  errandMode?: KiloErrandMode | null,
+): boolean {
+  if (serviceKind === "pickup_delivery") return true;
+  if (serviceKind === "errand") return errandMode === "photo";
+  return false;
+}
+
+/**
+ * Validate packageImages per Partner API:
+ * - always 0–6 https URLs
+ * - at least 1 when requiresPackageImages(...)
+ */
+export function validatePackageImages(args: {
+  serviceKind: KiloServiceKind;
+  errandMode?: KiloErrandMode | null;
+  packageImages: string[];
+}): void {
+  const urls = args.packageImages ?? [];
+
+  if (urls.length > 6) {
+    throw new Error("packageImages must contain at most 6 https URLs");
+  }
+
+  for (const url of urls) {
+    if (typeof url !== "string" || !url.startsWith("https://")) {
+      throw new Error(`packageImages must be https URLs: ${String(url)}`);
+    }
+  }
+
+  if (requiresPackageImages(args.serviceKind, args.errandMode) && urls.length < 1) {
+    throw new Error(
+      args.serviceKind === "errand"
+        ? "packageImages must contain 1 to 6 https URLs when errandMode is photo"
+        : "packageImages must contain 1 to 6 https URLs for pickup_delivery",
+    );
+  }
+}
 
 export interface DeliveryDraftForKilo {
   serviceKind?: KiloServiceKind;
@@ -28,6 +70,12 @@ export interface DeliveryDraftForKilo {
   isPODEnabled?: boolean;
   podAmount?: number;
   idempotencyKey: string;
+  errandMode?: KiloErrandMode;
+  errandLinks?: Array<{ url: string; note: string; curatedId?: string | null }>;
+  errandBudgetNgn?: string;
+  errandSubstituteOk?: boolean;
+  shopPhone?: string;
+  pickupLocationUnknown?: boolean;
 }
 
 export interface MapDraftToCreateInputArgs {
@@ -50,17 +98,6 @@ function clampIdempotencyKey(key: string): string {
   return `${cleaned}${"0".repeat(8 - cleaned.length)}`;
 }
 
-function assertHttpsImages(urls: string[]): void {
-  if (urls.length < 1 || urls.length > 6) {
-    throw new Error("packageImages must contain 1 to 6 https URLs");
-  }
-  for (const url of urls) {
-    if (!url.startsWith("https://")) {
-      throw new Error(`packageImages must be https URLs: ${url}`);
-    }
-  }
-}
-
 function assertRealCoords(coords: GeoCoords, label: string): void {
   if (!Number.isFinite(coords.lng) || !Number.isFinite(coords.lat)) {
     throw new Error(`${label} are invalid`);
@@ -78,12 +115,34 @@ export function mapDraftToCreateDeliveryInput(
   args: MapDraftToCreateInputArgs,
 ): CreateKiloDeliveryInput {
   const { draft, pickupCoords, deliveryCoords } = args;
-  assertHttpsImages(draft.packageImages);
   assertRealCoords(pickupCoords, "pickupCoords");
   assertRealCoords(deliveryCoords, "deliveryCoords");
 
   const serviceKind = draft.serviceKind ?? "pickup_delivery";
   const deliveryMode = draft.deliveryMode ?? "pickup";
+  const errandMode =
+    serviceKind === "errand"
+      ? draft.errandMode ?? "at_place"
+      : undefined;
+
+  validatePackageImages({
+    serviceKind,
+    errandMode,
+    packageImages: draft.packageImages,
+  });
+
+  if (serviceKind === "errand" && errandMode === "link") {
+    const links = draft.errandLinks ?? [];
+    if (links.length < 1) {
+      throw new Error("errandLinks are required when errandMode is link");
+    }
+    for (const link of links) {
+      if (!link.url?.trim().startsWith("https://")) {
+        throw new Error(`errandLinks.url must be https: ${link.url}`);
+      }
+    }
+  }
+
   const collection =
     draft.customerCollectionMethod ??
     (process.env.KILO_COLLECTION_METHOD?.trim() === "online_checkout"
@@ -111,10 +170,33 @@ export function mapDraftToCreateDeliveryInput(
     },
     packageDescription: draft.packageDescription.trim(),
     packageSize: draft.packageSize ?? "small",
-    packageImages: draft.packageImages,
+    packageImages: draft.packageImages.slice(0, 6),
     customerCollectionMethod: collection,
     idempotencyKey: clampIdempotencyKey(draft.idempotencyKey),
   };
+
+  if (serviceKind === "errand" && errandMode) {
+    payload.errandMode = errandMode;
+    if (draft.errandLinks?.length) {
+      payload.errandLinks = draft.errandLinks.map((link) => ({
+        url: link.url.trim(),
+        note: link.note?.trim() || "",
+        curatedId: link.curatedId ?? null,
+      }));
+    }
+    if (draft.errandBudgetNgn) {
+      payload.errandBudgetNgn = draft.errandBudgetNgn;
+    }
+    if (typeof draft.errandSubstituteOk === "boolean") {
+      payload.errandSubstituteOk = draft.errandSubstituteOk;
+    }
+    if (draft.shopPhone?.trim()) {
+      payload.shopPhone = normalizePhone(draft.shopPhone);
+    }
+    if (typeof draft.pickupLocationUnknown === "boolean") {
+      payload.pickupLocationUnknown = draft.pickupLocationUnknown;
+    }
+  }
 
   if (draft.isPODEnabled) {
     payload.isPODEnabled = true;

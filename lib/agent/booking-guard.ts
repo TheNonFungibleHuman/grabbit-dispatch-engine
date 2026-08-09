@@ -4,8 +4,12 @@
 export function customerReplyForFailedBooking(error: string): string {
   const lower = error.toLowerCase();
 
-  if (lower.includes("photo")) {
+  if (lower.includes("photo") || lower.includes("packageimages")) {
     return "Almost there. Please send a clear photo of the order/package first, then I’ll place it right away 💚";
+  }
+
+  if (lower.includes("errandlinks") || lower.includes("link")) {
+    return "Almost there. Can you send the shop/product link so I can place this?";
   }
 
   if (

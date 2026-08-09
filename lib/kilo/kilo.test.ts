@@ -67,11 +67,12 @@ describe("mapDraftToCreateDeliveryInput", () => {
     assert.deepEqual(payload.pickupCoords, { lng: 57.545, lat: -20.059 });
   });
 
-  it("rejects fake zero coords and missing images", () => {
+  it("rejects fake zero coords and missing images for pickup_delivery", () => {
     assert.throws(
       () =>
         mapDraftToCreateDeliveryInput({
           draft: {
+            serviceKind: "pickup_delivery",
             senderName: "Ada",
             senderPhone: "+99900000028",
             receiverName: "Grace",
@@ -85,7 +86,7 @@ describe("mapDraftToCreateDeliveryInput", () => {
           pickupCoords: { lng: 57.5, lat: -20.0 },
           deliveryCoords: { lng: 57.6, lat: -20.1 },
         }),
-      /1 to 6/,
+      /pickup_delivery/,
     );
 
     assert.throws(
@@ -106,6 +107,76 @@ describe("mapDraftToCreateDeliveryInput", () => {
           deliveryCoords: { lng: 57.6, lat: -20.1 },
         }),
       /real geocoded/,
+    );
+  });
+
+  it("allows empty packageImages for errand at_place and link", () => {
+    const atPlace = mapDraftToCreateDeliveryInput({
+      draft: {
+        serviceKind: "errand",
+        errandMode: "at_place",
+        senderName: "Ada",
+        senderPhone: "+99900000028",
+        receiverName: "Grace",
+        receiverPhone: "+99900000022",
+        pickupAddress: "KFC Mahogany",
+        deliveryAddress: "Songhai",
+        packageDescription: "2-Piece Chicken Meal",
+        packageImages: [],
+        idempotencyKey: "wa-msg-errand-1",
+      },
+      pickupCoords: { lng: 57.545, lat: -20.059 },
+      deliveryCoords: { lng: 57.56, lat: -20.11 },
+    });
+    assert.equal(atPlace.serviceKind, "errand");
+    assert.equal(atPlace.errandMode, "at_place");
+    assert.deepEqual(atPlace.packageImages, []);
+
+    const link = mapDraftToCreateDeliveryInput({
+      draft: {
+        serviceKind: "errand",
+        errandMode: "link",
+        errandLinks: [
+          { url: "https://shop.example.com/item", note: "Size M" },
+        ],
+        senderName: "Ada",
+        senderPhone: "+99900000028",
+        receiverName: "Grace",
+        receiverPhone: "+99900000022",
+        pickupAddress: "Online shop",
+        deliveryAddress: "Songhai",
+        packageDescription: "Shirt",
+        packageImages: [],
+        idempotencyKey: "wa-msg-errand-2",
+      },
+      pickupCoords: { lng: 57.545, lat: -20.059 },
+      deliveryCoords: { lng: 57.56, lat: -20.11 },
+    });
+    assert.equal(link.errandMode, "link");
+    assert.equal(link.errandLinks?.[0]?.url, "https://shop.example.com/item");
+  });
+
+  it("requires packageImages for errand photo mode", () => {
+    assert.throws(
+      () =>
+        mapDraftToCreateDeliveryInput({
+          draft: {
+            serviceKind: "errand",
+            errandMode: "photo",
+            senderName: "Ada",
+            senderPhone: "+99900000028",
+            receiverName: "Grace",
+            receiverPhone: "+99900000022",
+            pickupAddress: "Shop",
+            deliveryAddress: "Songhai",
+            packageDescription: "Snacks",
+            packageImages: [],
+            idempotencyKey: "wa-msg-errand-3",
+          },
+          pickupCoords: { lng: 57.545, lat: -20.059 },
+          deliveryCoords: { lng: 57.56, lat: -20.11 },
+        }),
+      /errandMode is photo/,
     );
   });
 });

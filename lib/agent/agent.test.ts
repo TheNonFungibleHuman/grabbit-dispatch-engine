@@ -22,7 +22,8 @@ describe("buildGrabbitSystemInstruction", () => {
     assert.match(prompt, /Is that right/i);
     assert.match(prompt, /Known restaurants/i);
     assert.match(prompt, /book_kilo_delivery/);
-    assert.match(prompt, /package photos/i);
+    assert.match(prompt, /pickup_delivery: at least 1 photo required/i);
+    assert.match(prompt, /errandMode=at_place or link: photos optional/i);
     assert.match(prompt, /Delivering to this number/i);
     assert.match(prompt, /match_service_location/);
     assert.match(prompt, /Never mention Kilo/i);
@@ -30,6 +31,7 @@ describe("buildGrabbitSystemInstruction", () => {
     assert.match(prompt, /team will get back/i);
     assert.match(prompt, /Never claim an order\/delivery was placed/i);
     assert.match(prompt, /ok:false means it was NOT placed/i);
+    assert.match(prompt, /Never break character/i);
   });
 });
 

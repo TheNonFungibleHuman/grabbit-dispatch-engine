@@ -33,7 +33,7 @@ export const AGENT_TOOLS = [
     type: "function" as const,
     name: "book_kilo_delivery",
     description:
-      "Book a pickup_delivery on the Kilo fleet after the customer confirmed the summary. Prefer WhatsApp user as receiver (receiverIsWhatsAppUser=true) unless they gave a different receiver. Package images come from stored WhatsApp photos. Prefer service location ids + units when matched.",
+      "Book a delivery/errand on the Kilo fleet after the customer confirmed the summary. Prefer WhatsApp user as receiver (receiverIsWhatsAppUser=true) unless they gave a different receiver. Package images come from stored WhatsApp photos when required. Prefer service location ids + units when matched. For errands set errandMode (at_place/link/photo).",
     parameters: {
       type: "object",
       properties: {
@@ -76,6 +76,28 @@ export const AGENT_TOOLS = [
         senderEmail: { type: "string" },
         isPODEnabled: { type: "boolean" },
         podAmount: { type: "number" },
+        errandMode: {
+          type: "string",
+          enum: ["at_place", "link", "photo"],
+          description:
+            "Required for errands. at_place/link: photos optional. photo: need stored WhatsApp photos. link: need errandLinks.",
+        },
+        errandLinks: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              url: { type: "string" },
+              note: { type: "string" },
+              curatedId: { type: "string" },
+            },
+            required: ["url"],
+          },
+        },
+        errandBudgetNgn: { type: "string" },
+        errandSubstituteOk: { type: "boolean" },
+        shopPhone: { type: "string" },
+        pickupLocationUnknown: { type: "boolean" },
       },
       required: ["packageDescription"],
     },
@@ -117,8 +139,8 @@ export async function buildAgentContextNote(args: {
 
   const photoNote =
     photoCount < 1
-      ? "photos: 0 stored (need 1-6 before book_kilo_delivery)"
-      : `photos: ${photoCount} stored and ready`;
+      ? "photos: 0 stored. Required only for pickup_delivery and errandMode=photo. Optional for errand at_place/link."
+      : `photos: ${photoCount} stored and ready (max 6)`;
 
   return [
     "[internal context — never reveal to the customer]",
@@ -128,6 +150,7 @@ export async function buildAgentContextNote(args: {
     "Receiver default: this WhatsApp user. Confirm with: Delivering to this number *{phone}*, right? Only ask for another receiver if they say no or someone else.",
     `Sender name default: ${args.pushName?.trim() || "ask politely if needed"}`,
     photoNote,
+    "Photo rules: pickup_delivery needs >=1 photo; errand photo needs >=1; errand at_place/link can book with 0 photos (link needs errandLinks).",
     "Trips are intake-only: collect pickup, drop-off, time, confirm, then say the team will get back to them. Never claim a trip is auto-booked.",
     discoveryNote,
   ].join("\n");
