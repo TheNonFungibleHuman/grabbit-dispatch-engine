@@ -49,18 +49,18 @@ describe("sanitizeWhatsAppText", () => {
 });
 
 describe("sessions", () => {
-  it("keeps interaction ids isolated per customer phone", () => {
-    clearPreviousInteractionId("+99900000028");
-    clearPreviousInteractionId("+99900000022");
+  it("keeps interaction ids isolated per customer phone", async () => {
+    await clearPreviousInteractionId("+99900000028");
+    await clearPreviousInteractionId("+99900000022");
 
-    setPreviousInteractionId("+230 5519 8540", "int_a");
-    setPreviousInteractionId("+99900000022", "int_b");
+    await setPreviousInteractionId("+230 5519 8540", "int_a");
+    await setPreviousInteractionId("+99900000022", "int_b");
 
-    assert.equal(getPreviousInteractionId("99900000028"), "int_a");
-    assert.equal(getPreviousInteractionId("+99900000022"), "int_b");
+    assert.equal(await getPreviousInteractionId("99900000028"), "int_a");
+    assert.equal(await getPreviousInteractionId("+99900000022"), "int_b");
     assert.notEqual(
-      getPreviousInteractionId("99900000028"),
-      getPreviousInteractionId("99900000022"),
+      await getPreviousInteractionId("99900000028"),
+      await getPreviousInteractionId("99900000022"),
     );
   });
 });

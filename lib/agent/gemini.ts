@@ -67,6 +67,88 @@ async function createInteraction(
   })) as InteractionLike;
 }
 
+async function runToolRound(args: {
+  ai: GoogleGenAI;
+  model: string;
+  interaction: InteractionLike;
+  sender: string;
+  pushName?: string;
+  messageId: string;
+  round: number;
+}): Promise<InteractionLike | null> {
+  const calls = getFunctionCalls(args.interaction);
+  if (calls.length === 0) {
+    if (args.interaction.status === "requires_action") {
+      logWarn("agent", "requires_action but no parseable function calls", {
+        messageId: args.messageId,
+        round: args.round,
+        ...summarizeInteraction(args.interaction),
+      });
+    }
+    return null;
+  }
+
+  if (!args.interaction.id) {
+    logWarn("agent", "missing interaction id after tool call; stopping tool loop", {
+      messageId: args.messageId,
+    });
+    return null;
+  }
+
+  logInfo("agent", "tool round", {
+    messageId: args.messageId,
+    round: args.round,
+    status: args.interaction.status ?? null,
+    tools: calls.map((call) => ({
+      name: call.name,
+      callId: call.id,
+      argsPreview: JSON.stringify(call.arguments ?? {}).slice(0, 300),
+    })),
+  });
+
+  const toolResults = [];
+  for (const call of calls) {
+    const result = await executeAgentTool({
+      name: call.name,
+      toolArguments: call.arguments,
+      senderPhone: args.sender,
+      pushName: args.pushName,
+      messageId: args.messageId,
+    });
+
+    const ok = Boolean((result as { ok?: boolean }).ok);
+    logInfo("agent", "tool result", {
+      messageId: args.messageId,
+      tool: call.name,
+      ok,
+      preview: JSON.stringify(result).slice(0, 400),
+    });
+
+    toolResults.push(
+      buildFunctionResultInput({
+        name: call.name,
+        callId: call.id ?? call.name,
+        result,
+        isError: !ok,
+      }),
+    );
+  }
+
+  const next = await createInteraction(args.ai, {
+    model: args.model,
+    previousInteractionId: args.interaction.id,
+    input: toolResults,
+  });
+
+  logInfo("agent", "gemini tool-followup response", {
+    messageId: args.messageId,
+    round: args.round,
+    ...summarizeInteraction(next),
+  });
+
+  return next;
+}
+
 /**
  * Generate a Grabbit WhatsApp reply via Gemini Interactions API.
  * History is scoped per sender phone via previous_interaction_id.
@@ -77,7 +159,7 @@ export async function generateAgentReply(
   const startedAt = Date.now();
   const ai = getGeminiClient();
   const model = getModel();
-  const previousInteractionId = getPreviousInteractionId(input.sender);
+  const previousInteractionId = await getPreviousInteractionId(input.sender);
 
   logInfo("agent", "generate start", {
     messageId: input.messageId,
@@ -133,79 +215,19 @@ export async function generateAgentReply(
     ...summarizeInteraction(interaction),
   });
 
-  if (interaction.id) {
-    setPreviousInteractionId(input.sender, interaction.id);
-  }
-
   for (let round = 0; round < MAX_TOOL_ROUNDS; round += 1) {
-    const calls = getFunctionCalls(interaction);
-    if (calls.length === 0) {
-      if (interaction.status === "requires_action") {
-        logWarn("agent", "requires_action but no parseable function calls", {
-          messageId: input.messageId,
-          round,
-          ...summarizeInteraction(interaction),
-        });
-      }
-      break;
-    }
-
-    logInfo("agent", "tool round", {
-      messageId: input.messageId,
-      round,
-      status: interaction.status ?? null,
-      tools: calls.map((call) => ({
-        name: call.name,
-        callId: call.id,
-        argsPreview: JSON.stringify(call.arguments ?? {}).slice(0, 300),
-      })),
-    });
-
-    const toolResults = [];
-    for (const call of calls) {
-      const result = await executeAgentTool({
-        name: call.name,
-        toolArguments: call.arguments,
-        senderPhone: input.sender,
+    try {
+      const next = await runToolRound({
+        ai,
+        model,
+        interaction,
+        sender: input.sender,
         pushName: input.pushName,
         messageId: input.messageId,
+        round,
       });
-
-      const ok = Boolean((result as { ok?: boolean }).ok);
-      logInfo("agent", "tool result", {
-        messageId: input.messageId,
-        tool: call.name,
-        ok,
-        preview: JSON.stringify(result).slice(0, 400),
-      });
-
-      toolResults.push(
-        buildFunctionResultInput({
-          name: call.name,
-          callId: call.id ?? call.name,
-          result,
-          isError: !ok,
-        }),
-      );
-    }
-
-    if (!interaction.id) {
-      logWarn(
-        "agent",
-        "missing interaction id after tool call; stopping tool loop",
-        {
-          messageId: input.messageId,
-        },
-      );
-      break;
-    }
-
-    try {
-      interaction = await createInteraction(ai, {
-        model,
-        previousInteractionId: interaction.id,
-        input: toolResults,
-      });
+      if (!next) break;
+      interaction = next;
     } catch (error) {
       logError("agent", "gemini tool-followup failed", error);
       console.error("[agent] gemini tool-followup detail", {
@@ -215,73 +237,44 @@ export async function generateAgentReply(
       });
       throw error;
     }
-
-    logInfo("agent", "gemini tool-followup response", {
-      messageId: input.messageId,
-      round,
-      ...summarizeInteraction(interaction),
-    });
-
-    if (interaction.id) {
-      setPreviousInteractionId(input.sender, interaction.id);
-    }
   }
 
   let text = sanitizeWhatsAppText(extractInteractionText(interaction));
   if (!text) {
-    logWarn("agent", "empty gemini output; retrying once without history", {
+    // Keep the customer's existing chain; do not fork a brand-new conversation.
+    logWarn("agent", "empty gemini output; retrying once with prior history", {
       messageId: input.messageId,
+      previousInteractionId: previousInteractionId ?? null,
       ...summarizeInteraction(interaction),
     });
 
     try {
-      const retry = await createInteraction(ai, {
+      let retryInteraction = await createInteraction(ai, {
         model,
         input: userInput,
+        previousInteractionId,
         includeSystem: true,
       });
       logInfo("agent", "gemini retry response", {
         messageId: input.messageId,
-        ...summarizeInteraction(retry),
+        ...summarizeInteraction(retryInteraction),
       });
 
-      // One tool round on retry if needed
-      let retryInteraction = retry;
-      const retryCalls = getFunctionCalls(retryInteraction);
-      if (retryCalls.length > 0 && retryInteraction.id) {
-        const toolResults = [];
-        for (const call of retryCalls) {
-          const result = await executeAgentTool({
-            name: call.name,
-            toolArguments: call.arguments,
-            senderPhone: input.sender,
-            pushName: input.pushName,
-            messageId: input.messageId,
-          });
-          toolResults.push(
-            buildFunctionResultInput({
-              name: call.name,
-              callId: call.id ?? call.name,
-              result,
-              isError: !Boolean((result as { ok?: boolean }).ok),
-            }),
-          );
-        }
-        retryInteraction = await createInteraction(ai, {
+      for (let round = 0; round < MAX_TOOL_ROUNDS; round += 1) {
+        const next = await runToolRound({
+          ai,
           model,
-          previousInteractionId: retryInteraction.id,
-          input: toolResults,
-        });
-        logInfo("agent", "gemini retry tool-followup", {
+          interaction: retryInteraction,
+          sender: input.sender,
+          pushName: input.pushName,
           messageId: input.messageId,
-          ...summarizeInteraction(retryInteraction),
+          round,
         });
+        if (!next) break;
+        retryInteraction = next;
       }
 
-      if (retryInteraction.id) {
-        setPreviousInteractionId(input.sender, retryInteraction.id);
-        interaction = retryInteraction;
-      }
+      interaction = retryInteraction;
       text = sanitizeWhatsAppText(extractInteractionText(retryInteraction));
     } catch (error) {
       logWarn("agent", "gemini empty-output retry failed", formatError(error));
@@ -295,6 +288,14 @@ export async function generateAgentReply(
     });
     text =
       "Got you. Mind sending that again in a short line so I can help right away? 🙂";
+  } else if (interaction.id) {
+    // Only advance the persisted history pointer after a real model reply.
+    await setPreviousInteractionId(input.sender, interaction.id);
+    logInfo("agent", "session pointer advanced", {
+      messageId: input.messageId,
+      previousInteractionId: previousInteractionId ?? null,
+      nextInteractionId: interaction.id,
+    });
   }
 
   logInfo("agent", "generate done", {
