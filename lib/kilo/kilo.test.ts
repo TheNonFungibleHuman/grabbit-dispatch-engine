@@ -5,6 +5,8 @@ import {
   composeServiceLocationAddress,
   expandUnitOptions,
   matchServiceLocations,
+  pinFromServiceLocation,
+  pinFromWarehouse,
   resolveUnitFollowUp,
 } from "./locations.ts";
 import { mapDraftToCreateDeliveryInput } from "./map-order.ts";
@@ -225,6 +227,31 @@ describe("service locations helpers", () => {
       songhai,
     ]);
     assert.equal(matches[0]?.id, "loc_songhai");
+  });
+
+  it("keeps service-location API coords when unit text changes", () => {
+    const withUnit = pinFromServiceLocation(sample, "R02");
+    const withoutUnit = pinFromServiceLocation(sample);
+    assert.equal(
+      withUnit.address,
+      "Queen's Hall — Triolet Road — R02",
+    );
+    assert.equal(withoutUnit.address, "Queen's Hall — Triolet Road");
+    assert.deepEqual(withUnit.coords, sample.coords);
+    assert.deepEqual(withoutUnit.coords, sample.coords);
+    assert.notEqual(withUnit.address, withoutUnit.address);
+  });
+
+  it("uses warehouse latitude/longitude as lng/lat without geocoding address", () => {
+    const pin = pinFromWarehouse({
+      id: "wh_1",
+      name: "Main depot",
+      address: "Fake street that must not be geocoded",
+      latitude: -20.05,
+      longitude: 57.55,
+    });
+    assert.deepEqual(pin.coords, { lng: 57.55, lat: -20.05 });
+    assert.equal(pin.address, "Fake street that must not be geocoded");
   });
 });
 

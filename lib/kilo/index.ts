@@ -16,6 +16,11 @@ export {
   resolveUnitFollowUp,
   summarizeDiscoveryForAgent,
 } from "./discovery";
+export {
+  assertApiCoords,
+  pinFromServiceLocation,
+  pinFromWarehouse,
+} from "./locations";
 export { mapDraftToCreateDeliveryInput, requiresPackageImages, validatePackageImages } from "./map-order";
 export type { DeliveryDraftForKilo } from "./map-order";
 export { statusMessageForCustomer } from "./status-messages";

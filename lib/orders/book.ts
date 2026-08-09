@@ -1,11 +1,11 @@
 import { geocodeAddress } from "../geocode";
 import {
-  composeServiceLocationAddress,
   getDiscoveryBundle,
   matchServiceLocations,
   pickCollectionMethod,
   resolveUnitFollowUp,
 } from "../kilo/discovery";
+import { pinFromServiceLocation, pinFromWarehouse } from "../kilo/locations";
 import {
   createDelivery,
   mapDraftToCreateDeliveryInput,
@@ -13,13 +13,14 @@ import {
 } from "../kilo";
 import { KiloApiError } from "../kilo/types";
 import type {
+  KiloCoords,
   KiloDeliveryMode,
   KiloErrandMode,
   KiloPackageSize,
   KiloServiceKind,
 } from "../kilo/types";
 import { requiresPackageImages } from "../kilo/map-order";
-import { logInfo } from "../log";
+import { logInfo, logWarn } from "../log";
 import {
   clearOrderDraft,
   getOrderDraft,
@@ -76,17 +77,22 @@ async function resolvePlace(args: {
   >["serviceLocations"];
   warehouseId?: string;
   deliveryMode?: KiloDeliveryMode;
+  /** Errand shop only: if geocode fails, reuse this pin + mark pickupLocationUnknown */
+  unknownShopFallbackCoords?: KiloCoords;
+  allowUnknownShopLocation?: boolean;
 }): Promise<
   | {
       ok: true;
       address: string;
-      coords: { lng: number; lat: number };
+      coords: KiloCoords;
       label: string;
       warehouseId?: string;
+      coordSource: "service_location" | "warehouse" | "geocode" | "unknown_shop_fallback";
+      pickupLocationUnknown?: boolean;
     }
   | { ok: false; error: string; followUp?: Record<string, unknown> }
 > {
-  // Warehouse pickup short-circuit
+  // Warehouse pickup: exact API lat/lng — never geocode warehouse.address
   if (
     args.role === "pickup" &&
     args.deliveryMode === "warehouse" &&
@@ -96,20 +102,29 @@ async function resolvePlace(args: {
     if (!warehouse) {
       return { ok: false, error: "Unknown warehouseId. Pick one from discovery." };
     }
-    if (
-      warehouse.latitude == null ||
-      warehouse.longitude == null ||
-      (warehouse.latitude === 0 && warehouse.longitude === 0)
-    ) {
-      return { ok: false, error: "Warehouse is missing coordinates." };
+    try {
+      const pin = pinFromWarehouse(warehouse);
+      logInfo("kilo", "place resolved", {
+        role: args.role,
+        coordSource: "warehouse",
+        label: pin.label,
+        coords: pin.coords,
+      });
+      return {
+        ok: true,
+        ...pin,
+        warehouseId: warehouse.id,
+        coordSource: "warehouse",
+      };
+    } catch (error) {
+      return {
+        ok: false,
+        error:
+          error instanceof Error
+            ? error.message
+            : "Warehouse is missing coordinates.",
+      };
     }
-    return {
-      ok: true,
-      address: warehouse.address,
-      coords: { lng: warehouse.longitude, lat: warehouse.latitude },
-      label: warehouse.name,
-      warehouseId: warehouse.id,
-    };
   }
 
   // Service locations: allowed for pickup_delivery both sides, and errand dropoff only
@@ -148,8 +163,6 @@ async function resolvePlace(args: {
           followUp,
         };
       }
-    } else if (args.unit?.trim() && location.unit.mode === "none") {
-      // ignore stray unit
     }
 
     const unitValue =
@@ -166,15 +179,35 @@ async function resolvePlace(args: {
       };
     }
 
-    return {
-      ok: true,
-      address: composeServiceLocationAddress(location, unitValue),
-      coords: location.coords,
-      label: location.name,
-    };
+    try {
+      // Unit only changes composed address text — coords stay the API pin.
+      const pin = pinFromServiceLocation(location, unitValue);
+      logInfo("kilo", "place resolved", {
+        role: args.role,
+        coordSource: "service_location",
+        locationId: location.id,
+        label: pin.label,
+        unit: unitValue ?? null,
+        address: pin.address,
+        coords: pin.coords,
+      });
+      return {
+        ok: true,
+        ...pin,
+        coordSource: "service_location",
+      };
+    } catch (error) {
+      return {
+        ok: false,
+        error:
+          error instanceof Error
+            ? error.message
+            : "Service location is missing coordinates.",
+      };
+    }
   }
 
-  // Fuzzy match free text to service locations when allowed
+  // Fuzzy match free text to service locations when allowed (still use API coords)
   if (allowServiceLocation && args.freeText?.trim()) {
     const matches = matchServiceLocations(
       args.freeText,
@@ -212,15 +245,46 @@ async function resolvePlace(args: {
     };
   }
 
+  // Free-form only: real geocoder. Never invent 0,0.
   try {
     const geo = await geocodeAddress(text);
+    logInfo("kilo", "place resolved", {
+      role: args.role,
+      coordSource: "geocode",
+      label: geo.label,
+      coords: { lng: geo.lng, lat: geo.lat },
+    });
     return {
       ok: true,
       address: text,
       coords: { lng: geo.lng, lat: geo.lat },
       label: geo.label,
+      coordSource: "geocode",
     };
   } catch (error) {
+    if (
+      args.role === "pickup" &&
+      args.serviceKind === "errand" &&
+      args.allowUnknownShopLocation &&
+      args.unknownShopFallbackCoords
+    ) {
+      logWarn("kilo", "errand shop geocode failed; using unknown-shop fallback pin", {
+        address: text,
+        fallbackCoords: args.unknownShopFallbackCoords,
+      });
+      return {
+        ok: true,
+        address: text,
+        coords: {
+          lng: args.unknownShopFallbackCoords.lng,
+          lat: args.unknownShopFallbackCoords.lat,
+        },
+        label: text,
+        coordSource: "unknown_shop_fallback",
+        pickupLocationUnknown: true,
+      };
+    }
+
     return {
       ok: false,
       error:
@@ -230,6 +294,7 @@ async function resolvePlace(args: {
     };
   }
 }
+
 
 export async function bookKiloDeliveryFromChat(args: {
   chatSenderPhone: string;
@@ -371,30 +436,68 @@ export async function bookKiloDeliveryFromChat(args: {
     };
   }
 
-  const pickup = await resolvePlace({
-    role: "pickup",
-    serviceKind,
-    freeText: args.toolArgs.pickupAddress,
-    locationId: args.toolArgs.pickupServiceLocationId,
-    unit: args.toolArgs.pickupUnit,
-    warehouses: discovery.warehouses,
-    serviceLocations: discovery.serviceLocations,
-    warehouseId: args.toolArgs.warehouseId,
-    deliveryMode,
-  });
-  if (!pickup.ok) return pickup;
+  // Errands: resolve dropoff first so a geocode-failed shop can reuse the
+  // delivery service-location pin when allowUnknownShopLocation is enabled.
+  let pickup: Awaited<ReturnType<typeof resolvePlace>>;
+  let dropoff: Awaited<ReturnType<typeof resolvePlace>>;
 
-  const dropoff = await resolvePlace({
-    role: "dropoff",
-    serviceKind,
-    freeText: args.toolArgs.deliveryAddress,
-    locationId: args.toolArgs.deliveryServiceLocationId,
-    unit: args.toolArgs.deliveryUnit,
-    warehouses: discovery.warehouses,
-    serviceLocations: discovery.serviceLocations,
-    deliveryMode: "pickup",
-  });
-  if (!dropoff.ok) return dropoff;
+  if (serviceKind === "errand") {
+    dropoff = await resolvePlace({
+      role: "dropoff",
+      serviceKind,
+      freeText: args.toolArgs.deliveryAddress,
+      locationId: args.toolArgs.deliveryServiceLocationId,
+      unit: args.toolArgs.deliveryUnit,
+      warehouses: discovery.warehouses,
+      serviceLocations: discovery.serviceLocations,
+      deliveryMode: "pickup",
+    });
+    if (!dropoff.ok) return dropoff;
+
+    pickup = await resolvePlace({
+      role: "pickup",
+      serviceKind,
+      freeText: args.toolArgs.pickupAddress,
+      locationId: args.toolArgs.pickupServiceLocationId,
+      unit: args.toolArgs.pickupUnit,
+      warehouses: discovery.warehouses,
+      serviceLocations: discovery.serviceLocations,
+      warehouseId: args.toolArgs.warehouseId,
+      deliveryMode,
+      allowUnknownShopLocation: caps.errand.allowUnknownShopLocation,
+      unknownShopFallbackCoords: dropoff.ok ? dropoff.coords : undefined,
+    });
+    if (!pickup.ok) return pickup;
+  } else {
+    pickup = await resolvePlace({
+      role: "pickup",
+      serviceKind,
+      freeText: args.toolArgs.pickupAddress,
+      locationId: args.toolArgs.pickupServiceLocationId,
+      unit: args.toolArgs.pickupUnit,
+      warehouses: discovery.warehouses,
+      serviceLocations: discovery.serviceLocations,
+      warehouseId: args.toolArgs.warehouseId,
+      deliveryMode,
+    });
+    if (!pickup.ok) return pickup;
+
+    dropoff = await resolvePlace({
+      role: "dropoff",
+      serviceKind,
+      freeText: args.toolArgs.deliveryAddress,
+      locationId: args.toolArgs.deliveryServiceLocationId,
+      unit: args.toolArgs.deliveryUnit,
+      warehouses: discovery.warehouses,
+      serviceLocations: discovery.serviceLocations,
+      deliveryMode: "pickup",
+    });
+    if (!dropoff.ok) return dropoff;
+  }
+
+  if (!pickup.ok || !dropoff.ok) {
+    return pickup.ok ? dropoff : pickup;
+  }
 
   const idempotencyKey = `wa-${args.messageId}`.slice(0, 120);
 
@@ -428,8 +531,29 @@ export async function bookKiloDeliveryFromChat(args: {
     errandBudgetNgn: args.toolArgs.errandBudgetNgn,
     errandSubstituteOk: args.toolArgs.errandSubstituteOk,
     shopPhone: args.toolArgs.shopPhone,
-    pickupLocationUnknown: args.toolArgs.pickupLocationUnknown,
+    pickupLocationUnknown:
+      pickup.pickupLocationUnknown === true ||
+      args.toolArgs.pickupLocationUnknown === true,
   };
+
+  logInfo("kilo", "booking place pins", {
+    messageId: args.messageId,
+    serviceKind,
+    errandMode: errandMode ?? null,
+    pickup: {
+      source: pickup.coordSource,
+      label: pickup.label,
+      coords: pickup.coords,
+      address: pickup.address,
+      pickupLocationUnknown: pickup.pickupLocationUnknown ?? false,
+    },
+    dropoff: {
+      source: dropoff.coordSource,
+      label: dropoff.label,
+      coords: dropoff.coords,
+      address: dropoff.address,
+    },
+  });
 
   try {
     const payload = mapDraftToCreateDeliveryInput({

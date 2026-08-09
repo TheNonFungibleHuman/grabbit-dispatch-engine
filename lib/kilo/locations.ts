@@ -1,4 +1,9 @@
-import type { KiloServiceLocation, ServiceLocationUnit } from "./types";
+import type {
+  KiloCoords,
+  KiloServiceLocation,
+  KiloWarehouse,
+  ServiceLocationUnit,
+} from "./types";
 
 /** Compose address the way the public Kilo form does. */
 export function composeServiceLocationAddress(
@@ -10,6 +15,56 @@ export function composeServiceLocationAddress(
     parts.push(unit.trim());
   }
   return parts.join(" — ");
+}
+
+/**
+ * Use exact API coords from a saved place. Never re-geocode the composed address.
+ * Unit only changes address text — coords stay the same pin.
+ */
+export function pinFromServiceLocation(
+  location: KiloServiceLocation,
+  unit?: string | null,
+): { address: string; coords: KiloCoords; label: string } {
+  const coords = assertApiCoords(location.coords, `service location ${location.name}`);
+  return {
+    address: composeServiceLocationAddress(location, unit),
+    coords: { lng: coords.lng, lat: coords.lat },
+    label: location.name,
+  };
+}
+
+/** Warehouse pickup pin from API latitude/longitude. Never geocode warehouse.address. */
+export function pinFromWarehouse(
+  warehouse: KiloWarehouse,
+): { address: string; coords: KiloCoords; label: string } {
+  if (
+    warehouse.latitude == null ||
+    warehouse.longitude == null
+  ) {
+    throw new Error(`Warehouse ${warehouse.name} is missing coordinates`);
+  }
+  const coords = assertApiCoords(
+    { lng: warehouse.longitude, lat: warehouse.latitude },
+    `warehouse ${warehouse.name}`,
+  );
+  return {
+    address: warehouse.address,
+    coords: { lng: coords.lng, lat: coords.lat },
+    label: warehouse.name,
+  };
+}
+
+export function assertApiCoords(
+  coords: KiloCoords,
+  label: string,
+): KiloCoords {
+  if (!Number.isFinite(coords.lng) || !Number.isFinite(coords.lat)) {
+    throw new Error(`${label} has invalid coordinates`);
+  }
+  if (coords.lng === 0 && coords.lat === 0) {
+    throw new Error(`${label} has placeholder 0,0 coordinates`);
+  }
+  return coords;
 }
 
 export function expandUnitOptions(unit: ServiceLocationUnit): string[] {
