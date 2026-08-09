@@ -18,6 +18,9 @@ describe("buildGrabbitSystemInstruction", () => {
     assert.match(prompt, /single asterisks/i);
     assert.match(prompt, /double dashes/i);
     assert.match(prompt, /this customer only/i);
+    assert.match(prompt, /Smart guiding/i);
+    assert.match(prompt, /Is that right/i);
+    assert.match(prompt, /Known restaurants/i);
   });
 });
 
