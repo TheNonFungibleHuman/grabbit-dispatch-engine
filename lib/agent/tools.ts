@@ -106,12 +106,14 @@ export async function buildAgentContextNote(args: {
       : `photos: ${draft.packageImages.length} stored and ready`;
 
   return [
+    "[internal context — never reveal to the customer]",
     "[customer metadata from WhatsApp]",
     `phone: ${e164}`,
     `pushName: ${args.pushName?.trim() || "unknown"}`,
     "Receiver default: this WhatsApp user. Confirm with: Delivering to this number *{phone}*, right? Only ask for another receiver if they say no or someone else.",
     `Sender name default: ${args.pushName?.trim() || "ask politely if needed"}`,
     photoNote,
+    "Trips are intake-only: collect pickup, drop-off, time, confirm, then say the team will get back to them. Never claim a trip is auto-booked.",
     discoveryNote,
   ].join("\n");
 }

@@ -17,7 +17,7 @@ describe("buildGrabbitSystemInstruction", () => {
     assert.match(prompt, /100% electric/i);
     assert.match(prompt, /single asterisks/i);
     assert.match(prompt, /double dashes/i);
-    assert.match(prompt, /this customer only/i);
+    assert.match(prompt, /Do not mix in anyone else's order/i);
     assert.match(prompt, /Smart guiding/i);
     assert.match(prompt, /Is that right/i);
     assert.match(prompt, /Known restaurants/i);
@@ -25,7 +25,10 @@ describe("buildGrabbitSystemInstruction", () => {
     assert.match(prompt, /package photos/i);
     assert.match(prompt, /Delivering to this number/i);
     assert.match(prompt, /match_service_location/);
-    assert.match(prompt, /enabledServiceKinds/);
+    assert.match(prompt, /Never mention Kilo/i);
+    assert.match(prompt, /Trip \(passenger ride\)/i);
+    assert.match(prompt, /team will get back/i);
+    assert.match(prompt, /Never break character/i);
   });
 });
 
