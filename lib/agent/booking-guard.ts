@@ -1,5 +1,6 @@
 export type BookingFailureDetails = {
   error: string;
+  code?: string | null;
   fieldErrors?: Record<string, string[]> | null;
 };
 
@@ -9,7 +10,7 @@ function failureText(details: BookingFailureDetails | string): string {
   const fieldBits = Object.entries(details.fieldErrors ?? {}).flatMap(
     ([field, messages]) => [field, ...(messages ?? [])],
   );
-  return [details.error, ...fieldBits].filter(Boolean).join("\n");
+  return [details.error, details.code, ...fieldBits].filter(Boolean).join("\n");
 }
 
 /**
@@ -21,16 +22,31 @@ export function customerReplyForFailedBooking(
 ): string {
   const raw = failureText(details);
   const lower = raw.toLowerCase();
+  const code =
+    typeof details === "string"
+      ? ""
+      : (details.code ?? "").toLowerCase();
   const fields = Object.keys(
     typeof details === "string" ? {} : details.fieldErrors ?? {},
   ).map((key) => key.toLowerCase());
+
+  // Internal Kilo image-host allowlist / CDN config — not the customer's fault.
+  if (
+    code === "image_host_rejected" ||
+    lower.includes("image_host_rejected") ||
+    lower.includes("allowed image host") ||
+    lower.includes("image hosts configured") ||
+    lower.includes("cdn/media hostname")
+  ) {
+    return "One sec, having a small hiccup placing this on our side. Please try again in a moment 💚";
+  }
 
   if (
     fields.includes("packageimages") ||
     lower.includes("packageimages") ||
     lower.includes("package photo") ||
     lower.includes("reference photo") ||
-    /\bphotos?\b/.test(lower)
+    (/\bphotos?\b/.test(lower) && !lower.includes("image host"))
   ) {
     return "Almost there. Please send a clear photo of the order/package, then I’ll place it right away 💚";
   }

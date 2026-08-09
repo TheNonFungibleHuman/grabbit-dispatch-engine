@@ -501,6 +501,22 @@ export async function bookKiloDeliveryFromChat(args: {
 
   const idempotencyKey = `wa-${args.messageId}`.slice(0, 120);
 
+  // Only send stored WhatsApp photos when this service actually requires them.
+  // Leftover draft photos on at_place/link errands can trip Kilo image-host checks.
+  const photosRequired = requiresPackageImages(serviceKind, errandMode);
+  const packageImages = photosRequired
+    ? draftPhotos.packageImages.slice(0, 6)
+    : [];
+
+  if (!photosRequired && draftPhotos.packageImages.length > 0) {
+    logInfo("kilo", "stripping unused draft photos for booking", {
+      messageId: args.messageId,
+      serviceKind,
+      errandMode: errandMode ?? null,
+      strippedCount: draftPhotos.packageImages.length,
+    });
+  }
+
   const draft: DeliveryDraftForKilo = {
     serviceKind,
     deliveryMode,
@@ -514,7 +530,7 @@ export async function bookKiloDeliveryFromChat(args: {
     deliveryAddress: dropoff.address,
     packageDescription: args.toolArgs.packageDescription,
     packageSize: args.toolArgs.packageSize ?? "small",
-    packageImages: draftPhotos.packageImages.slice(0, 6),
+    packageImages,
     pickupContactSameAsSender: args.toolArgs.pickupContactSameAsSender ?? true,
     pickupContactName: args.toolArgs.pickupContactName,
     pickupContactPhone: args.toolArgs.pickupContactPhone,
@@ -591,6 +607,22 @@ export async function bookKiloDeliveryFromChat(args: {
   } catch (error) {
     if (error instanceof KiloApiError) {
       const packageImageErrors = error.fieldErrors?.packageImages;
+      const imageHosts = packageImages.map((url) => {
+        try {
+          return new URL(url).hostname;
+        } catch {
+          return url;
+        }
+      });
+      logWarn("kilo", "create delivery failed", {
+        messageId: args.messageId,
+        code: error.code ?? null,
+        error: error.message,
+        fieldErrors: error.fieldErrors ?? null,
+        packageImageCount: packageImages.length,
+        packageImageHosts: imageHosts,
+        photosRequired,
+      });
       return {
         ok: false,
         error: packageImageErrors?.length
@@ -598,9 +630,12 @@ export async function bookKiloDeliveryFromChat(args: {
           : error.message,
         code: error.code,
         fieldErrors: error.fieldErrors,
-        customerGuidance: packageImageErrors?.length
-          ? "Do NOT say the order was booked. Ask for the required photo(s)."
-          : undefined,
+        customerGuidance:
+          error.code === "image_host_rejected"
+            ? "Do NOT invent a successful booking. This is an internal image-host config issue. Apologize briefly and ask them to try again shortly."
+            : packageImageErrors?.length
+              ? "Do NOT say the order was booked. Ask for the required photo(s)."
+              : undefined,
         booked: false,
       };
     }

@@ -143,7 +143,14 @@ async function runToolRound(args: {
         typeof result.fieldErrors === "object"
           ? (result.fieldErrors as Record<string, string[]>)
           : undefined;
-      bookingFailure = { error, fieldErrors };
+      const code =
+        result &&
+        typeof result === "object" &&
+        "code" in result &&
+        typeof (result as { code?: unknown }).code === "string"
+          ? (result as { code: string }).code
+          : undefined;
+      bookingFailure = { error, fieldErrors, code };
     }
 
     toolResults.push(

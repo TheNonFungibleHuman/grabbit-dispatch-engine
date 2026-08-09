@@ -32,10 +32,23 @@ describe("booking-guard", () => {
     );
   });
 
-  it("avoids vague missing-detail wording on unknown errors", () => {
-    const reply = customerReplyForFailedBooking("something unexpected exploded");
-    assert.doesNotMatch(reply, /missing detail/i);
-    assert.match(reply, /pickup place|drop-off|resend/i);
+  it("treats image_host_rejected as an internal hiccup, not a customer gap", () => {
+    assert.match(
+      customerReplyForFailedBooking({
+        error:
+          "No allowed image hosts configured. Add your CDN/media hostnames before creating deliveries via API.",
+        code: "image_host_rejected",
+      }),
+      /hiccup|moment/i,
+    );
+    assert.doesNotMatch(
+      customerReplyForFailedBooking({
+        error:
+          "No allowed image hosts configured. Add your CDN/media hostnames before creating deliveries via API.",
+        code: "image_host_rejected",
+      }),
+      /resend in one line|photo of the order/i,
+    );
   });
 
   it("detects false booking success wording", () => {
