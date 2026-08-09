@@ -21,6 +21,8 @@ describe("buildGrabbitSystemInstruction", () => {
     assert.match(prompt, /Smart guiding/i);
     assert.match(prompt, /Is that right/i);
     assert.match(prompt, /Known restaurants/i);
+    assert.match(prompt, /book_kilo_delivery/);
+    assert.match(prompt, /package photos/i);
   });
 });
 

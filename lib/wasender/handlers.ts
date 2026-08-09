@@ -82,7 +82,7 @@ async function onUserMessage(message: IncomingUserMessage): Promise<void> {
         : `+${message.sender.replace(/\D/g, "")}`;
       await sendTextMessage({
         to,
-        text: "Sorry — I’m having a quick technical hiccup. Please resend your message in a moment and we’ll take care of you 💚",
+        text: "Sorry, I’m having a quick technical hiccup. Please resend your message in a moment and we’ll take care of you 💚",
       });
     } catch (sendError) {
       console.error("[agent] failed to send fallback error reply", sendError);
