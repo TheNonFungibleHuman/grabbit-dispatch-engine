@@ -61,7 +61,7 @@ async function createInteraction(
     input: args.input as never,
     tools: AGENT_TOOLS,
     ...(args.includeSystem
-      ? { system_instruction: buildGrabbitSystemInstruction() }
+      ? { system_instruction: await buildGrabbitSystemInstruction() }
       : {}),
     ...(args.previousInteractionId
       ? { previous_interaction_id: args.previousInteractionId }

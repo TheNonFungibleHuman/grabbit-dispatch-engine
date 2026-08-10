@@ -1,31 +1,11 @@
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { getKnowledgeForPrompt } from "../admin/knowledge";
 
-let cachedKnowledge: string | null = null;
-
-export function getGrabbitKnowledgeBase(): string {
-  if (cachedKnowledge) {
-    return cachedKnowledge;
-  }
-
-  const raw = readFileSync(join(process.cwd(), "docs.md"), "utf8");
-  cachedKnowledge = prepareKnowledgeForPrompt(raw);
-  return cachedKnowledge;
+export async function getGrabbitKnowledgeBase(): Promise<string> {
+  return getKnowledgeForPrompt();
 }
 
-function prepareKnowledgeForPrompt(raw: string): string {
-  return raw
-    .replace(/\*\*(.+?)\*\*/g, "$1")
-    .replace(/^#{1,6}\s+/gm, "")
-    .replace(/\\([.!*_])/g, "$1")
-    .replace(/\s*—\s*/g, ", ")
-    .replace(/\s*–\s*/g, ", ")
-    .replace(/\s+--\s+/g, ", ")
-    .trim();
-}
-
-export function buildGrabbitSystemInstruction(): string {
-  const knowledge = getGrabbitKnowledgeBase();
+export async function buildGrabbitSystemInstruction(): Promise<string> {
+  const knowledge = await getGrabbitKnowledgeBase();
 
   return `You are the WhatsApp assistant for Grabbit Express, Mauritius' first 100% electric on-demand delivery service.
 

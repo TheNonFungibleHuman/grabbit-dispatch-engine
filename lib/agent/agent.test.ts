@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { describe, it } from "node:test";
 import { sanitizeWhatsAppText } from "./format.ts";
-import { buildGrabbitSystemInstruction } from "./prompt.ts";
+import { prepareKnowledgeForPrompt } from "../admin/knowledge-format.ts";
 import {
   clearPreviousInteractionId,
   getPreviousInteractionId,
@@ -10,30 +12,43 @@ import {
 
 describe("buildGrabbitSystemInstruction", () => {
   it("includes Grabbit coverage areas and WhatsApp formatting rules", () => {
-    const prompt = buildGrabbitSystemInstruction();
-    assert.match(prompt, /Grabbit Express/);
-    assert.match(prompt, /Pamplemousses/);
-    assert.match(prompt, /Triolet/);
-    assert.match(prompt, /100% electric/i);
-    assert.match(prompt, /single asterisks/i);
-    assert.match(prompt, /double dashes/i);
-    assert.match(prompt, /Do not mix in anyone else's order/i);
-    assert.match(prompt, /Smart guiding/i);
-    assert.match(prompt, /Is that right/i);
-    assert.match(prompt, /Known restaurants/i);
-    assert.match(prompt, /book_kilo_delivery/);
-    assert.match(prompt, /pickup_delivery: at least 1 photo required/i);
-    assert.match(prompt, /errandMode=at_place or link: photos optional/i);
-    assert.match(prompt, /Delivering to this number/i);
-    assert.match(prompt, /match_service_location/);
-    assert.match(prompt, /Never mention Kilo/i);
-    assert.match(prompt, /Trip \(passenger ride\)/i);
-    assert.match(prompt, /team will get back/i);
-    assert.match(prompt, /Never claim an order\/delivery was placed/i);
-    assert.match(prompt, /ok:false means it was NOT placed/i);
-    assert.match(prompt, /Never book or claim an on-demand delivery while availability status is CLOSED/i);
-    assert.match(prompt, /Mauritius time/i);
-    assert.match(prompt, /Never break character/i);
+    // Read sources directly so the node strip-types runner does not need the
+    // Next/Blob import graph used by the live async builder.
+    const promptSource = readFileSync(
+      join(process.cwd(), "lib/agent/prompt.ts"),
+      "utf8",
+    );
+    const knowledge = prepareKnowledgeForPrompt(
+      readFileSync(join(process.cwd(), "docs.md"), "utf8"),
+    );
+
+    assert.match(promptSource, /Grabbit Express/);
+    assert.match(promptSource, /single asterisks/i);
+    assert.match(promptSource, /double dashes/i);
+    assert.match(promptSource, /Do not mix in anyone else's order/i);
+    assert.match(promptSource, /Smart guiding/i);
+    assert.match(promptSource, /Is that right/i);
+    assert.match(promptSource, /book_kilo_delivery/);
+    assert.match(promptSource, /pickup_delivery: at least 1 photo required/i);
+    assert.match(promptSource, /errandMode=at_place or link: photos optional/i);
+    assert.match(promptSource, /Delivering to this number/i);
+    assert.match(promptSource, /match_service_location/);
+    assert.match(promptSource, /Never mention Kilo/i);
+    assert.match(promptSource, /Trip \(passenger ride\)/i);
+    assert.match(promptSource, /team will get back/i);
+    assert.match(promptSource, /Never claim an order\/delivery was placed/i);
+    assert.match(promptSource, /ok:false means it was NOT placed/i);
+    assert.match(
+      promptSource,
+      /Never book or claim an on-demand delivery while availability status is CLOSED/i,
+    );
+    assert.match(promptSource, /Mauritius time/i);
+    assert.match(promptSource, /Never break character/i);
+
+    assert.match(promptSource, /Triolet/);
+    assert.match(knowledge, /Pamplemousses/);
+    assert.match(knowledge, /100% electric/i);
+    assert.match(knowledge, /Known restaurants/i);
   });
 });
 
