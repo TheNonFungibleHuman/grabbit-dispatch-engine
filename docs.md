@@ -28,7 +28,15 @@ Format tip: Brand - Branch / Area
 
 Hey there\!  Welcome to Grabbit Express🤗, Mauritius first 100% electric on-demand delivery service. 
 
-Our coverage areas are Pamplemousses, Mont, Arsenal, Triolet, Calebasses.
+**Our coverage areas are**
+
+ Pamplemousses garden  
+Grand Baie Express bus opposite to Pamplemousses garden, and mahogany  
+SSRN hospital bus stop
+
+SSRN hospital  
+Mahogany   
+Pamplemousses
 
 If you need a delivery:
 
