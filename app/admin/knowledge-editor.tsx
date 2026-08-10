@@ -1,8 +1,8 @@
 "use client";
 
 import { useActionState, useEffect, useState } from "react";
+import { AdminNav } from "@/app/admin/admin-nav";
 import {
-  logoutAdminAction,
   publishKnowledgeAction,
   resetKnowledgeToSeedAction,
   type AdminActionState,
@@ -25,7 +25,6 @@ export function KnowledgeEditor(props: { initial: KnowledgeDocument }) {
 
   useEffect(() => {
     if (resetState.ok) {
-      // Reload after seed reset so textarea matches published seed.
       window.location.reload();
     }
   }, [resetState.ok]);
@@ -37,41 +36,28 @@ export function KnowledgeEditor(props: { initial: KnowledgeDocument }) {
 
   return (
     <div className="space-y-6">
-      <header className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-        <div>
-          <p className="text-sm font-semibold tracking-wide text-[#1f7a4c]">
-            Grabbit Admin
-          </p>
-          <h1 className="mt-1 text-3xl font-semibold tracking-tight">
-            Agent context
-          </h1>
-          <p className="mt-2 max-w-2xl text-sm leading-6 text-[#4b5a50]">
-            This text is injected into the WhatsApp agent system prompt. Publish
-            to push changes live (Blob). Until published, the agent uses the
-            repo seed or the last published version.
-          </p>
-        </div>
-        <form action={logoutAdminAction}>
-          <button
-            type="submit"
-            className="rounded-md border border-[#c9d2c6] bg-white px-3 py-2 text-sm font-medium hover:bg-[#eef2ea]"
-          >
-            Sign out
-          </button>
-        </form>
+      <AdminNav active="knowledge" />
+
+      <header>
+        <h1 className="text-3xl font-semibold tracking-tight">Agent context</h1>
+        <p className="mt-2 max-w-2xl text-sm leading-6 text-[#4b5a50]">
+          This text is injected into the WhatsApp agent system prompt. Publish
+          to push changes live (Blob). Until published, the agent uses the repo
+          seed or the last published version.
+        </p>
       </header>
 
       <div className="flex flex-wrap items-center gap-3 text-sm text-[#4b5a50]">
-        <span className="rounded-full bg-white px-3 py-1 border border-[#d7dfd1]">
+        <span className="rounded-full border border-[#d7dfd1] bg-white px-3 py-1">
           Source: {sourceLabel}
         </span>
-        <span className="rounded-full bg-white px-3 py-1 border border-[#d7dfd1]">
+        <span className="rounded-full border border-[#d7dfd1] bg-white px-3 py-1">
           Updated:{" "}
           {props.initial.source === "seed"
             ? "not published yet"
             : props.initial.updatedAt.replace("T", " ").slice(0, 19) + " UTC"}
         </span>
-        <span className="rounded-full bg-white px-3 py-1 border border-[#d7dfd1]">
+        <span className="rounded-full border border-[#d7dfd1] bg-white px-3 py-1">
           {content.length.toLocaleString()} chars
         </span>
       </div>

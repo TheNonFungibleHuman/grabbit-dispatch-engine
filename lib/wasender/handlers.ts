@@ -1,6 +1,7 @@
 import { processIncomingUserMessage } from "../agent";
 import { formatError, logError, logInfo, logWarn } from "../log";
-import { sendTextMessage } from "./client";
+import { recordOpsEvent } from "../ops/store";
+import { sendCustomerText } from "./send-tracked";
 import { getSenderPhone } from "./parse";
 import type {
   IncomingUserMessage,
@@ -77,6 +78,13 @@ async function handleIncomingMessage(
 
 async function onUserMessage(message: IncomingUserMessage): Promise<void> {
   const startedAt = Date.now();
+  await recordOpsEvent({
+    phone: message.sender,
+    type: "inbound_received",
+    messageId: message.messageId,
+    preview: message.text,
+  });
+
   try {
     await processIncomingUserMessage(message);
     logInfo("wasender", "message processed", {
@@ -93,13 +101,22 @@ async function onUserMessage(message: IncomingUserMessage): Promise<void> {
       ...formatError(error),
     });
 
+    await recordOpsEvent({
+      phone: message.sender,
+      type: "agent_failed",
+      messageId: message.messageId,
+      preview: message.text,
+      error: error instanceof Error ? error.message : String(error),
+    });
+
     try {
       const to = message.sender.startsWith("+")
         ? message.sender
         : `+${message.sender.replace(/\D/g, "")}`;
-      await sendTextMessage({
+      await sendCustomerText({
         to,
         text: "Sorry, I’m having a quick technical hiccup. Please resend your message in a moment and we’ll take care of you 💚",
+        messageId: message.messageId,
       });
       logWarn("wasender", "sent technical hiccup fallback", {
         messageId: message.messageId,

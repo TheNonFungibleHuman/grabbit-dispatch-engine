@@ -2,7 +2,7 @@ import { generateAgentReply } from "./gemini";
 import { formatError, logError, logInfo, logWarn } from "../log";
 import { persistIncomingPackageImage } from "../media/wasender";
 import { addPackageImageToDraft } from "../orders/store";
-import { sendTextMessage } from "../wasender/client";
+import { sendCustomerText } from "../wasender/send-tracked";
 import type { IncomingUserMessage } from "../wasender/types";
 
 function toE164(phone: string): string {
@@ -55,14 +55,19 @@ export async function processIncomingUserMessage(
             messageId: message.messageId,
             pushName: message.pushName,
           });
-          await sendTextMessage({ to, text: reply.text });
+          await sendCustomerText({
+            to,
+            text: reply.text,
+            messageId: message.messageId,
+          });
         } else {
           const name = message.pushName?.trim();
-          await sendTextMessage({
+          await sendCustomerText({
             to,
             text: name
               ? `Got it ${name}. Photo saved (${draft.packageImages.length}/6). Send another if needed, or tell me pickup and drop-off 🙂`
               : `Got your photo (${draft.packageImages.length}/6). Send another if needed, or tell me the pickup and drop-off details 🙂`,
+            messageId: message.messageId,
           });
         }
 
@@ -83,18 +88,20 @@ export async function processIncomingUserMessage(
         messageId: message.messageId,
         ...formatError(error),
       });
-      await sendTextMessage({
+      await sendCustomerText({
         to,
         text: "I couldn’t save that photo. Please send it again as an image 💚",
+        messageId: message.messageId,
       });
       return;
     }
   }
 
   if (!message.text) {
-    await sendTextMessage({
+    await sendCustomerText({
       to,
       text: "Happy to help. Tell me what you need delivered, or send a package photo to start 💚",
+      messageId: message.messageId,
     });
     return;
   }
@@ -106,9 +113,10 @@ export async function processIncomingUserMessage(
     pushName: message.pushName,
   });
 
-  await sendTextMessage({
+  await sendCustomerText({
     to,
     text: reply.text,
+    messageId: message.messageId,
   });
 
   logInfo("agent", "replied", {

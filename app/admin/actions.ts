@@ -14,6 +14,7 @@ import {
   publishKnowledge,
   readSeedKnowledge,
 } from "@/lib/admin/knowledge";
+import { clearThreadTakeover } from "@/lib/ops/store";
 
 export type AdminActionState = {
   ok: boolean;
@@ -91,4 +92,28 @@ export async function resetKnowledgeToSeedAction(): Promise<AdminActionState> {
 
 export async function getKnowledgeEditorData() {
   return loadKnowledgeDocument();
+}
+
+export async function clearTakeoverAction(
+  _prev: AdminActionState,
+  formData: FormData,
+): Promise<AdminActionState> {
+  if (!(await isAdminAuthed())) {
+    return { ok: false, message: "Session expired. Sign in again." };
+  }
+
+  const phone = String(formData.get("phone") ?? "");
+  try {
+    const thread = await clearThreadTakeover(phone);
+    if (!thread) {
+      return { ok: false, message: "Unknown phone." };
+    }
+    return { ok: true, message: `Marked +${thread.phone} as handled.` };
+  } catch (error) {
+    return {
+      ok: false,
+      message:
+        error instanceof Error ? error.message : "Could not clear takeover",
+    };
+  }
 }

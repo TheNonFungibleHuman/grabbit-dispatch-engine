@@ -1,4 +1,5 @@
 export { sendTextMessage } from "./client";
+export { sendCustomerText } from "./send-tracked";
 export {
   getSenderPhone,
   handleWasenderEvent,
