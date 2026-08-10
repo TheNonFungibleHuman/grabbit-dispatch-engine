@@ -42,6 +42,8 @@ describe("buildGrabbitSystemInstruction", () => {
       promptSource,
       /Never book or claim an on-demand delivery while availability status is CLOSED/i,
     );
+    assert.match(promptSource, /Live knowledge revision/i);
+    assert.match(promptSource, /follow THIS turn's knowledge/i);
     assert.match(promptSource, /Mauritius time/i);
     assert.match(promptSource, /Never break character/i);
 

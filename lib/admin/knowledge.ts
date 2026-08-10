@@ -8,16 +8,24 @@ export { prepareKnowledgeForPrompt } from "./knowledge-format";
 
 export const KNOWLEDGE_BLOB_PATH = "grabbit/admin/knowledge.json";
 
+/** How long a warm instance may reuse knowledge before re-reading Blob. */
+const KNOWLEDGE_FRESH_TTL_MS = 2_000;
+
 export interface KnowledgeDocument {
   content: string;
   updatedAt: string;
   source: "blob" | "seed";
 }
 
-let preparedCache: { raw: string; prepared: string } | null = null;
+export interface KnowledgeBundle {
+  document: KnowledgeDocument;
+  prepared: string;
+}
+
+let freshBundle: { fetchedAt: number; bundle: KnowledgeBundle } | null = null;
 
 export function clearKnowledgeCache(): void {
-  preparedCache = null;
+  freshBundle = null;
   memoryClear(KNOWLEDGE_BLOB_PATH);
 }
 
@@ -25,7 +33,14 @@ export function readSeedKnowledge(): string {
   return readFileSync(join(process.cwd(), "docs.md"), "utf8");
 }
 
-export async function loadKnowledgeDocument(): Promise<KnowledgeDocument> {
+export async function loadKnowledgeDocument(args?: {
+  /** When true, bypass in-memory Blob cache (used by the live agent). */
+  bypassMemory?: boolean;
+}): Promise<KnowledgeDocument> {
+  if (args?.bypassMemory) {
+    memoryClear(KNOWLEDGE_BLOB_PATH);
+  }
+
   const stored = await readJson<{ content?: string; updatedAt?: string }>(
     KNOWLEDGE_BLOB_PATH,
   );
@@ -56,11 +71,19 @@ export async function publishKnowledge(content: string): Promise<KnowledgeDocume
     source: "blob",
   };
 
+  // Drop any stale warm-instance copy before/after write.
+  clearKnowledgeCache();
   await writeJson(KNOWLEDGE_BLOB_PATH, {
     content: doc.content,
     updatedAt: doc.updatedAt,
   });
-  preparedCache = null;
+  freshBundle = {
+    fetchedAt: Date.now(),
+    bundle: {
+      document: doc,
+      prepared: prepareKnowledgeForPrompt(doc.content),
+    },
+  };
   logInfo("admin", "knowledge published", {
     chars: doc.content.length,
     updatedAt: doc.updatedAt,
@@ -68,12 +91,28 @@ export async function publishKnowledge(content: string): Promise<KnowledgeDocume
   return doc;
 }
 
-export async function getKnowledgeForPrompt(): Promise<string> {
-  const doc = await loadKnowledgeDocument();
-  if (preparedCache && preparedCache.raw === doc.content) {
-    return preparedCache.prepared;
+/**
+ * Fresh knowledge for the agent. Re-reads Blob frequently so an Admin
+ * Publish is picked up on the next WhatsApp turn in the same chat.
+ */
+export async function getKnowledgeBundle(): Promise<KnowledgeBundle> {
+  if (
+    freshBundle &&
+    Date.now() - freshBundle.fetchedAt < KNOWLEDGE_FRESH_TTL_MS
+  ) {
+    return freshBundle.bundle;
   }
-  const prepared = prepareKnowledgeForPrompt(doc.content);
-  preparedCache = { raw: doc.content, prepared };
-  return prepared;
+
+  const document = await loadKnowledgeDocument({ bypassMemory: true });
+  const bundle: KnowledgeBundle = {
+    document,
+    prepared: prepareKnowledgeForPrompt(document.content),
+  };
+  freshBundle = { fetchedAt: Date.now(), bundle };
+  return bundle;
+}
+
+export async function getKnowledgeForPrompt(): Promise<string> {
+  const bundle = await getKnowledgeBundle();
+  return bundle.prepared;
 }

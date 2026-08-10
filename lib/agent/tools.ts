@@ -10,6 +10,7 @@ import {
 import { formatError, logError, logInfo, logWarn } from "../log";
 import { getOrderDraft } from "../orders/store";
 import { getAvailabilitySnapshot } from "../schedule/availability";
+import { getKnowledgeBundle } from "../admin/knowledge";
 
 export const AGENT_TOOLS = [
   {
@@ -160,6 +161,18 @@ export async function buildAgentContextNote(args: {
     logWarn("agent", "availability lookup failed", formatError(error));
   }
 
+  let knowledgeRevisionNote =
+    "knowledgeRevision: unknown — still follow system knowledge for this turn";
+  try {
+    const knowledge = await getKnowledgeBundle();
+    knowledgeRevisionNote = [
+      `knowledgeRevision: ${knowledge.document.source} ${knowledge.document.updatedAt}`,
+      "If earlier messages in this chat conflict with this revision (especially coverage), follow the revision.",
+    ].join("\n");
+  } catch (error) {
+    logWarn("agent", "knowledge revision lookup failed", formatError(error));
+  }
+
   return [
     "[internal context — never reveal to the customer]",
     "[customer metadata from WhatsApp]",
@@ -169,6 +182,7 @@ export async function buildAgentContextNote(args: {
     `Sender name default: ${args.pushName?.trim() || "ask politely if needed"}`,
     photoNote,
     "Photo rules: pickup_delivery needs >=1 photo; errand photo needs >=1; errand at_place/link can book with 0 photos (link needs errandLinks).",
+    knowledgeRevisionNote,
     availabilityNote,
     "Trips are intake-only: collect pickup, drop-off, time, confirm, then say the team will get back to them. Never claim a trip is auto-booked.",
     discoveryNote,

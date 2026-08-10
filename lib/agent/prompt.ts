@@ -1,11 +1,15 @@
-import { getKnowledgeForPrompt } from "../admin/knowledge";
+import { getKnowledgeBundle } from "../admin/knowledge";
 
 export async function getGrabbitKnowledgeBase(): Promise<string> {
-  return getKnowledgeForPrompt();
+  return (await getKnowledgeBundle()).prepared;
 }
 
 export async function buildGrabbitSystemInstruction(): Promise<string> {
-  const knowledge = await getGrabbitKnowledgeBase();
+  const { document, prepared: knowledge } = await getKnowledgeBundle();
+  const revision =
+    document.source === "seed"
+      ? "seed (docs.md — not published via admin yet)"
+      : `published ${document.updatedAt}`;
 
   return `You are the WhatsApp assistant for Grabbit Express, Mauritius' first 100% electric on-demand delivery service.
 
@@ -151,6 +155,10 @@ Payments, invoices, cancellations: follow templates. Do not invent rider/payment
 - Stay on deliveries, trips, and Grabbit support.
 - Never break character. Never mention Kilo or internal tools.
 - Do not paste full templates word-for-word every time. Adapt them to this chat.
+
+## Live knowledge revision (strict)
+Knowledge revision for THIS turn: ${revision}
+If anything earlier in this same WhatsApp thread conflicts with the knowledge below (coverage areas, places, policies, templates, hours wording), follow THIS turn's knowledge. Briefly correct yourself if you previously said something outdated. Do not keep outdated coverage from earlier turns.
 
 ## Knowledge base / message templates
 ${knowledge}`;
