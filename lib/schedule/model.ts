@@ -17,6 +17,14 @@ export interface ScheduleSlot {
   byDay: Partial<Record<WeekdayKey, string>>;
 }
 
+export interface DayOpenSlots {
+  weekday: WeekdayKey;
+  /** 0 = today, 1 = tomorrow, ... */
+  daysAhead: number;
+  label: string;
+  openSlots: Array<{ label: string; riders: string[] }>;
+}
+
 export interface AvailabilityEvaluation {
   slots: ScheduleSlot[];
   mauritiusNowLabel: string;
@@ -26,6 +34,8 @@ export interface AvailabilityEvaluation {
   currentSlot: ScheduleSlot | null;
   ridersNow: string[];
   nextOpenSlots: Array<{ label: string; riders: string[] }>;
+  /** Today + upcoming days with exact open slots (for "tomorrow" questions). */
+  upcomingDays: DayOpenSlots[];
   summaryForAgent: string;
 }
 
@@ -209,6 +219,30 @@ function slotRiders(slot: ScheduleSlot, weekday: WeekdayKey): string[] {
   return ridersFromCell(slot.byDay[weekday]);
 }
 
+function weekdayAhead(from: WeekdayKey, daysAhead: number): WeekdayKey {
+  const index = DAY_KEYS.indexOf(from);
+  const safeIndex = index < 0 ? 0 : index;
+  return DAY_KEYS[(safeIndex + daysAhead) % DAY_KEYS.length];
+}
+
+function openSlotsForDay(
+  slots: ScheduleSlot[],
+  weekday: WeekdayKey,
+): Array<{ label: string; riders: string[] }> {
+  return slots
+    .map((slot) => ({
+      label: slot.label,
+      riders: slotRiders(slot, weekday),
+    }))
+    .filter((row) => row.riders.length > 0);
+}
+
+function relativeDayLabel(daysAhead: number, weekday: WeekdayKey): string {
+  if (daysAhead === 0) return `today (${weekday})`;
+  if (daysAhead === 1) return `tomorrow (${weekday})`;
+  return `in ${daysAhead} days (${weekday})`;
+}
+
 export function evaluateAvailability(
   slots: ScheduleSlot[],
   now = new Date(),
@@ -235,16 +269,32 @@ export function evaluateAvailability(
     if (nextOpenSlots.length >= 3) break;
   }
 
-  const todayOpen = slots
-    .map((slot) => ({
-      label: slot.label,
-      riders: slotRiders(slot, weekday),
-    }))
-    .filter((row) => row.riders.length > 0);
+  const todayOpen = openSlotsForDay(slots, weekday);
+  const upcomingDays: DayOpenSlots[] = [];
+  for (let daysAhead = 0; daysAhead <= 2; daysAhead += 1) {
+    const dayKey = weekdayAhead(weekday, daysAhead);
+    upcomingDays.push({
+      weekday: dayKey,
+      daysAhead,
+      label: relativeDayLabel(daysAhead, dayKey),
+      openSlots: openSlotsForDay(slots, dayKey),
+    });
+  }
+
+  const tomorrow = upcomingDays.find((day) => day.daysAhead === 1);
+  const formatDayBlock = (day: DayOpenSlots): string => {
+    if (day.openSlots.length < 1) {
+      return `${day.label}: NO open rider slots`;
+    }
+    return `${day.label} open slots (use ONLY these times — empty times = no rider):\n${day.openSlots
+      .map((row) => `• ${row.label} — ${row.riders.join(", ")}`)
+      .join("\n")}`;
+  };
 
   const lines = [
     "[delivery availability — Mauritius time Indian/Mauritius]",
     `now: ${label}`,
+    `today weekday key: ${weekday}`,
     openNow
       ? `status: OPEN now (${currentSlot?.label}) riders: ${ridersNow.join(", ")}`
       : "status: CLOSED for on-demand booking right now (no rider in this slot)",
@@ -254,12 +304,20 @@ export function evaluateAvailability(
           .join("\n")}`
       : "today open slots: none",
     nextOpenSlots.length
-      ? `next options:\n${nextOpenSlots
+      ? `next options later today:\n${nextOpenSlots
           .map((row) => `• ${row.label} — ${row.riders.join(", ")}`)
           .join("\n")}`
-      : "next options: none left today",
-    "Hard rule: do NOT accept/book on-demand delivery while status is CLOSED. Offer the next open slot and take a deferred request for the team if they still want help.",
-  ];
+      : "next options later today: none left",
+    formatDayBlock(upcomingDays[0]),
+    tomorrow ? formatDayBlock(tomorrow) : "",
+    upcomingDays[2] ? formatDayBlock(upcomingDays[2]) : "",
+    "Hard rules for availability answers:",
+    "- Do NOT invent riders, days, or times.",
+    "- If asked about tomorrow / another day, answer ONLY from that day's open slots above and always include the exact time slots.",
+    "- A day can have riders at some times and none at others (example: tomorrow morning may be closed while midday/evening is open).",
+    "- Never say a day is generally available without listing the open time slots.",
+    "- Do NOT accept/book on-demand delivery while status is CLOSED. Offer the next concrete open slot (today first, else tomorrow's first open slot) and take a deferred request if needed.",
+  ].filter(Boolean);
 
   return {
     slots,
@@ -270,6 +328,7 @@ export function evaluateAvailability(
     currentSlot,
     ridersNow,
     nextOpenSlots,
+    upcomingDays,
     summaryForAgent: lines.join("\n"),
   };
 }

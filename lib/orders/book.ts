@@ -309,9 +309,13 @@ export async function bookKiloDeliveryFromChat(args: {
     const availability = await getAvailabilitySnapshot();
     if (!availability.openNow) {
       const next = availability.nextOpenSlots[0];
+      const tomorrow = availability.upcomingDays.find((day) => day.daysAhead === 1);
+      const tomorrowFirst = tomorrow?.openSlots[0];
       const nextHint = next
         ? ` Next open slot today: ${next.label} (${next.riders.join(", ")}).`
-        : " No more open rider slots left today.";
+        : tomorrowFirst
+          ? ` No more open slots today. Next open: tomorrow (${tomorrow.weekday}) ${tomorrowFirst.label} (${tomorrowFirst.riders.join(", ")}).`
+          : " No more open rider slots left today.";
       logWarn("kilo", "booking blocked outside rider availability", {
         weekday: availability.weekday,
         now: availability.mauritiusNowLabel,

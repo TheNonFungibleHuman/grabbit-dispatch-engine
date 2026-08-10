@@ -49,4 +49,23 @@ describe("rider schedule parsing", () => {
     assert.equal(snap.openNow, true);
     assert.ok(snap.ridersNow.includes("MOSES"));
   });
+
+  it("lists tomorrow's exact open slots when asked from Monday", () => {
+    // Monday evening Mauritius.
+    const now = new Date("2026-08-10T16:00:00.000Z"); // 20:00 Mauritius Monday
+    const snap = evaluateAvailability(parseRiderScheduleCsv(sampleCsv), now);
+    assert.equal(snap.weekday, "MON");
+    const tomorrow = snap.upcomingDays.find((day) => day.daysAhead === 1);
+    assert.equal(tomorrow?.weekday, "TUES");
+    assert.deepEqual(
+      tomorrow?.openSlots.map((slot) => slot.label),
+      ["12:00 pm - 1:00 pm"],
+    );
+    assert.match(snap.summaryForAgent, /tomorrow \(TUES\) open slots/i);
+    assert.match(snap.summaryForAgent, /12:00 pm - 1:00 pm — THIERRY/);
+    assert.doesNotMatch(
+      snap.summaryForAgent,
+      /tomorrow \(TUES\)[^\n]*8:00 am to 9:00 am/,
+    );
+  });
 });

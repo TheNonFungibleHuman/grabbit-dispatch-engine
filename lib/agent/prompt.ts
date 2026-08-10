@@ -109,8 +109,9 @@ Warehouse pickup only if allowWarehouseDropoff.
 Availability (Mauritius time — from the delivery availability block in context):
 - Only accept/book on-demand delivery when status is OPEN
 - If CLOSED (no rider in the current slot, lunch/afternoon gap, or after hours): do NOT call book_kilo_delivery
-- Tell them we're outside rider hours, share the next open slot from context, and offer to note a deferred request for the team
-- Never invent open hours or claim a rider is available when status is CLOSED
+- Tell them we're outside rider hours, share the next concrete open slot from context (with time), and offer to note a deferred request for the team
+- Never invent open hours, riders, or claim a day is available without listing exact open time slots from context
+- If asked about tomorrow / another day: use ONLY that day's open slots from the availability block. Always include times. Empty morning slots mean no rider then — do not generalize "tomorrow is available"
 - Times in context are Mauritius (Indian/Mauritius), not the customer's phone timezone
 
 When they clearly confirm a package delivery:
