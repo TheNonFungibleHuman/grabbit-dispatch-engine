@@ -1,4 +1,5 @@
 import { processIncomingUserMessage } from "../agent";
+import { isAgentEnabled } from "../admin/agent-switch";
 import { formatError, logError, logInfo, logWarn } from "../log";
 import { recordOpsEvent } from "../ops/store";
 import { sendCustomerText } from "./send-tracked";
@@ -84,6 +85,15 @@ async function onUserMessage(message: IncomingUserMessage): Promise<void> {
     messageId: message.messageId,
     preview: message.text,
   });
+
+  const agentOn = await isAgentEnabled();
+  if (!agentOn) {
+    logWarn("wasender", "agent disabled; skipping AI reply (human takeover)", {
+      messageId: message.messageId,
+      sender: message.sender,
+    });
+    return;
+  }
 
   try {
     await processIncomingUserMessage(message);

@@ -1,7 +1,78 @@
-import Link from "next/link";
-import { logoutAdminAction } from "@/app/admin/actions";
+"use client";
 
-export function AdminNav(props: { active: "knowledge" | "messages" }) {
+import Link from "next/link";
+import { useActionState, useEffect } from "react";
+import { useRouter } from "next/navigation";
+import {
+  logoutAdminAction,
+  setAgentEnabledAction,
+  type AdminActionState,
+} from "@/app/admin/actions";
+
+const initialState: AdminActionState = { ok: false };
+
+function AgentKillSwitch(props: { enabled: boolean }) {
+  const router = useRouter();
+  const [state, action, pending] = useActionState(
+    setAgentEnabledAction,
+    initialState,
+  );
+
+  useEffect(() => {
+    if (state.ok) router.refresh();
+  }, [state.ok, router]);
+
+  return (
+    <div className="flex flex-col items-stretch gap-1 sm:items-end">
+      <form action={action}>
+        <input
+          type="hidden"
+          name="enabled"
+          value={props.enabled ? "false" : "true"}
+        />
+        <button
+          type="submit"
+          disabled={pending}
+          className={[
+            "rounded-md px-3 py-2 text-sm font-semibold transition disabled:opacity-60",
+            props.enabled
+              ? "border border-[#f0c2c2] bg-[#fff5f5] text-[#9b2c2c] hover:bg-[#fee2e2]"
+              : "border border-[#b7dfc5] bg-[#eefaf2] text-[#14532d] hover:bg-[#dcfce7]",
+          ].join(" ")}
+        >
+          {pending
+            ? "Updating…"
+            : props.enabled
+              ? "Deactivate AI"
+              : "Activate AI"}
+        </button>
+      </form>
+      <p
+        className={`text-xs ${
+          props.enabled ? "text-[#14532d]" : "text-[#9b2c2c]"
+        }`}
+      >
+        {props.enabled
+          ? "AI is ON"
+          : "AI is OFF — silent (human takeover)"}
+      </p>
+      {state.message ? (
+        <p
+          className={`max-w-[16rem] text-xs ${
+            state.ok ? "text-[#4b5a50]" : "text-[#9b2c2c]"
+          }`}
+        >
+          {state.message}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+export function AdminNav(props: {
+  active: "knowledge" | "messages";
+  agentEnabled: boolean;
+}) {
   const linkClass = (id: "knowledge" | "messages") =>
     [
       "rounded-md px-3 py-2 text-sm font-medium",
@@ -11,26 +82,37 @@ export function AdminNav(props: { active: "knowledge" | "messages" }) {
     ].join(" ");
 
   return (
-    <div className="flex flex-wrap items-center justify-between gap-3">
-      <div className="flex flex-wrap items-center gap-2">
-        <p className="mr-2 text-sm font-semibold tracking-wide text-[#1f7a4c]">
-          Grabbit Admin
-        </p>
-        <Link href="/admin/knowledge" className={linkClass("knowledge")}>
-          Context
-        </Link>
-        <Link href="/admin/messages" className={linkClass("messages")}>
-          Messages
-        </Link>
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <p className="mr-2 text-sm font-semibold tracking-wide text-[#1f7a4c]">
+            Grabbit Admin
+          </p>
+          <Link href="/admin/knowledge" className={linkClass("knowledge")}>
+            Context
+          </Link>
+          <Link href="/admin/messages" className={linkClass("messages")}>
+            Messages
+          </Link>
+        </div>
+        <div className="flex flex-wrap items-start gap-3">
+          <AgentKillSwitch enabled={props.agentEnabled} />
+          <form action={logoutAdminAction}>
+            <button
+              type="submit"
+              className="rounded-md border border-[#c9d2c6] bg-white px-3 py-2 text-sm font-medium hover:bg-[#eef2ea]"
+            >
+              Sign out
+            </button>
+          </form>
+        </div>
       </div>
-      <form action={logoutAdminAction}>
-        <button
-          type="submit"
-          className="rounded-md border border-[#c9d2c6] bg-white px-3 py-2 text-sm font-medium hover:bg-[#eef2ea]"
-        >
-          Sign out
-        </button>
-      </form>
+      {!props.agentEnabled ? (
+        <div className="rounded-md border border-[#f0c2c2] bg-[#fff5f5] px-3 py-2 text-sm text-[#9b2c2c]">
+          AI replies are paused. New customer messages stay silent so you can
+          answer on WhatsApp.
+        </div>
+      ) : null}
     </div>
   );
 }

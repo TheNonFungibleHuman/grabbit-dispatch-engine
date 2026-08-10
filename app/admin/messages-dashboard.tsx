@@ -104,10 +104,11 @@ export function MessagesDashboard(props: {
   recentThreads: ThreadOps[];
   recentEvents: OpsEvent[];
   updatedAt: string;
+  agentEnabled: boolean;
 }) {
   return (
     <div className="space-y-8">
-      <AdminNav active="messages" />
+      <AdminNav active="messages" agentEnabled={props.agentEnabled} />
 
       <header>
         <h1 className="text-3xl font-semibold tracking-tight">Messages</h1>

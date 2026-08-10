@@ -11,7 +11,10 @@ import type { KnowledgeDocument } from "@/lib/admin/knowledge";
 
 const initialState: AdminActionState = { ok: false };
 
-export function KnowledgeEditor(props: { initial: KnowledgeDocument }) {
+export function KnowledgeEditor(props: {
+  initial: KnowledgeDocument;
+  agentEnabled: boolean;
+}) {
   const [content, setContent] = useState(props.initial.content);
   const [publishState, publishAction, publishing] = useActionState(
     publishKnowledgeAction,
@@ -36,7 +39,7 @@ export function KnowledgeEditor(props: { initial: KnowledgeDocument }) {
 
   return (
     <div className="space-y-6">
-      <AdminNav active="knowledge" />
+      <AdminNav active="knowledge" agentEnabled={props.agentEnabled} />
 
       <header>
         <h1 className="text-3xl font-semibold tracking-tight">Agent context</h1>

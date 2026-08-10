@@ -15,6 +15,7 @@ import {
   readSeedKnowledge,
 } from "@/lib/admin/knowledge";
 import { clearThreadTakeover } from "@/lib/ops/store";
+import { setAgentEnabled } from "@/lib/admin/agent-switch";
 
 export type AdminActionState = {
   ok: boolean;
@@ -114,6 +115,33 @@ export async function clearTakeoverAction(
       ok: false,
       message:
         error instanceof Error ? error.message : "Could not clear takeover",
+    };
+  }
+}
+
+export async function setAgentEnabledAction(
+  _prev: AdminActionState,
+  formData: FormData,
+): Promise<AdminActionState> {
+  if (!(await isAdminAuthed())) {
+    return { ok: false, message: "Session expired. Sign in again." };
+  }
+
+  const enabledRaw = String(formData.get("enabled") ?? "");
+  const enabled = enabledRaw === "true";
+  try {
+    const state = await setAgentEnabled(enabled);
+    return {
+      ok: true,
+      message: state.enabled
+        ? "AI is ON — it will reply to WhatsApp again."
+        : "AI is OFF — it will stay silent so you can take over.",
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      message:
+        error instanceof Error ? error.message : "Could not update AI switch",
     };
   }
 }

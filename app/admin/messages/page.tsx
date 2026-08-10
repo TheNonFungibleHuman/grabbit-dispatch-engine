@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { MessagesDashboard } from "@/app/admin/messages-dashboard";
+import { getAgentSwitchState } from "@/lib/admin/agent-switch";
 import { isAdminAuthed } from "@/lib/admin/auth";
 import { getOpsDashboard } from "@/lib/ops/store";
 
@@ -8,7 +9,10 @@ export default async function AdminMessagesPage() {
     redirect("/admin/login");
   }
 
-  const dashboard = await getOpsDashboard();
+  const [dashboard, agentSwitch] = await Promise.all([
+    getOpsDashboard(),
+    getAgentSwitchState({ bypassMemory: true }),
+  ]);
 
   return (
     <MessagesDashboard
@@ -17,6 +21,7 @@ export default async function AdminMessagesPage() {
       recentThreads={dashboard.recentThreads}
       recentEvents={dashboard.state.recent}
       updatedAt={dashboard.state.updatedAt}
+      agentEnabled={agentSwitch.enabled}
     />
   );
 }
