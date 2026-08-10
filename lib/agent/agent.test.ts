@@ -31,6 +31,8 @@ describe("buildGrabbitSystemInstruction", () => {
     assert.match(prompt, /team will get back/i);
     assert.match(prompt, /Never claim an order\/delivery was placed/i);
     assert.match(prompt, /ok:false means it was NOT placed/i);
+    assert.match(prompt, /Never book or claim an on-demand delivery while availability status is CLOSED/i);
+    assert.match(prompt, /Mauritius time/i);
     assert.match(prompt, /Never break character/i);
   });
 });

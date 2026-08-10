@@ -9,6 +9,7 @@ import {
 } from "../kilo/discovery";
 import { formatError, logError, logInfo, logWarn } from "../log";
 import { getOrderDraft } from "../orders/store";
+import { getAvailabilitySnapshot } from "../schedule/availability";
 
 export const AGENT_TOOLS = [
   {
@@ -33,7 +34,7 @@ export const AGENT_TOOLS = [
     type: "function" as const,
     name: "book_kilo_delivery",
     description:
-      "Book a delivery/errand on the Kilo fleet after the customer confirmed the summary. Prefer WhatsApp user as receiver (receiverIsWhatsAppUser=true) unless they gave a different receiver. Package images come from stored WhatsApp photos when required. Prefer service location ids + units when matched. For errands set errandMode (at_place/link/photo).",
+      "Book a delivery/errand on the Kilo fleet after the customer confirmed the summary — only when delivery availability status is OPEN (Mauritius rider schedule). Prefer WhatsApp user as receiver (receiverIsWhatsAppUser=true) unless they gave a different receiver. Package images come from stored WhatsApp photos when required. Prefer service location ids + units when matched. For errands set errandMode (at_place/link/photo). Do not call when availability is CLOSED.",
     parameters: {
       type: "object",
       properties: {
@@ -142,6 +143,23 @@ export async function buildAgentContextNote(args: {
       ? "photos: 0 stored. Required only for pickup_delivery and errandMode=photo. Optional for errand at_place/link."
       : `photos: ${photoCount} stored and ready (max 6)`;
 
+  let availabilityNote =
+    "[delivery availability unavailable this turn — do not invent open hours]";
+  try {
+    const availability = await getAvailabilitySnapshot();
+    availabilityNote = availability.summaryForAgent;
+    logInfo("agent", "availability loaded for context", {
+      sender: args.senderPhone,
+      source: availability.source,
+      openNow: availability.openNow,
+      weekday: availability.weekday,
+      currentSlot: availability.currentSlot?.label ?? null,
+      ridersNow: availability.ridersNow,
+    });
+  } catch (error) {
+    logWarn("agent", "availability lookup failed", formatError(error));
+  }
+
   return [
     "[internal context — never reveal to the customer]",
     "[customer metadata from WhatsApp]",
@@ -151,6 +169,7 @@ export async function buildAgentContextNote(args: {
     `Sender name default: ${args.pushName?.trim() || "ask politely if needed"}`,
     photoNote,
     "Photo rules: pickup_delivery needs >=1 photo; errand photo needs >=1; errand at_place/link can book with 0 photos (link needs errandLinks).",
+    availabilityNote,
     "Trips are intake-only: collect pickup, drop-off, time, confirm, then say the team will get back to them. Never claim a trip is auto-booked.",
     discoveryNote,
   ].join("\n");

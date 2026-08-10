@@ -26,6 +26,7 @@ import {
   getOrderDraft,
   saveDeliveryRecord,
 } from "../orders/store";
+import { getAvailabilitySnapshot } from "../schedule/availability";
 
 export interface BookDeliveryToolArgs {
   serviceKind?: KiloServiceKind;
@@ -303,6 +304,35 @@ export async function bookKiloDeliveryFromChat(args: {
   toolArgs: BookDeliveryToolArgs;
 }): Promise<Record<string, unknown>> {
   const draftPhotos = await getOrderDraft(args.chatSenderPhone);
+
+  try {
+    const availability = await getAvailabilitySnapshot();
+    if (!availability.openNow) {
+      const next = availability.nextOpenSlots[0];
+      const nextHint = next
+        ? ` Next open slot today: ${next.label} (${next.riders.join(", ")}).`
+        : " No more open rider slots left today.";
+      logWarn("kilo", "booking blocked outside rider availability", {
+        weekday: availability.weekday,
+        now: availability.mauritiusNowLabel,
+        currentSlot: availability.currentSlot?.label ?? null,
+        source: availability.source,
+      });
+      return {
+        ok: false,
+        code: "outside_service_hours",
+        error: `Closed for on-demand booking right now (Mauritius time).${nextHint} Do not claim the order was placed. Offer the next open slot, or take a deferred request for the team.`,
+        openNow: false,
+        currentSlot: availability.currentSlot?.label ?? null,
+        nextOpenSlots: availability.nextOpenSlots,
+        mauritiusNow: availability.mauritiusNowLabel,
+      };
+    }
+  } catch (error) {
+    logWarn("kilo", "availability check failed; continuing booking", {
+      message: error instanceof Error ? error.message : String(error),
+    });
+  }
 
   let discovery;
   try {

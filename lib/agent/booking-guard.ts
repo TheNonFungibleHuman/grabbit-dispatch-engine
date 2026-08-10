@@ -42,6 +42,22 @@ export function customerReplyForFailedBooking(
   }
 
   if (
+    code === "outside_service_hours" ||
+    lower.includes("outside_service_hours") ||
+    lower.includes("closed for on-demand") ||
+    lower.includes("no rider in this slot")
+  ) {
+    const nextMatch = raw.match(
+      /Next open slot today:\s*([^.]+)\./i,
+    );
+    const nextSlot = nextMatch?.[1]?.trim();
+    if (nextSlot) {
+      return `We’re outside rider hours right now. Next open window is ${nextSlot}. Want me to note this for the team for then? 💚`;
+    }
+    return "We’re outside rider hours right now, and there’s no open slot left today. Want me to note this for the team for the next available window? 💚";
+  }
+
+  if (
     fields.includes("packageimages") ||
     lower.includes("packageimages") ||
     lower.includes("package photo") ||

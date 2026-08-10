@@ -51,6 +51,17 @@ describe("booking-guard", () => {
     );
   });
 
+  it("explains closed hours and next slot on outside_service_hours", () => {
+    assert.match(
+      customerReplyForFailedBooking({
+        error:
+          "Closed for on-demand booking right now (Mauritius time). Next open slot today: 5:00 pm -6:00 pm (SHERIF).",
+        code: "outside_service_hours",
+      }),
+      /outside rider hours|5:00 pm -6:00 pm/i,
+    );
+  });
+
   it("detects false booking success wording", () => {
     assert.equal(
       looksLikeFalseBookingSuccess(
