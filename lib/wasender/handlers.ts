@@ -2,6 +2,8 @@ import { processIncomingUserMessage } from "../agent";
 import { isAgentEnabled } from "../admin/agent-switch";
 import { formatError, logError, logInfo, logWarn } from "../log";
 import { recordOpsEvent } from "../ops/store";
+import { appendTranscriptEntry } from "../agent/transcript";
+import { sanitizeWhatsAppText } from "../agent/format";
 import { sendCustomerText } from "./send-tracked";
 import { getSenderPhone } from "./parse";
 import type {
@@ -88,6 +90,12 @@ async function onUserMessage(message: IncomingUserMessage): Promise<void> {
 
   const agentOn = await isAgentEnabled();
   if (!agentOn) {
+    await appendTranscriptEntry(message.sender, {
+      role: "customer",
+      text: message.text || "(media/empty)",
+      messageId: message.messageId,
+      whileAgentDisabled: true,
+    });
     logWarn("wasender", "agent disabled; skipping AI reply (human takeover)", {
       messageId: message.messageId,
       sender: message.sender,
@@ -123,9 +131,17 @@ async function onUserMessage(message: IncomingUserMessage): Promise<void> {
       const to = message.sender.startsWith("+")
         ? message.sender
         : `+${message.sender.replace(/\D/g, "")}`;
+      const text = sanitizeWhatsAppText(
+        "Sorry, I’m having a quick technical hiccup. Please resend your message in a moment and we’ll take care of you.",
+      );
       await sendCustomerText({
         to,
-        text: "Sorry, I’m having a quick technical hiccup. Please resend your message in a moment and we’ll take care of you 💚",
+        text,
+        messageId: message.messageId,
+      });
+      await appendTranscriptEntry(message.sender, {
+        role: "agent",
+        text,
         messageId: message.messageId,
       });
       logWarn("wasender", "sent technical hiccup fallback", {

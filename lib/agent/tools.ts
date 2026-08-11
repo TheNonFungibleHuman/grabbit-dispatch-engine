@@ -11,6 +11,10 @@ import { formatError, logError, logInfo, logWarn } from "../log";
 import { getOrderDraft } from "../orders/store";
 import { getAvailabilitySnapshot } from "../schedule/availability";
 import { getKnowledgeBundle } from "../admin/knowledge";
+import {
+  formatTranscriptForAgent,
+  loadTranscript,
+} from "./transcript";
 
 export const AGENT_TOOLS = [
   {
@@ -35,7 +39,7 @@ export const AGENT_TOOLS = [
     type: "function" as const,
     name: "book_kilo_delivery",
     description:
-      "Book a delivery/errand on the Kilo fleet after the customer confirmed the summary — only when delivery availability status is OPEN (Mauritius rider schedule). Prefer WhatsApp user as receiver (receiverIsWhatsAppUser=true) unless they gave a different receiver. Package images come from stored WhatsApp photos when required. Prefer service location ids + units when matched. For errands set errandMode (at_place/link/photo). Do not call when availability is CLOSED.",
+      "Book a delivery/errand on the Kilo fleet after the customer confirmed the summary — ONLY when delivery availability status is OPEN right now in Mauritius time with a rider in the current slot. Never book for later/tomorrow. Prefer WhatsApp user as receiver (receiverIsWhatsAppUser=true) unless they gave a different receiver. Package images come from stored WhatsApp photos when required. Prefer service location ids + units when matched. For errands set errandMode (at_place/link/photo). Do not call when availability is CLOSED.",
     parameters: {
       type: "object",
       properties: {
@@ -163,14 +167,29 @@ export async function buildAgentContextNote(args: {
 
   let knowledgeRevisionNote =
     "knowledgeRevision: unknown — still follow system knowledge for this turn";
+  let liveKnowledgeBlock =
+    "[live knowledge unavailable this turn — do not invent coverage/policies]";
   try {
     const knowledge = await getKnowledgeBundle();
     knowledgeRevisionNote = [
       `knowledgeRevision: ${knowledge.document.source} ${knowledge.document.updatedAt}`,
-      "If earlier messages in this chat conflict with this revision (especially coverage), follow the revision.",
+      "Hard rule: this live knowledge overrides older chat turns and any stale system memory about coverage, restaurants, templates, or policies.",
+    ].join("\n");
+    liveKnowledgeBlock = [
+      "[LIVE KNOWLEDGE — authoritative for THIS turn]",
+      knowledge.prepared,
+      "[end live knowledge]",
     ].join("\n");
   } catch (error) {
     logWarn("agent", "knowledge revision lookup failed", formatError(error));
+  }
+
+  let transcriptNote = "[no local transcript yet]";
+  try {
+    const transcript = await loadTranscript(args.senderPhone);
+    transcriptNote = formatTranscriptForAgent(transcript);
+  } catch (error) {
+    logWarn("agent", "transcript lookup failed", formatError(error));
   }
 
   return [
@@ -184,8 +203,13 @@ export async function buildAgentContextNote(args: {
     "Photo rules: pickup_delivery needs >=1 photo; errand photo needs >=1; errand at_place/link can book with 0 photos (link needs errandLinks).",
     knowledgeRevisionNote,
     availabilityNote,
+    "Menu help: guide the order in chat. Suggest known restaurants/items from live knowledge and discovery. Never tell the customer to go check an app menu themselves when you can help collect items here. If a curated link exists in discovery, you may use it as a reference while still placing the order here.",
+    "Availability: Mauritius time only. Book via API ONLY while status is OPEN with a rider in the current slot. Never create a Kilo delivery for later/tomorrow.",
+    "Tone: no love/heart emoji. Never restart greeting on short acks (nice/ok/thanks) when history exists.",
     "Trips are intake-only: collect pickup, drop-off, time, confirm, then say the team will get back to them. Never claim a trip is auto-booked.",
+    transcriptNote,
     discoveryNote,
+    liveKnowledgeBlock,
   ].join("\n");
 }
 
@@ -254,12 +278,21 @@ export async function executeAgentTool(args: {
     }
 
     if (args.name === "book_kilo_delivery") {
-      return await bookKiloDeliveryFromChat({
+      const result = await bookKiloDeliveryFromChat({
         chatSenderPhone: args.senderPhone,
         chatPushName: args.pushName,
         messageId: args.messageId,
         toolArgs: asBookArgs(args.toolArguments),
       });
+      if (result.ok === true) {
+        try {
+          const { markTranscriptBookingQuiet } = await import("./transcript");
+          await markTranscriptBookingQuiet(args.senderPhone);
+        } catch (error) {
+          logWarn("agent", "failed to mark booking quiet window", formatError(error));
+        }
+      }
+      return result;
     }
 
     return { ok: false, error: `Unknown tool: ${args.name}` };

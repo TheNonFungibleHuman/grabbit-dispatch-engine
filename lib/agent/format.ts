@@ -22,10 +22,36 @@ export function sanitizeWhatsAppText(raw: string): string {
   text = text.replace(/\s+--\s+/g, ", ");
   text = text.replace(/-{2,}/g, "-");
 
+  // Never send love / heart-style emoji (client preference).
+  text = text.replace(/[\u{1F90D}\u{1F9E1}\u{1F49B}\u{1F49A}\u{1F499}\u{1F49C}\u{1F5A4}\u{1F90E}\u{2764}\u{FE0F}?\u{1F494}\u{1F495}\u{1F496}\u{1F497}\u{1F498}\u{1F49D}\u{1F49E}\u{1F49F}\u{2763}\u{FE0F}?]/gu, "");
+  text = text.replace(/💚/g, "");
+  text = text.replace(/❤️‍🔥/g, "");
+  text = text.replace(/❤️‍🩹/g, "");
+  text = text.replace(/♥️/g, "");
+  text = text.replace(/❤/g, "");
+
   // Tighten whitespace / blank lines for cleaner chats.
   text = text.replace(/[ \t]+\n/g, "\n");
   text = text.replace(/\n{3,}/g, "\n\n");
   text = text.replace(/[ \t]{2,}/g, " ");
+  text = text.replace(/[ \t]+([!?.,])/g, "$1");
 
   return text.trim();
+}
+
+/** Short customer acknowledgements that should not restart intake. */
+export function isShortAcknowledgement(text: string): boolean {
+  const cleaned = text
+    .trim()
+    .toLowerCase()
+    .replace(/[!?.,👋🙏👍👌😊😅]+/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!cleaned || cleaned.length > 40) return false;
+  return (
+    /^(nice|ok|okay|k|kk|cool|great|perfect|thanks|thank you|thank u|thx|ty|noted|alright|all right|got it|sure|yes|yep|yeah|yup|done|cheers|appreciate it|much appreciated)$/i.test(
+      cleaned,
+    ) ||
+    /^(thanks|thank you|thx|ty)\b/.test(cleaned)
+  );
 }

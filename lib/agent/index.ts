@@ -1,9 +1,16 @@
 import { generateAgentReply } from "./gemini";
+import { isShortAcknowledgement, sanitizeWhatsAppText } from "./format";
 import { formatError, logError, logInfo, logWarn } from "../log";
 import { persistIncomingPackageImage } from "../media/wasender";
 import { addPackageImageToDraft } from "../orders/store";
 import { sendCustomerText } from "../wasender/send-tracked";
 import type { IncomingUserMessage } from "../wasender/types";
+import {
+  appendTranscriptEntry,
+  isInQuietWindow,
+  loadTranscript,
+  recentDisabledCustomerMessages,
+} from "./transcript";
 
 function toE164(phone: string): string {
   const digits = phone.replace(/\D/g, "");
@@ -21,6 +28,25 @@ function hasImageMessage(message: IncomingUserMessage): boolean {
   );
 }
 
+async function sendAndRecord(args: {
+  to: string;
+  sender: string;
+  text: string;
+  messageId: string;
+}): Promise<void> {
+  const text = sanitizeWhatsAppText(args.text);
+  await sendCustomerText({
+    to: args.to,
+    text,
+    messageId: args.messageId,
+  });
+  await appendTranscriptEntry(args.sender, {
+    role: "agent",
+    text,
+    messageId: args.messageId,
+  });
+}
+
 /**
  * Run the Grabbit Gemini agent and reply on WhatsApp.
  */
@@ -34,6 +60,12 @@ export async function processIncomingUserMessage(
     to,
     hasText: Boolean(message.text),
     hasImage: hasImageMessage(message),
+  });
+
+  await appendTranscriptEntry(message.sender, {
+    role: "customer",
+    text: message.text || (hasImageMessage(message) ? "(image)" : ""),
+    messageId: message.messageId,
   });
 
   if (hasImageMessage(message)) {
@@ -55,18 +87,20 @@ export async function processIncomingUserMessage(
             messageId: message.messageId,
             pushName: message.pushName,
           });
-          await sendCustomerText({
+          await sendAndRecord({
             to,
+            sender: message.sender,
             text: reply.text,
             messageId: message.messageId,
           });
         } else {
           const name = message.pushName?.trim();
-          await sendCustomerText({
+          await sendAndRecord({
             to,
+            sender: message.sender,
             text: name
-              ? `Got it ${name}. Photo saved (${draft.packageImages.length}/6). Send another if needed, or tell me pickup and drop-off 🙂`
-              : `Got your photo (${draft.packageImages.length}/6). Send another if needed, or tell me the pickup and drop-off details 🙂`,
+              ? `Got it ${name}. Photo saved (${draft.packageImages.length}/6). Send another if needed, or tell me pickup and drop-off.`
+              : `Got your photo (${draft.packageImages.length}/6). Send another if needed, or tell me the pickup and drop-off details.`,
             messageId: message.messageId,
           });
         }
@@ -88,9 +122,10 @@ export async function processIncomingUserMessage(
         messageId: message.messageId,
         ...formatError(error),
       });
-      await sendCustomerText({
+      await sendAndRecord({
         to,
-        text: "I couldn’t save that photo. Please send it again as an image 💚",
+        sender: message.sender,
+        text: "I couldn’t save that photo. Please send it again as an image.",
         messageId: message.messageId,
       });
       return;
@@ -98,12 +133,38 @@ export async function processIncomingUserMessage(
   }
 
   if (!message.text) {
-    await sendCustomerText({
+    await sendAndRecord({
       to,
-      text: "Happy to help. Tell me what you need delivered, or send a package photo to start 💚",
+      sender: message.sender,
+      text: "Happy to help. Tell me what you need delivered, or send a package photo to start.",
       messageId: message.messageId,
     });
     return;
+  }
+
+  // After an order is handled, or right after AI was paused with human coverage,
+  // short acks should not restart the whole intake persona.
+  if (isShortAcknowledgement(message.text)) {
+    try {
+      const transcript = await loadTranscript(message.sender);
+      const hadPauseGap = recentDisabledCustomerMessages(transcript).length > 0;
+      if (isInQuietWindow(transcript) || hadPauseGap) {
+        await sendAndRecord({
+          to,
+          sender: message.sender,
+          text: "Anytime. Ping us when you need the next delivery.",
+          messageId: message.messageId,
+        });
+        logInfo("agent", "brief ack reply (quiet/pause gap)", {
+          messageId: message.messageId,
+          quiet: isInQuietWindow(transcript),
+          hadPauseGap,
+        });
+        return;
+      }
+    } catch (error) {
+      logWarn("agent", "short-ack path failed; continuing normal reply", formatError(error));
+    }
   }
 
   const reply = await generateAgentReply({
@@ -113,8 +174,9 @@ export async function processIncomingUserMessage(
     pushName: message.pushName,
   });
 
-  await sendCustomerText({
+  await sendAndRecord({
     to,
+    sender: message.sender,
     text: reply.text,
     messageId: message.messageId,
   });

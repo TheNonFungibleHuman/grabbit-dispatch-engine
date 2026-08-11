@@ -26,7 +26,7 @@ import {
   getOrderDraft,
   saveDeliveryRecord,
 } from "../orders/store";
-import { getAvailabilitySnapshot } from "../schedule/availability";
+import { getAvailabilitySnapshot, clearScheduleCache } from "../schedule/availability";
 
 export interface BookDeliveryToolArgs {
   serviceKind?: KiloServiceKind;
@@ -306,16 +306,17 @@ export async function bookKiloDeliveryFromChat(args: {
   const draftPhotos = await getOrderDraft(args.chatSenderPhone);
 
   try {
+    clearScheduleCache();
     const availability = await getAvailabilitySnapshot();
     if (!availability.openNow) {
       const next = availability.nextOpenSlots[0];
       const tomorrow = availability.upcomingDays.find((day) => day.daysAhead === 1);
       const tomorrowFirst = tomorrow?.openSlots[0];
       const nextHint = next
-        ? ` Next open slot today: ${next.label} (${next.riders.join(", ")}).`
+        ? ` Next open Mauritius slot today: ${next.label} (${next.riders.join(", ")}).`
         : tomorrowFirst
-          ? ` No more open slots today. Next open: tomorrow (${tomorrow.weekday}) ${tomorrowFirst.label} (${tomorrowFirst.riders.join(", ")}).`
-          : " No more open rider slots left today.";
+          ? ` No open slots left today. First open tomorrow (${tomorrow.weekday}): ${tomorrowFirst.label} (${tomorrowFirst.riders.join(", ")}). Tell them to come back then. Do NOT create a Kilo delivery and do NOT take the order as placed for later.`
+          : " No open rider slots left today. Do NOT create a Kilo delivery.";
       logWarn("kilo", "booking blocked outside rider availability", {
         weekday: availability.weekday,
         now: availability.mauritiusNowLabel,
@@ -325,17 +326,24 @@ export async function bookKiloDeliveryFromChat(args: {
       return {
         ok: false,
         code: "outside_service_hours",
-        error: `Closed for on-demand booking right now (Mauritius time).${nextHint} Do not claim the order was placed. Offer the next open slot, or take a deferred request for the team.`,
+        error: `Closed for on-demand booking right now (Mauritius time).${nextHint} Never claim the order was placed. Never book for a future slot via API.`,
         openNow: false,
         currentSlot: availability.currentSlot?.label ?? null,
         nextOpenSlots: availability.nextOpenSlots,
+        upcomingDays: availability.upcomingDays,
         mauritiusNow: availability.mauritiusNowLabel,
       };
     }
   } catch (error) {
-    logWarn("kilo", "availability check failed; continuing booking", {
+    logWarn("kilo", "availability check failed; refusing booking", {
       message: error instanceof Error ? error.message : String(error),
     });
+    return {
+      ok: false,
+      code: "availability_unavailable",
+      error:
+        "Could not verify Mauritius rider availability right now. Do NOT create a delivery. Ask the customer to try again shortly.",
+    };
   }
 
   let discovery;

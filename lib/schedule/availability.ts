@@ -28,7 +28,7 @@ export interface AvailabilitySnapshot extends AvailabilityEvaluation {
   source: "remote" | "local";
 }
 
-const CACHE_TTL_MS = 2 * 60 * 1000;
+const CACHE_TTL_MS = 30 * 1000;
 let cache: {
   fetchedAt: number;
   slots: ScheduleSlot[];

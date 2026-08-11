@@ -38,23 +38,29 @@ export function customerReplyForFailedBooking(
     lower.includes("image hosts configured") ||
     lower.includes("cdn/media hostname")
   ) {
-    return "One sec, having a small hiccup placing this on our side. Please try again in a moment 💚";
+    return "One sec, having a small hiccup placing this on our side. Please try again in a moment.";
   }
 
   if (
     code === "outside_service_hours" ||
+    code === "availability_unavailable" ||
     lower.includes("outside_service_hours") ||
+    lower.includes("availability_unavailable") ||
     lower.includes("closed for on-demand") ||
-    lower.includes("no rider in this slot")
+    lower.includes("no rider in this slot") ||
+    lower.includes("could not verify mauritius rider availability")
   ) {
     const nextMatch = raw.match(
-      /Next open slot today:\s*([^.]+)\./i,
+      /Next open Mauritius slot today:\s*([^.]+)\./i,
     );
-    const nextSlot = nextMatch?.[1]?.trim();
+    const tomorrowMatch = raw.match(
+      /First open tomorrow \([^)]+\):\s*([^.]+)\./i,
+    );
+    const nextSlot = nextMatch?.[1]?.trim() || tomorrowMatch?.[1]?.trim();
     if (nextSlot) {
-      return `We’re outside rider hours right now. Next open window is ${nextSlot}. Want me to note this for the team for then? 💚`;
+      return `We’re outside rider hours right now (Mauritius time). Next open window is ${nextSlot}. Please come back then and we’ll place it.`;
     }
-    return "We’re outside rider hours right now, and there’s no open slot left today. Want me to note this for the team for the next available window? 💚";
+    return "We’re outside rider hours right now (Mauritius time). Please try again in the next open slot and we’ll place it then.";
   }
 
   if (
@@ -64,7 +70,7 @@ export function customerReplyForFailedBooking(
     lower.includes("reference photo") ||
     (/\bphotos?\b/.test(lower) && !lower.includes("image host"))
   ) {
-    return "Almost there. Please send a clear photo of the order/package, then I’ll place it right away 💚";
+    return "Almost there. Please send a clear photo of the order/package, then I’ll place it right away.";
   }
 
   if (

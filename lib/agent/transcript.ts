@@ -1,0 +1,141 @@
+import { readJson, writeJson } from "../blob/json-store";
+import { normalizeSender } from "./sessions";
+
+export type TranscriptRole = "customer" | "agent" | "note";
+
+export interface TranscriptEntry {
+  at: string;
+  role: TranscriptRole;
+  text: string;
+  /** True when AI kill switch was off (human covering WhatsApp). */
+  whileAgentDisabled?: boolean;
+  messageId?: string;
+}
+
+export interface ChatTranscript {
+  senderPhone: string;
+  updatedAt: string;
+  /** Last successful booking / handoff quiet window */
+  quietUntil?: string;
+  lastBookingAt?: string;
+  entries: TranscriptEntry[];
+}
+
+const MAX_ENTRIES = 40;
+
+function transcriptPath(sender: string): string {
+  return `grabbit/sessions/${normalizeSender(sender)}/transcript.json`;
+}
+
+export async function loadTranscript(sender: string): Promise<ChatTranscript> {
+  const phone = normalizeSender(sender);
+  const stored = await readJson<ChatTranscript>(transcriptPath(phone));
+  if (stored?.entries && Array.isArray(stored.entries)) {
+    return {
+      senderPhone: phone,
+      updatedAt: stored.updatedAt ?? new Date(0).toISOString(),
+      quietUntil: stored.quietUntil,
+      lastBookingAt: stored.lastBookingAt,
+      entries: stored.entries.slice(-MAX_ENTRIES),
+    };
+  }
+  return {
+    senderPhone: phone,
+    updatedAt: new Date(0).toISOString(),
+    entries: [],
+  };
+}
+
+async function saveTranscript(transcript: ChatTranscript): Promise<void> {
+  await writeJson(transcriptPath(transcript.senderPhone), {
+    ...transcript,
+    entries: transcript.entries.slice(-MAX_ENTRIES),
+    updatedAt: new Date().toISOString(),
+  });
+}
+
+export async function appendTranscriptEntry(
+  sender: string,
+  entry: Omit<TranscriptEntry, "at"> & { at?: string },
+): Promise<ChatTranscript> {
+  const transcript = await loadTranscript(sender);
+  transcript.entries.push({
+    at: entry.at ?? new Date().toISOString(),
+    role: entry.role,
+    text: entry.text.slice(0, 500),
+    whileAgentDisabled: entry.whileAgentDisabled,
+    messageId: entry.messageId,
+  });
+  transcript.updatedAt = new Date().toISOString();
+  await saveTranscript(transcript);
+  return transcript;
+}
+
+export async function markTranscriptBookingQuiet(
+  sender: string,
+  quietMinutes = 90,
+): Promise<void> {
+  const transcript = await loadTranscript(sender);
+  const now = Date.now();
+  transcript.lastBookingAt = new Date(now).toISOString();
+  transcript.quietUntil = new Date(now + quietMinutes * 60_000).toISOString();
+  transcript.updatedAt = new Date().toISOString();
+  await saveTranscript(transcript);
+}
+
+export function isInQuietWindow(transcript: ChatTranscript, now = Date.now()): boolean {
+  if (!transcript.quietUntil) return false;
+  const until = Date.parse(transcript.quietUntil);
+  return Number.isFinite(until) && until > now;
+}
+
+export function recentDisabledCustomerMessages(
+  transcript: ChatTranscript,
+  limit = 12,
+): TranscriptEntry[] {
+  const disabled = transcript.entries.filter(
+    (entry) => entry.role === "customer" && entry.whileAgentDisabled,
+  );
+  return disabled.slice(-limit);
+}
+
+export function formatTranscriptForAgent(
+  transcript: ChatTranscript,
+  opts?: { includeDisabledGap?: boolean },
+): string {
+  const lines: string[] = ["[recent WhatsApp thread for this number only]"];
+
+  const gap = recentDisabledCustomerMessages(transcript);
+  if (opts?.includeDisabledGap !== false && gap.length > 0) {
+    lines.push(
+      "[while AI was OFF — customer still messaged; a human may have replied on WhatsApp]",
+      ...gap.map(
+        (entry) =>
+          `• customer (${entry.at.slice(11, 16)} UTC): ${entry.text || "(media/empty)"}`,
+      ),
+      "Hard rule: do NOT greet as a new chat. Do NOT restart intake. Continue naturally from this thread.",
+    );
+  }
+
+  const recent = transcript.entries.slice(-16);
+  if (recent.length) {
+    lines.push("[latest turns]");
+    for (const entry of recent) {
+      const tag =
+        entry.role === "customer"
+          ? entry.whileAgentDisabled
+            ? "customer(paused-AI)"
+            : "customer"
+          : entry.role;
+      lines.push(`• ${tag}: ${entry.text || "(media/empty)"}`);
+    }
+  }
+
+  if (isInQuietWindow(transcript)) {
+    lines.push(
+      "[quiet window] A delivery/order was recently handled. If they only say thanks/ok/nice, reply in ONE short line. Do not restart greeting or sales intake unless they ask for a new order.",
+    );
+  }
+
+  return lines.join("\n");
+}

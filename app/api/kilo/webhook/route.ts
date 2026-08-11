@@ -9,6 +9,7 @@ import {
   verifyKiloSignature,
   type KiloWebhookPayload,
 } from "@/lib/kilo";
+import { sanitizeWhatsAppText } from "@/lib/agent/format";
 import { sendCustomerText } from "@/lib/wasender/send-tracked";
 
 export const runtime = "nodejs";
@@ -121,7 +122,7 @@ export async function POST(request: Request) {
 
       await sendCustomerText({
         to,
-        text,
+        text: sanitizeWhatsAppText(text),
         messageId: delivery.id,
       });
       console.info("[kilo] status WhatsApp sent", {

@@ -9,7 +9,7 @@ export { prepareKnowledgeForPrompt } from "./knowledge-format";
 export const KNOWLEDGE_BLOB_PATH = "grabbit/admin/knowledge.json";
 
 /** How long a warm instance may reuse knowledge before re-reading Blob. */
-const KNOWLEDGE_FRESH_TTL_MS = 2_000;
+const KNOWLEDGE_FRESH_TTL_MS = 0;
 
 export interface KnowledgeDocument {
   content: string;

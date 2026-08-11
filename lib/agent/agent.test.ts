@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, it } from "node:test";
-import { sanitizeWhatsAppText } from "./format.ts";
+import { sanitizeWhatsAppText, isShortAcknowledgement } from "./format.ts";
 import { prepareKnowledgeForPrompt } from "../admin/knowledge-format.ts";
 import {
   clearPreviousInteractionId,
@@ -42,10 +42,9 @@ describe("buildGrabbitSystemInstruction", () => {
       promptSource,
       /Never book or claim an on-demand delivery while availability status is CLOSED/i,
     );
-    assert.match(promptSource, /Live knowledge revision/i);
-    assert.match(promptSource, /follow THIS turn's knowledge/i);
-    assert.match(promptSource, /Mauritius time/i);
-    assert.match(promptSource, /Never break character/i);
+    assert.match(promptSource, /Never use love\/heart emoji/i);
+    assert.match(promptSource, /Do NOT create a Kilo delivery for later/i);
+    assert.match(promptSource, /Do NOT send them away to check a menu/i);
 
     assert.match(promptSource, /Triolet/);
     assert.match(knowledge, /Pamplemousses/);
@@ -67,6 +66,22 @@ describe("sanitizeWhatsAppText", () => {
       sanitizeWhatsAppText("Thanks -- we got it — pending"),
       "Thanks, we got it, pending",
     );
+  });
+
+  it("strips love and heart emoji", () => {
+    assert.equal(
+      sanitizeWhatsAppText("Thanks for choosing Grabbit 💚"),
+      "Thanks for choosing Grabbit",
+    );
+    assert.doesNotMatch(sanitizeWhatsAppText("Done ❤❤️"), /❤|💚|❤️/);
+  });
+});
+
+describe("isShortAcknowledgement", () => {
+  it("detects short acks that should not restart intake", () => {
+    assert.equal(isShortAcknowledgement("nice"), true);
+    assert.equal(isShortAcknowledgement("thanks!"), true);
+    assert.equal(isShortAcknowledgement("I want KFC Triolet"), false);
   });
 });
 
