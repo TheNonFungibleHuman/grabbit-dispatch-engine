@@ -14,6 +14,7 @@ const initialState: AdminActionState = { ok: false };
 export function KnowledgeEditor(props: {
   initial: KnowledgeDocument;
   agentEnabled: boolean;
+  scheduleSummary: string;
 }) {
   const [content, setContent] = useState(props.initial.content);
   const [publishState, publishAction, publishing] = useActionState(
@@ -39,7 +40,11 @@ export function KnowledgeEditor(props: {
 
   return (
     <div className="space-y-6">
-      <AdminNav active="knowledge" agentEnabled={props.agentEnabled} />
+      <AdminNav
+        active="knowledge"
+        agentEnabled={props.agentEnabled}
+        scheduleSummary={props.scheduleSummary}
+      />
 
       <header>
         <h1 className="text-3xl font-semibold tracking-tight">Agent context</h1>

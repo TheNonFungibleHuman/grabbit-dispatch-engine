@@ -5,6 +5,7 @@ import { useActionState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import {
   logoutAdminAction,
+  refreshScheduleAction,
   setAgentEnabledAction,
   type AdminActionState,
 } from "@/app/admin/actions";
@@ -69,9 +70,55 @@ function AgentKillSwitch(props: { enabled: boolean }) {
   );
 }
 
+function ScheduleRefresh(props: { summary: string }) {
+  const router = useRouter();
+  const [state, action, pending] = useActionState(
+    refreshScheduleAction,
+    initialState,
+  );
+
+  useEffect(() => {
+    if (state.ok) router.refresh();
+  }, [state.ok, router]);
+
+  return (
+    <div className="rounded-xl border border-[#d7dfd1] bg-white px-4 py-3">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
+          <p className="text-sm font-semibold text-[#14201a]">
+            Rider schedule (Mauritius)
+          </p>
+          <p className="mt-1 text-xs leading-5 text-[#4b5a50]">
+            {props.summary}
+          </p>
+        </div>
+        <form action={action}>
+          <button
+            type="submit"
+            disabled={pending}
+            className="rounded-md border border-[#c9d2c6] bg-[#f3f5f1] px-3 py-2 text-sm font-semibold text-[#14201a] hover:bg-[#eef2ea] disabled:opacity-60"
+          >
+            {pending ? "Fetching Sheet…" : "Refresh schedule"}
+          </button>
+        </form>
+      </div>
+      {state.message ? (
+        <p
+          className={`mt-3 text-xs leading-5 ${
+            state.ok ? "text-[#14532d]" : "text-[#9b2c2c]"
+          }`}
+        >
+          {state.message}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
 export function AdminNav(props: {
   active: "knowledge" | "messages";
   agentEnabled: boolean;
+  scheduleSummary: string;
 }) {
   const linkClass = (id: "knowledge" | "messages") =>
     [
@@ -107,6 +154,9 @@ export function AdminNav(props: {
           </form>
         </div>
       </div>
+
+      <ScheduleRefresh summary={props.scheduleSummary} />
+
       {!props.agentEnabled ? (
         <div className="rounded-md border border-[#f0c2c2] bg-[#fff5f5] px-3 py-2 text-sm text-[#9b2c2c]">
           AI replies are paused. New customer messages stay silent so you can

@@ -16,6 +16,10 @@ import {
 } from "@/lib/admin/knowledge";
 import { clearThreadTakeover } from "@/lib/ops/store";
 import { setAgentEnabled } from "@/lib/admin/agent-switch";
+import {
+  refreshScheduleFromSheet,
+  summarizeAvailabilityForAdmin,
+} from "@/lib/schedule/availability";
 
 export type AdminActionState = {
   ok: boolean;
@@ -142,6 +146,31 @@ export async function setAgentEnabledAction(
       ok: false,
       message:
         error instanceof Error ? error.message : "Could not update AI switch",
+    };
+  }
+}
+
+export async function refreshScheduleAction(
+  _prev: AdminActionState,
+  _formData: FormData,
+): Promise<AdminActionState> {
+  if (!(await isAdminAuthed())) {
+    return { ok: false, message: "Session expired. Sign in again." };
+  }
+
+  try {
+    const snap = await refreshScheduleFromSheet();
+    return {
+      ok: true,
+      message: `Schedule refreshed from Sheet. ${summarizeAvailabilityForAdmin(snap)}`,
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      message:
+        error instanceof Error
+          ? `Schedule refresh failed: ${error.message}`
+          : "Schedule refresh failed",
     };
   }
 }

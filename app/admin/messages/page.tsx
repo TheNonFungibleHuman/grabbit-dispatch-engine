@@ -3,15 +3,20 @@ import { MessagesDashboard } from "@/app/admin/messages-dashboard";
 import { getAgentSwitchState } from "@/lib/admin/agent-switch";
 import { isAdminAuthed } from "@/lib/admin/auth";
 import { getOpsDashboard } from "@/lib/ops/store";
+import {
+  getAvailabilitySnapshot,
+  summarizeAvailabilityForAdmin,
+} from "@/lib/schedule/availability";
 
 export default async function AdminMessagesPage() {
   if (!(await isAdminAuthed())) {
     redirect("/admin/login");
   }
 
-  const [dashboard, agentSwitch] = await Promise.all([
+  const [dashboard, agentSwitch, schedule] = await Promise.all([
     getOpsDashboard(),
     getAgentSwitchState({ bypassMemory: true }),
+    getAvailabilitySnapshot(),
   ]);
 
   return (
@@ -22,6 +27,7 @@ export default async function AdminMessagesPage() {
       recentEvents={dashboard.state.recent}
       updatedAt={dashboard.state.updatedAt}
       agentEnabled={agentSwitch.enabled}
+      scheduleSummary={summarizeAvailabilityForAdmin(schedule)}
     />
   );
 }

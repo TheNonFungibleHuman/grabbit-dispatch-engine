@@ -105,10 +105,15 @@ export function MessagesDashboard(props: {
   recentEvents: OpsEvent[];
   updatedAt: string;
   agentEnabled: boolean;
+  scheduleSummary: string;
 }) {
   return (
     <div className="space-y-8">
-      <AdminNav active="messages" agentEnabled={props.agentEnabled} />
+      <AdminNav
+        active="messages"
+        agentEnabled={props.agentEnabled}
+        scheduleSummary={props.scheduleSummary}
+      />
 
       <header>
         <h1 className="text-3xl font-semibold tracking-tight">Messages</h1>
