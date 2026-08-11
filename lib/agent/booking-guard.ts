@@ -58,9 +58,9 @@ export function customerReplyForFailedBooking(
     );
     const nextSlot = nextMatch?.[1]?.trim() || tomorrowMatch?.[1]?.trim();
     if (nextSlot) {
-      return `We’re outside rider hours right now (Mauritius time). Next open window is ${nextSlot}. Please come back then and we’ll place it.`;
+      return `We’re outside rider hours right now (Mauritius time). Next open window is ${nextSlot}. Please come back then and ask us to place the order. Nothing is placed until then.`;
     }
-    return "We’re outside rider hours right now (Mauritius time). Please try again in the next open slot and we’ll place it then.";
+    return "We’re outside rider hours right now (Mauritius time). Please come back in the next open slot and ask us to place the order. Nothing is placed until then.";
   }
 
   if (
@@ -166,9 +166,32 @@ export function customerReplyForFailedBooking(
 export function looksLikeFalseBookingSuccess(text: string): boolean {
   const lower = text.toLowerCase();
   return (
-    /\b(order|delivery|booking)\b/.test(lower) &&
-    /\b(received|placed|booked|confirmed|on (its|the) way|rider assigned)\b/.test(
+    (/\b(order|delivery|booking)\b/.test(lower) &&
+      /\b(received|placed|booked|confirmed|on (its|the) way|rider assigned)\b/.test(
+        lower,
+      )) ||
+    /\b(request|order|delivery)\b.{0,40}\b(logged|queued|saved for (our )?team)\b/.test(
+      lower,
+    ) ||
+    /\blogged with our team\b/.test(lower) ||
+    /\bteam will (process|check|handle|confirm) (your )?(order|delivery|request)\b/.test(
       lower,
     )
   );
+}
+
+/** Closed-hours overclaim: sounds like something was queued without a real create. */
+export function looksLikeFalseDeferredOrderPromise(text: string): boolean {
+  const lower = text.toLowerCase();
+  return (
+    looksLikeFalseBookingSuccess(text) ||
+    (/\b(tomorrow|later|next (open )?slot)\b/.test(lower) &&
+      /\b(logged|queued|process|we'll (handle|take care)|we will (handle|take care)|noted your (order|request))\b/.test(
+        lower,
+      ))
+  );
+}
+
+export function closedHoursComeBackReply(): string {
+  return "We can only place deliveries during open rider hours (Mauritius time). Nothing is placed until then, and the team won’t pick this up overnight. Please message us again in the next open slot and say you want to place the order.";
 }

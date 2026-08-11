@@ -316,7 +316,9 @@ export function evaluateAvailability(
     "- If asked about tomorrow / another day, answer ONLY from that day's open slots above and always include the exact time slots.",
     "- A day can have riders at some times and none at others (example: tomorrow morning may be closed while midday/evening is open).",
     "- Never say a day is generally available without listing the open time slots.",
-    "- Do NOT accept/book on-demand delivery while status is CLOSED. Offer the next concrete open slot (today first, else tomorrow's first open slot) and take a deferred request if needed.",
+    "- When status is CLOSED: HARD STOP delivery intake. Answer menus/coverage/hours only. Tell them to come back in an open Mauritius slot to place the order.",
+    "- When CLOSED: never say the order is logged, queued, saved for the team, or will be processed later. Nothing is real until a delivery is created while OPEN.",
+    "- Do NOT accept/book on-demand delivery while status is CLOSED. Do not create future-slot deliveries.",
   ].filter(Boolean);
 
   return {

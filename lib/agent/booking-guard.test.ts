@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 import {
   customerReplyForFailedBooking,
   looksLikeFalseBookingSuccess,
+  looksLikeFalseDeferredOrderPromise,
 } from "./booking-guard.ts";
 
 describe("booking-guard", () => {
@@ -72,6 +73,15 @@ describe("booking-guard", () => {
     assert.equal(
       looksLikeFalseBookingSuccess("Please send a package photo first 🙂"),
       false,
+    );
+  });
+
+  it("detects false deferred / logged-for-tomorrow promises", () => {
+    assert.equal(
+      looksLikeFalseDeferredOrderPromise(
+        "Yes, your request has been logged with our team for tomorrow between 1:00 pm - 2:00 pm!",
+      ),
+      true,
     );
   });
 });

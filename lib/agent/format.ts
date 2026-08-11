@@ -39,7 +39,9 @@ export function sanitizeWhatsAppText(raw: string): string {
   return text.trim();
 }
 
-/** Short customer acknowledgements that should not restart intake. */
+/** Short customer acknowledgements that should not restart intake.
+ * Do NOT include confirmation words like yes/sure — those are used mid-order.
+ */
 export function isShortAcknowledgement(text: string): boolean {
   const cleaned = text
     .trim()
@@ -49,9 +51,8 @@ export function isShortAcknowledgement(text: string): boolean {
     .trim();
   if (!cleaned || cleaned.length > 40) return false;
   return (
-    /^(nice|ok|okay|k|kk|cool|great|perfect|thanks|thank you|thank u|thx|ty|noted|alright|all right|got it|sure|yes|yep|yeah|yup|done|cheers|appreciate it|much appreciated)$/i.test(
+    /^(nice|ok|okay|k|kk|cool|great|perfect|thanks|thank you|thank u|thx|ty|noted|cheers|appreciate it|much appreciated)$/i.test(
       cleaned,
-    ) ||
-    /^(thanks|thank you|thx|ty)\b/.test(cleaned)
+    ) || /^(thanks|thank you|thx|ty)\b/.test(cleaned)
   );
 }

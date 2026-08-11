@@ -35,7 +35,8 @@ describe("buildGrabbitSystemInstruction", () => {
     assert.match(promptSource, /match_service_location/);
     assert.match(promptSource, /Never mention Kilo/i);
     assert.match(promptSource, /Trip \(passenger ride\)/i);
-    assert.match(promptSource, /team will get back/i);
+    assert.match(promptSource, /reception only/i);
+    assert.match(promptSource, /HARD STOP on delivery intake/i);
     assert.match(promptSource, /Never claim an order\/delivery was placed/i);
     assert.match(promptSource, /ok:false means it was NOT placed/i);
     assert.match(
@@ -43,8 +44,9 @@ describe("buildGrabbitSystemInstruction", () => {
       /Never book or claim an on-demand delivery while availability status is CLOSED/i,
     );
     assert.match(promptSource, /Never use love\/heart emoji/i);
-    assert.match(promptSource, /Do NOT create a Kilo delivery for later/i);
-    assert.match(promptSource, /Do NOT send them away to check a menu/i);
+    assert.match(promptSource, /come back during an open slot/i);
+    assert.match(promptSource, /menus are info-only/i);
+    assert.match(promptSource, /Never break character/i);
 
     assert.match(promptSource, /Triolet/);
     assert.match(knowledge, /Pamplemousses/);
@@ -81,6 +83,7 @@ describe("isShortAcknowledgement", () => {
   it("detects short acks that should not restart intake", () => {
     assert.equal(isShortAcknowledgement("nice"), true);
     assert.equal(isShortAcknowledgement("thanks!"), true);
+    assert.equal(isShortAcknowledgement("yes"), false);
     assert.equal(isShortAcknowledgement("I want KFC Triolet"), false);
   });
 });

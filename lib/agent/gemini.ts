@@ -1,7 +1,11 @@
 import { GoogleGenAI } from "@google/genai";
 import { formatError, logError, logInfo, logWarn } from "../log";
-import { customerReplyForFailedBooking } from "./booking-guard";
-import type { BookingFailureDetails } from "./booking-guard";
+import {
+  closedHoursComeBackReply,
+  customerReplyForFailedBooking,
+  looksLikeFalseDeferredOrderPromise,
+  type BookingFailureDetails,
+} from "./booking-guard";
 import { sanitizeWhatsAppText } from "./format";
 import {
   buildFunctionResultInput,
@@ -80,6 +84,7 @@ async function runToolRound(args: {
 }): Promise<{
   interaction: InteractionLike;
   bookingFailure: BookingFailureDetails | null;
+  bookingSucceeded: boolean;
 } | null> {
   const calls = getFunctionCalls(args.interaction);
   if (calls.length === 0) {
@@ -112,6 +117,7 @@ async function runToolRound(args: {
   });
 
   let bookingFailure: BookingFailureDetails | null = null;
+  let bookingSucceeded = false;
   const toolResults = [];
   for (const call of calls) {
     const result = await executeAgentTool({
@@ -130,27 +136,31 @@ async function runToolRound(args: {
       preview: JSON.stringify(result).slice(0, 400),
     });
 
-    if (call.name === "book_kilo_delivery" && !ok) {
-      const error =
-        typeof (result as { error?: unknown }).error === "string"
-          ? (result as { error: string }).error
-          : "Booking failed";
-      const fieldErrors =
-        result &&
-        typeof result === "object" &&
-        "fieldErrors" in result &&
-        result.fieldErrors &&
-        typeof result.fieldErrors === "object"
-          ? (result.fieldErrors as Record<string, string[]>)
-          : undefined;
-      const code =
-        result &&
-        typeof result === "object" &&
-        "code" in result &&
-        typeof (result as { code?: unknown }).code === "string"
-          ? (result as { code: string }).code
-          : undefined;
-      bookingFailure = { error, fieldErrors, code };
+    if (call.name === "book_kilo_delivery") {
+      if (ok) {
+        bookingSucceeded = true;
+      } else {
+        const error =
+          typeof (result as { error?: unknown }).error === "string"
+            ? (result as { error: string }).error
+            : "Booking failed";
+        const fieldErrors =
+          result &&
+          typeof result === "object" &&
+          "fieldErrors" in result &&
+          result.fieldErrors &&
+          typeof result.fieldErrors === "object"
+            ? (result.fieldErrors as Record<string, string[]>)
+            : undefined;
+        const code =
+          result &&
+          typeof result === "object" &&
+          "code" in result &&
+          typeof (result as { code?: unknown }).code === "string"
+            ? (result as { code: string }).code
+            : undefined;
+        bookingFailure = { error, fieldErrors, code };
+      }
     }
 
     toolResults.push(
@@ -175,7 +185,7 @@ async function runToolRound(args: {
     ...summarizeInteraction(next),
   });
 
-  return { interaction: next, bookingFailure };
+  return { interaction: next, bookingFailure, bookingSucceeded };
 }
 
 /**
@@ -245,6 +255,7 @@ export async function generateAgentReply(
   });
 
   let bookingFailure: BookingFailureDetails | null = null;
+  let bookingSucceeded = false;
 
   for (let round = 0; round < MAX_TOOL_ROUNDS; round += 1) {
     try {
@@ -261,6 +272,9 @@ export async function generateAgentReply(
       interaction = next.interaction;
       if (next.bookingFailure) {
         bookingFailure = next.bookingFailure;
+      }
+      if (next.bookingSucceeded) {
+        bookingSucceeded = true;
       }
     } catch (error) {
       logError("agent", "gemini tool-followup failed", error);
@@ -309,6 +323,9 @@ export async function generateAgentReply(
         if (next.bookingFailure) {
           bookingFailure = next.bookingFailure;
         }
+        if (next.bookingSucceeded) {
+          bookingSucceeded = true;
+        }
       }
 
       interaction = retryInteraction;
@@ -323,6 +340,18 @@ export async function generateAgentReply(
     logWarn("agent", "overriding reply after failed booking", {
       messageId: input.messageId,
       bookingFailure,
+      modelReplyPreview: text.slice(0, 160),
+      safeReplyPreview: safeText.slice(0, 160),
+    });
+    text = safeText;
+  } else if (
+    !bookingSucceeded &&
+    text &&
+    looksLikeFalseDeferredOrderPromise(text)
+  ) {
+    const safeText = closedHoursComeBackReply();
+    logWarn("agent", "overriding false deferred/logged order promise", {
+      messageId: input.messageId,
       modelReplyPreview: text.slice(0, 160),
       safeReplyPreview: safeText.slice(0, 160),
     });
