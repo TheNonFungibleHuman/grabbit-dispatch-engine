@@ -4,8 +4,12 @@ import {
   updateDeliveryRecordStatus,
 } from "@/lib/orders/store";
 import {
+  extractKiloWebhook,
   getKiloWebhookSecret,
+  isOtpIssuedEvent,
+  resolveWebhookNotifyPhone,
   statusMessageForCustomer,
+  toWhatsAppE164,
   verifyKiloSignature,
   type KiloWebhookPayload,
 } from "@/lib/kilo";
@@ -13,35 +17,6 @@ import { sanitizeWhatsAppText } from "@/lib/agent/format";
 import { sendCustomerText } from "@/lib/wasender/send-tracked";
 
 export const runtime = "nodejs";
-
-function extractDelivery(payload: KiloWebhookPayload): {
-  id?: string;
-  status?: string;
-  accessCode?: string;
-} {
-  const delivery =
-    payload.data?.object ??
-    payload.delivery ??
-    (payload.data &&
-    typeof payload.data === "object" &&
-    "delivery" in payload.data
-      ? (payload.data as { delivery?: { id?: string; status?: string; access_code?: string | null } })
-          .delivery
-      : undefined);
-
-  if (!delivery) {
-    return {};
-  }
-
-  return {
-    id: typeof delivery.id === "string" ? delivery.id : undefined,
-    status: typeof delivery.status === "string" ? delivery.status : undefined,
-    accessCode:
-      typeof delivery.access_code === "string"
-        ? delivery.access_code
-        : undefined,
-  };
-}
 
 export async function GET() {
   return NextResponse.json({
@@ -54,6 +29,9 @@ export async function GET() {
 /**
  * Kilo Business webhook receiver.
  * Configure: https://grabbit-whatsapp-agent.vercel.app/api/kilo/webhook
+ *
+ * Status + OTP WhatsApp sends run here independently of the admin AI kill switch.
+ * When AI is off, inbound chat is quiet, but OTP (`delivery.otp_issued`) still goes out.
  */
 export async function POST(request: Request) {
   let secret: string;
@@ -89,46 +67,62 @@ export async function POST(request: Request) {
 
   after(async () => {
     try {
-      const delivery = extractDelivery(payload);
-      if (!delivery.id) {
+      const extracted = extractKiloWebhook(payload);
+      if (!extracted.deliveryId) {
         console.warn("[kilo] webhook missing delivery id", { event });
+        return;
+      }
+
+      if (isOtpIssuedEvent(event) && !extracted.otp?.code) {
+        console.warn("[kilo] otp_issued without data.otp.code — not inventing", {
+          deliveryId: extracted.deliveryId,
+          event,
+        });
         return;
       }
 
       const record =
         (await updateDeliveryRecordStatus(
-          delivery.id,
-          delivery.status ?? event,
-        )) ?? (await getDeliveryRecord(delivery.id));
+          extracted.deliveryId,
+          extracted.status ?? event,
+        )) ?? (await getDeliveryRecord(extracted.deliveryId));
 
-      if (!record?.senderPhone) {
-        console.warn("[kilo] no local delivery record for webhook", {
-          deliveryId: delivery.id,
+      const deliveryObject = payload.data?.object ?? payload.delivery;
+      const notifyPhone = resolveWebhookNotifyPhone({
+        otpReceiverPhone: extracted.otp?.receiverPhone,
+        recordSenderPhone: record?.senderPhone,
+        deliveryReceiverPhone: deliveryObject?.customer?.receiver_phone,
+        deliverySenderPhone: deliveryObject?.customer?.sender_phone,
+      });
+
+      if (!notifyPhone) {
+        console.warn("[kilo] no phone for webhook WhatsApp", {
+          deliveryId: extracted.deliveryId,
           event,
+          hasRecord: Boolean(record),
         });
         return;
       }
 
       const text = statusMessageForCustomer({
         event,
-        status: delivery.status ?? record.status,
-        accessCode: delivery.accessCode ?? record.accessCode,
-        deliveryId: delivery.id,
+        status: extracted.status ?? record?.status,
+        accessCode: extracted.accessCode ?? record?.accessCode,
+        deliveryId: extracted.deliveryId,
+        otpCode: extracted.otp?.code,
+        customerMessageHint: extracted.customerMessageHint,
       });
-
-      const to = record.senderPhone.startsWith("+")
-        ? record.senderPhone
-        : `+${record.senderPhone.replace(/\D/g, "")}`;
 
       await sendCustomerText({
-        to,
+        to: toWhatsAppE164(notifyPhone),
         text: sanitizeWhatsAppText(text),
-        messageId: delivery.id,
+        messageId: extracted.deliveryId,
       });
       console.info("[kilo] status WhatsApp sent", {
-        deliveryId: delivery.id,
+        deliveryId: extracted.deliveryId,
         event,
-        to: record.senderPhone,
+        otp: Boolean(extracted.otp?.code),
+        to: notifyPhone,
       });
     } catch (error) {
       console.error("[kilo] failed to process webhook", { event, error });

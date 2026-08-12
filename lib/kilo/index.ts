@@ -35,8 +35,16 @@ export type {
   KiloServiceLocation,
   KiloWarehouse,
   KiloWebhookEvent,
+  KiloWebhookOtpPayload,
   KiloWebhookPayload,
   ServiceLocationsResponse,
   WarehousesResponse,
 } from "./types";
+export {
+  extractKiloWebhook,
+  isOtpIssuedEvent,
+  resolveWebhookNotifyPhone,
+  toWhatsAppE164,
+} from "./webhook-payload";
+export type { ExtractedKiloWebhook, KiloWebhookOtp } from "./webhook-payload";
 export { getKiloWebhookSecret, verifyKiloSignature } from "./verify";

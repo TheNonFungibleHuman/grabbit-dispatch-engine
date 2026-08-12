@@ -212,6 +212,13 @@ export interface ServiceLocationsResponse {
   serviceLocations: KiloServiceLocation[];
 }
 
+export interface KiloWebhookOtpPayload {
+  code: string;
+  receiver_phone?: string;
+  reason?: "payment" | "resend" | string;
+  channel?: "webhook" | string;
+}
+
 export interface KiloWebhookEvent {
   id: string;
   type:
@@ -220,12 +227,19 @@ export interface KiloWebhookEvent {
     | "delivery.status_changed"
     | "delivery.cancelled"
     | "delivery.completed"
+    | "delivery.otp_issued"
     | (string & {});
   created: number;
   data: {
     object: KiloDelivery;
     previous_status: string | null;
+    /** Present on `delivery.otp_issued` when OTP-via-webhook is enabled */
+    otp?: KiloWebhookOtpPayload;
   };
+  summary?: string;
+  customer_message_hint?: string;
+  docs_url?: string;
+  agent_notes?: string[];
   /** Older/alternate shapes kept for resilience */
   event?: string;
   delivery?: KiloDelivery;

@@ -11,6 +11,11 @@ import {
 } from "./locations.ts";
 import { mapDraftToCreateDeliveryInput } from "./map-order.ts";
 import { statusMessageForCustomer } from "./status-messages.ts";
+import {
+  extractKiloWebhook,
+  isOtpIssuedEvent,
+  resolveWebhookNotifyPhone,
+} from "./webhook-payload.ts";
 import type { KiloServiceLocation } from "./types.ts";
 import { verifyKiloSignature } from "./verify.ts";
 
@@ -270,6 +275,87 @@ describe("statusMessageForCustomer", () => {
         status: "cancelled",
       }),
       /cancelled/i,
+    );
+  });
+
+  it("sends OTP from webhook code only", () => {
+    const text = statusMessageForCustomer({
+      event: "delivery.otp_issued",
+      deliveryId: "DEL_abc",
+      otpCode: "4821",
+    });
+    assert.match(text, /\*4821\*/);
+    assert.match(text, /DEL_abc/);
+    assert.match(text, /rider/i);
+  });
+});
+
+describe("extractKiloWebhook otp", () => {
+  it("reads data.otp from delivery.otp_issued", () => {
+    const extracted = extractKiloWebhook({
+      id: "delivery.otp_issued_DEL_1_1",
+      type: "delivery.otp_issued",
+      created: 1710000000,
+      data: {
+        object: {
+          id: "DEL_1",
+          status: "assigned",
+          access_code: null,
+          title: null,
+          service_kind: "pickup_delivery",
+          request_source: "api",
+          package: { description: null, size: null, is_fragile: false },
+          payment: {
+            delivery_fee: null,
+            delivery_payment_status: null,
+            currency_code: null,
+            customer_collection_method: null,
+            is_pod_enabled: false,
+            pod_amount: null,
+          },
+          pickup: {
+            address: null,
+            latitude: null,
+            longitude: null,
+            warehouse_id: null,
+          },
+          dropoff: { address: null, latitude: null, longitude: null },
+          distance_km: null,
+          estimated_duration_minutes: null,
+          customer: {
+            sender_name: null,
+            sender_phone: "+99900000022",
+            sender_email: null,
+            receiver_name: null,
+            receiver_phone: "+99900000041",
+          },
+          rider_assigned: true,
+          created_at: "2026-01-01T00:00:00.000Z",
+          updated_at: null,
+          cancelled_at: null,
+          cancellation_reason: null,
+        },
+        previous_status: null,
+        otp: {
+          code: "4821",
+          receiver_phone: "+99900000041",
+          reason: "payment",
+          channel: "webhook",
+        },
+      },
+      customer_message_hint: "Your delivery code is ready.",
+    });
+
+    assert.equal(extracted.deliveryId, "DEL_1");
+    assert.equal(extracted.otp?.code, "4821");
+    assert.equal(extracted.otp?.receiverPhone, "+99900000041");
+    assert.equal(true, isOtpIssuedEvent("delivery.otp_issued"));
+    assert.equal(
+      resolveWebhookNotifyPhone({
+        otpReceiverPhone: extracted.otp?.receiverPhone,
+        recordSenderPhone: "+99900000018",
+      }),
+      "+99900000041",
     );
   });
 });
