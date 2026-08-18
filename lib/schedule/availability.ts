@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { memoryClear, readJson, writeJson } from "../blob/json-store";
-import { formatError, logInfo, logWarn } from "../log";
+import { memoryClear, readJson, writeJson } from "../blob/json-store.ts";
+import { formatError, logInfo, logWarn } from "../log.ts";
 import {
   evaluateAvailability,
   parseRiderScheduleCsv,
@@ -9,7 +9,7 @@ import {
   type AvailabilityEvaluation,
   type ScheduleSlot,
   type WeekdayKey,
-} from "./model";
+} from "./model.ts";
 
 export type {
   AvailabilityEvaluation,
@@ -24,7 +24,7 @@ export {
   parseRiderScheduleCsv,
   parseTimeSlotLabel,
   ridersFromCell,
-} from "./model";
+} from "./model.ts";
 
 export const SCHEDULE_BLOB_PATH = "grabbit/admin/rider-schedule.json";
 

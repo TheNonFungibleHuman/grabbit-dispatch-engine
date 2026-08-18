@@ -6,9 +6,22 @@ export function statusMessageForCustomer(args: {
   /** From `delivery.otp_issued` → `data.otp.code` only */
   otpCode?: string;
   customerMessageHint?: string;
-}): string {
+}): string | null {
   const status = (args.status ?? "").toLowerCase();
   const event = args.event.toLowerCase();
+
+  // Do NOT spam duplicate initial creation/pending/matched messages from webhook
+  if (
+    event.includes("created") ||
+    event.includes("pending") ||
+    event.includes("matched") ||
+    event.includes("assigned") ||
+    status === "pending" ||
+    status === "matched" ||
+    status === "assigned"
+  ) {
+    return null;
+  }
 
   if (event.includes("otp_issued") || args.otpCode) {
     const code = args.otpCode?.trim();
@@ -48,26 +61,9 @@ export function statusMessageForCustomer(args: {
     return "Your order has been picked up and is on the way.";
   }
 
-  if (
-    status.includes("matched") ||
-    status.includes("assigned") ||
-    status.includes("accepted")
-  ) {
-    return "A rider has been assigned to your delivery. We’ll keep you posted.";
-  }
-
-  if (event.includes("created") || status.includes("pending")) {
-    const code = args.accessCode ? ` Code: *${args.accessCode}*` : "";
-    return `Delivery booked${code}. We’ll update you here as it moves.`;
-  }
-
   if (args.customerMessageHint?.trim()) {
     return args.customerMessageHint.trim();
   }
 
-  if (status) {
-    return `Delivery update: ${status.replaceAll("_", " ")}. We’ll keep you posted.`;
-  }
-
-  return "Quick update on your Grabbit delivery. We’ll keep you posted.";
+  return null;
 }

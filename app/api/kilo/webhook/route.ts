@@ -113,6 +113,14 @@ export async function POST(request: Request) {
         customerMessageHint: extracted.customerMessageHint,
       });
 
+      if (!text || !text.trim()) {
+        console.info("[kilo] webhook event skipped (no customer message needed)", {
+          deliveryId: extracted.deliveryId,
+          event,
+        });
+        return;
+      }
+
       await sendCustomerText({
         to: toWhatsAppE164(notifyPhone),
         text: sanitizeWhatsAppText(text),
