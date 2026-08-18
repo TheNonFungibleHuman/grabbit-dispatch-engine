@@ -361,6 +361,13 @@ export async function executeAgentTool(args: {
         };
       }
 
+      try {
+        const { markTranscriptBookingQuiet } = await import("./transcript.ts");
+        await markTranscriptBookingQuiet(args.senderPhone);
+      } catch (error) {
+        logWarn("agent", "failed to mark schedule booking quiet window", formatError(error));
+      }
+
       return {
         ok: true,
         serviceKind,

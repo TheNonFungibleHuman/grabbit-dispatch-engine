@@ -69,10 +69,7 @@ export async function writeJson(pathname: string, value: unknown): Promise<void>
 }
 
 export async function readJson<T>(pathname: string): Promise<T | null> {
-  const cached = memoryGet<T>(pathname);
-  if (cached) return cached;
-
-  // 1. Try Supabase first if configured
+  // 1. Try Supabase first if configured (always fresh across serverless lambdas)
   const supabase = getSupabaseClient();
   if (supabase) {
     try {
@@ -93,6 +90,9 @@ export async function readJson<T>(pathname: string): Promise<T | null> {
       });
     }
   }
+
+  const cached = memoryGet<T>(pathname);
+  if (cached) return cached;
 
   // 2. Fall back to Vercel Blob if configured
   if (process.env.BLOB_READ_WRITE_TOKEN?.trim()) {
