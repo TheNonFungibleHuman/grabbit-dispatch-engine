@@ -15,6 +15,8 @@ import type {
 export { getSenderPhone, parseWasenderWebhookPayload } from "./parse";
 export type { IncomingUserMessage } from "./types";
 
+const PROCESSED_MESSAGE_IDS = new Set<string>();
+
 export async function handleWasenderEvent(
   payload: WasenderWebhookEvent,
 ): Promise<void> {
@@ -37,9 +39,22 @@ async function handleIncomingMessage(
   payload: MessagesReceivedEvent,
 ): Promise<void> {
   const message = payload.data?.messages;
-  if (!message?.key) {
-    logWarn("wasender", "messages.received without message data");
+  if (!message?.key?.id) {
+    logWarn("wasender", "messages.received without message key or id");
     return;
+  }
+
+  // Deduplicate incoming messages across webhook events
+  if (PROCESSED_MESSAGE_IDS.has(message.key.id)) {
+    logInfo("wasender", "ignored duplicate incoming message event", {
+      messageId: message.key.id,
+    });
+    return;
+  }
+  PROCESSED_MESSAGE_IDS.add(message.key.id);
+  if (PROCESSED_MESSAGE_IDS.size > 2000) {
+    const oldest = PROCESSED_MESSAGE_IDS.values().next().value;
+    if (oldest) PROCESSED_MESSAGE_IDS.delete(oldest);
   }
 
   // Ignore echoes of our own outbound messages.

@@ -51,8 +51,6 @@ If you need a trip:
 
 ⏰Time
 
-Our team will confirm your order shortly\!
-
 ### **2\. Order Confirmed(Delivery)**
 
 ✅ Your order has been confirmed\!
@@ -130,8 +128,8 @@ Thank you for choosing Grabbit Express. 💚
 - **Waiting Policy**: Includes 15 minutes of free waiting time after your scheduled drop-off at the intermediate destination. An additional fee applies for every extra 5 minutes of waiting time thereafter.
 
 3. **Confirmation & Dispatch Process**:
-- During chat intake, the AI collects details, confirms with the customer, and notifies the on-duty rider.
-- The official confirmation message with the live tracking link is dispatched once the rider accepts the request.
+- During chat intake, the assistant collects details, confirms the booking summary, and instantly schedules the delivery/trip on Kilo.
+- The official confirmation message with the live tracking link is provided immediately in chat, and the assigned on-duty rider is notified.
 
 🎉Deraest Customer, your trip has been completed\!
 
