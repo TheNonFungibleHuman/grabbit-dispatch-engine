@@ -336,18 +336,6 @@ export async function generateAgentReply(
       safeReplyPreview: safeText.slice(0, 160),
     });
     text = safeText;
-  } else if (
-    !bookingSucceeded &&
-    text &&
-    looksLikeFalseDeferredOrderPromise(text)
-  ) {
-    const safeText = closedHoursComeBackReply();
-    logWarn("agent", "overriding false deferred/logged order promise", {
-      messageId: input.messageId,
-      modelReplyPreview: text.slice(0, 160),
-      safeReplyPreview: safeText.slice(0, 160),
-    });
-    text = safeText;
   } else if (!text) {
     logWarn("agent", "empty deepseek output; using fallback reply", {
       messageId: input.messageId,

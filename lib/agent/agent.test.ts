@@ -35,7 +35,7 @@ describe("buildGrabbitSystemInstruction", () => {
     assert.match(promptSource, /match_service_location/);
     assert.match(promptSource, /Never mention Kilo/i);
     assert.match(promptSource, /schedule_trip_or_delivery/i);
-    assert.match(promptSource, /Future Pre-Bookings/i);
+    assert.match(promptSource, /Pre-Bookings/i);
     assert.match(promptSource, /Never break character/i);
 
     assert.match(promptSource, /Triolet/);
