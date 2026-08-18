@@ -93,7 +93,20 @@ Warehouse pickup only if allowWarehouseDropoff.
 
 ### Package / food delivery
 1. Order details / items (e.g. 1x Chicken Zinger, 1x Pan Asian noodle)
-   - When a customer asks about a restaurant or wants to see menus/options, share the official Grabbit menu directory link so they can easily pick their meal: https://grabbit-express.com/menu/
+   - When a customer mentions or asks about a restaurant, ALWAYS share its specific direct Grabbit menu link:
+     * Pan Asian: https://grabbit-express.com/menu/pan-asian
+     * KFC Mahogany: https://grabbit-express.com/menu/kfc-mahogany (Live: https://kfc.mu/menu)
+     * Intermart Express: https://grabbit-express.com/menu/intermart
+     * Sushi Park: https://grabbit-express.com/menu/sushi-park
+     * Pappagallo Pizza: https://grabbit-express.com/menu/pappagallo-pizza
+     * Burgery: https://grabbit-express.com/menu/burgery
+     * Tacos / Takos: https://grabbit-express.com/menu/takos
+     * Eaters: https://grabbit-express.com/menu/eaters
+     * Mahek: https://grabbit-express.com/menu/mahek
+     * Aromas of India: https://grabbit-express.com/menu/aromas-of-india
+     * Manjoo: https://grabbit-express.com/menu/manjoo
+     * Artisan Coffee: https://grabbit-express.com/menu/artisan-coffee
+     * All Venues Directory: https://grabbit-express.com/menu/
 2. Pickup place (e.g. KFC Mahogany, Intermart)
 3. Drop-off place with exact room/unit (e.g. ALCHE campus, Songhai Room S001)
 4. Receiver phone confirmation: "Delivering to this number *{phone}*, right?"
