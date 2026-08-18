@@ -118,42 +118,19 @@ If you'd like, you can send us another delivery request, and we'll do our best t
 
 Thank you for choosing Grabbit Express. 💚
 
-###  **NB: ADD NAME OF CUSTOMER IF YOU KNOW**    **Trip Confirmed (all)**
+### **Trip Policy Guidelines**
 
-✅ Dearest customer,your trip has been confirmed\!
+1. **One-Way Trips**:
+- Direct trip from Pickup to Drop-off.
+- No waiting policy is applied.
 
-Thank you for choosing Grabbit Express. 🤗
+2. **Round Trips (e.g. ALCHE ↔ Mahogany)**:
+- Pickup → Destination → Return.
+- **Waiting Policy**: Includes 15 minutes of free waiting time after your scheduled drop-off at the intermediate destination. An additional fee applies for every extra 5 minutes of waiting time thereafter.
 
-Our rider has been assigned and is heading your way.
-
-📍 Pickup Point: ALCHE main gate
-
-📍 Drop-off Point:
-
-⏰ Scheduled Time:
-
-⏱️ Waiting Policy: To keep our schedules running smoothly for all passengers, your rider includes 15 minutes of free waiting time past your scheduled pickup. An additional fee will apply for every extra 5 minutes of waiting time thereafter.
-
-If you have any questions or need to modify your trip, simply reply to this chat. We look forward to driving you safely\! 💚
-
-**Trip Confirmed (only Mahogany Round trips)**
-
-✅ Dearest customer,your trip has been confirmed\!
-
-Thank you for choosing Grabbit Express. 🤗
-
-Our rider has been assigned .
-
-📍 Pickup Point: ALCHE main gate
-
-📍 Drop-off Point: Mahogany
-
-⏰ Scheduled Time:
-
-⏱️ Waiting Policy: To keep our schedules running smoothly for all passengers, your round ride includes 15 minutes of free waiting time after your scheduled drop off. An additional fee will apply for every extra 5 minutes of waiting time thereafter.  
-If you have any questions or need to modify your trip, simply reply to this chat. We look forward to driving you safely\! 💚
-
-###  **After Trip Message**
+3. **Confirmation & Dispatch Process**:
+- During chat intake, the AI collects details, confirms with the customer, and notifies the on-duty rider.
+- The official confirmation message with the live tracking link is dispatched once the rider accepts the request.
 
 🎉Deraest Customer, your trip has been completed\!
 

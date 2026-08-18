@@ -64,4 +64,33 @@ describe("pre-booking & anti-double-booking guard", () => {
     assert.equal(book2.doubleBooked, true);
     assert.match(book2.error || "", /booked/i);
   });
+
+  it("stores tripType for round trips and handles rider decline cascade", async () => {
+    const slotKey = "2026-09-02_14:00-15:00";
+    const book = await createPreBookingRequest({
+      customerPhone: "+99900000024",
+      customerName: "Charlie",
+      serviceKind: "trip",
+      tripType: "round_trip",
+      pickupAddress: "ALCHE main gate",
+      deliveryAddress: "Mahogany Promenade",
+      scheduledDate: "2026-09-02",
+      scheduledTime: "2:00 pm",
+      slotKey,
+      assignedRider: "Thierry",
+    });
+
+    assert.equal(book.ok, true);
+    assert.equal(book.booking?.tripType, "round_trip");
+    assert.equal(book.booking?.assignedRider, "Thierry");
+
+    // Thierry declines -> should cascade to Sherif
+    const declineRes = await handleRiderReply({
+      senderPhone: "+999000000009", // Thierry's phone
+      text: "NO",
+    });
+
+    assert.equal(declineRes.handled, true);
+    assert.match(declineRes.responseMessage || "", /Reassigning request to/i);
+  });
 });

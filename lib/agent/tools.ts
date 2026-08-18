@@ -133,6 +133,11 @@ export const AGENT_TOOLS = [
         deliveryAddress: { type: "string" },
         customerName: { type: "string" },
         packageDescription: { type: "string" },
+        tripType: {
+          type: "string",
+          enum: ["one_way", "round_trip"],
+          description: "For passenger trips: one_way (direct trip) or round_trip (includes return + 15 min free wait after dropoff)",
+        },
       },
       required: ["serviceKind", "scheduledDate", "scheduledTime", "pickupAddress", "deliveryAddress"],
     },
@@ -343,6 +348,7 @@ export async function executeAgentTool(args: {
       const deliveryAddress = String(value.deliveryAddress || "");
       const customerName = String(value.customerName || args.pushName || "Customer");
       const packageDescription = value.packageDescription ? String(value.packageDescription) : undefined;
+      const tripType = value.tripType as ("one_way" | "round_trip" | undefined);
 
       // 1. Resolve on-duty rider for this target date & time
       const { getRiderForTargetSlot } = await import("../schedule/availability");
@@ -369,6 +375,7 @@ export async function executeAgentTool(args: {
         pickupAddress,
         deliveryAddress,
         packageDescription,
+        tripType,
         scheduledDate,
         scheduledTime,
         slotKey: targetSlot.slotKey,

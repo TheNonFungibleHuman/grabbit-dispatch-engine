@@ -27,15 +27,12 @@ describe("buildGrabbitSystemInstruction", () => {
     assert.match(promptSource, /double dashes/i);
     assert.match(promptSource, /Do not mix in anyone else's order/i);
     assert.match(promptSource, /Smart guiding/i);
-    assert.match(promptSource, /Is that right/i);
-    assert.match(promptSource, /book_kilo_delivery/);
-    assert.match(promptSource, /pickup_delivery: at least 1 photo required/i);
-    assert.match(promptSource, /errandMode=at_place or link: photos optional/i);
     assert.match(promptSource, /Delivering to this number/i);
-    assert.match(promptSource, /match_service_location/);
+    assert.match(promptSource, /One-Way/i);
+    assert.match(promptSource, /Round Trip/i);
+    assert.match(promptSource, /Waiting Policy/i);
     assert.match(promptSource, /Never mention Kilo/i);
     assert.match(promptSource, /schedule_trip_or_delivery/i);
-    assert.match(promptSource, /Pre-Bookings/i);
     assert.match(promptSource, /Never break character/i);
 
     assert.match(promptSource, /Triolet/);

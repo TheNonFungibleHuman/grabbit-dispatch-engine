@@ -11,6 +11,7 @@ export interface PreBooking {
   customerPhone: string;
   customerName: string;
   serviceKind: "pickup_delivery" | "errand" | "trip";
+  tripType?: "one_way" | "round_trip";
   pickupAddress: string;
   deliveryAddress: string;
   packageDescription?: string;
@@ -22,6 +23,7 @@ export interface PreBooking {
   scheduledTime: string; // e.g. "12:00 pm"
   slotKey: string;       // e.g. "2026-08-19_12:00-13:00"
   assignedRider: string; // e.g. "Thierry"
+  declinedRiders?: string[]; // Rider names who declined
   status: "pending_rider" | "confirmed" | "dispatched" | "declined" | "cancelled";
   kiloDeliveryId?: string;
   trackingUrl?: string;
@@ -48,15 +50,12 @@ export async function listAllPreBookings(): Promise<PreBooking[]> {
 }
 
 export async function savePreBooking(booking: PreBooking): Promise<void> {
-  await writeJson(bookingPath(booking.id), {
-    ...booking,
-    updatedAt: new Date().toISOString(),
-  });
-
-  const index = await readJson<{ ids: string[] }>(INDEX_PATH) || { ids: [] };
-  if (!index.ids.includes(booking.id)) {
-    index.ids.push(booking.id);
-    await writeJson(INDEX_PATH, index);
+  await writeJson(bookingPath(booking.id), booking);
+  const index = await readJson<{ ids: string[] }>(INDEX_PATH);
+  const ids = Array.isArray(index?.ids) ? index!.ids : [];
+  if (!ids.includes(booking.id)) {
+    ids.push(booking.id);
+    await writeJson(INDEX_PATH, { ids });
   }
 }
 
@@ -118,6 +117,7 @@ export async function createPreBookingRequest(args: {
   customerPhone: string;
   customerName: string;
   serviceKind: "pickup_delivery" | "errand" | "trip";
+  tripType?: "one_way" | "round_trip";
   pickupAddress: string;
   deliveryAddress: string;
   packageDescription?: string;
@@ -162,6 +162,7 @@ export async function createPreBookingRequest(args: {
     customerPhone: args.customerPhone,
     customerName: args.customerName,
     serviceKind: args.serviceKind,
+    tripType: args.tripType,
     pickupAddress: args.pickupAddress,
     deliveryAddress: args.deliveryAddress,
     packageDescription: args.packageDescription,
@@ -173,6 +174,7 @@ export async function createPreBookingRequest(args: {
     scheduledTime: args.scheduledTime,
     slotKey: args.slotKey,
     assignedRider: args.assignedRider,
+    declinedRiders: [],
     status: "pending_rider",
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
@@ -185,6 +187,7 @@ export async function createPreBookingRequest(args: {
     customer: args.customerPhone,
     slotKey: args.slotKey,
     assignedRider: args.assignedRider,
+    tripType: args.tripType,
   });
 
   // 2. Dispatch notification to assigned rider
@@ -272,19 +275,59 @@ export async function handleRiderReply(args: {
   }
 
   if (isDecline) {
-    pending.status = "declined";
-    await savePreBooking(pending);
+    const declined = pending.declinedRiders || [];
+    if (!declined.includes(actualRider.name)) {
+      declined.push(actualRider.name);
+    }
+    pending.declinedRiders = declined;
 
-    logInfo("prebooking", "rider declined booking", {
+    logInfo("prebooking", "rider declined booking, attempting cascade", {
       bookingId: pending.id,
-      rider: actualRider.name,
+      declinedRider: actualRider.name,
     });
+
+    // Attempt cascade: find another rider in fleet who has not yet declined
+    const nextRider = FLEET_RIDERS.find(
+      (r) => !declined.some((d) => d.toLowerCase() === r.name.toLowerCase()),
+    );
+
+    if (nextRider) {
+      pending.assignedRider = nextRider.name;
+      pending.updatedAt = new Date().toISOString();
+      await savePreBooking(pending);
+
+      logInfo("prebooking", "cascading booking to next rider", {
+        bookingId: pending.id,
+        nextRider: nextRider.name,
+      });
+
+      await notifyRiderForBooking({
+        bookingId: pending.id,
+        customerName: pending.customerName,
+        customerPhone: pending.customerPhone,
+        serviceKind: pending.serviceKind,
+        pickupAddress: pending.pickupAddress,
+        dropoffAddress: pending.deliveryAddress,
+        scheduledTime: `${pending.scheduledDate} ${pending.scheduledTime}`,
+        assignedRider: nextRider.name,
+      });
+
+      return {
+        handled: true,
+        responseMessage: `Understood, ${actualRider.name}. Reassigning request to ${nextRider.name}.`,
+      };
+    }
+
+    // No other riders available
+    pending.status = "declined";
+    pending.updatedAt = new Date().toISOString();
+    await savePreBooking(pending);
 
     // Notify customer
     try {
       await sendCustomerText({
         to: pending.customerPhone,
-        text: `Hello ${pending.customerName || "there"}, rider ${actualRider.name} is unavailable for your requested time (${pending.scheduledTime}). Would you like to select another time?`,
+        text: `Hello ${pending.customerName || "there"}, our riders are currently unavailable for your requested time (${pending.scheduledTime}). Would you like to select another time slot?`,
         messageId: `decline_${pending.id}_${Date.now()}`,
       });
     } catch (custErr) {
@@ -293,7 +336,7 @@ export async function handleRiderReply(args: {
 
     return {
       handled: true,
-      responseMessage: `Understood, ${actualRider.name}. The request has been declined.`,
+      responseMessage: `Understood, ${actualRider.name}. No other riders available; customer has been notified.`,
     };
   }
 
@@ -349,21 +392,36 @@ export async function handleRiderReply(args: {
     pending.status = "confirmed";
     pending.kiloDeliveryId = delivery.id;
     pending.trackingUrl = trackingUrl;
+    pending.updatedAt = new Date().toISOString();
     await savePreBooking(pending);
 
-    // Send tracking link to customer!
-    const customerMsg = [
-      `✅ *Your ${pending.serviceKind} is confirmed!*`,
+    // Send tracking link to customer with trip type specifics!
+    const isRoundTrip = pending.serviceKind === "trip" && pending.tripType === "round_trip";
+    const customerLines = [
+      `✅ *Your ${pending.serviceKind === "trip" ? (isRoundTrip ? "Round Trip" : "Trip") : pending.serviceKind} is confirmed!*`,
       `Rider *${actualRider.name}* has accepted and is scheduled for *${pending.scheduledTime}*.`,
       ``,
       `📍 Pickup: ${pending.pickupAddress}`,
       `📍 Drop-off: ${pending.deliveryAddress}`,
+    ];
+
+    if (isRoundTrip) {
+      customerLines.push(
+        ``,
+        `⏱️ *Waiting Policy:*`,
+        `Your round trip includes 15 minutes of free waiting time after drop-off at your destination before the return leg.`,
+      );
+    }
+
+    customerLines.push(
       ``,
       `🔴 *Live Tracking Link:*`,
       trackingUrl,
       ``,
       `Thank you for choosing Grabbit Express! 🛵⚡`,
-    ].join("\n");
+    );
+
+    const customerMsg = customerLines.join("\n");
 
     try {
       await sendCustomerText({

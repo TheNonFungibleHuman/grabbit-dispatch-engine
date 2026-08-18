@@ -336,6 +336,23 @@ export async function generateAgentReply(
       safeReplyPreview: safeText.slice(0, 160),
     });
     text = safeText;
+  } else if (
+    !bookingSucceeded &&
+    text &&
+    /\b(heading your way|rider has been assigned and is heading|your trip has been confirmed|your order has been confirmed)\b/i.test(text)
+  ) {
+    logWarn("agent", "stripping premature confirmation claim", {
+      messageId: input.messageId,
+      modelReplyPreview: text.slice(0, 160),
+    });
+    text = text
+      .replace(/✅\s*Dearest customer,?\s*your trip has been confirmed!?/gi, "")
+      .replace(/Our rider has been assigned and is heading your way\.?/gi, "")
+      .replace(/✅\s*Your order has been confirmed!?/gi, "")
+      .trim();
+    if (!text) {
+      text = "Got your request! Let me confirm your details and notify the on-duty rider.";
+    }
   } else if (!text) {
     logWarn("agent", "empty deepseek output; using fallback reply", {
       messageId: input.messageId,
