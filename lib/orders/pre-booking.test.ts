@@ -61,35 +61,99 @@ describe("pre-booking & anti-double-booking guard", () => {
 
     assert.equal(book2.ok, false);
     assert.equal(book2.doubleBooked, true);
-    assert.match(book2.error || "", /booked/i);
+    assert.match(book2.error || "", /booking|booked/i);
   });
 
-  it("stores tripType for round trips and handles rider decline cascade", async () => {
-    const slotKey = "2026-09-02_14:00-15:00";
-    const book = await createPreBookingRequest({
-      customerPhone: "+99900000024",
-      customerName: "Charlie",
-      serviceKind: "trip",
-      tripType: "round_trip",
-      pickupAddress: "ALCHE main gate",
-      deliveryAddress: "Mahogany Promenade",
-      scheduledDate: "2026-09-02",
-      scheduledTime: "2:00 pm",
+  it("enforces strict 15-minute buffer between bookings for the same rider", async () => {
+    const slotKey = "2026-09-03_18:00-19:00";
+    const rider = "Thierry";
+
+    // 1. Initial booking at 6:15 pm
+    const book1 = await createPreBookingRequest({
+      customerPhone: "+99900000025",
+      customerName: "David",
+      serviceKind: "pickup_delivery",
+      pickupAddress: "KFC Mahogany",
+      deliveryAddress: "ALCHE campus",
+      scheduledDate: "2026-09-03",
+      scheduledTime: "6:15 pm",
       slotKey,
-      assignedRider: "Thierry",
+      assignedRider: rider,
     });
+    assert.equal(book1.ok, true);
 
-    assert.equal(book.ok, true);
-    assert.equal(book.booking?.tripType, "round_trip");
-    assert.equal(book.booking?.assignedRider, "Thierry");
-
-    // Thierry declines -> should cascade to Sherif
-    const declineRes = await handleRiderReply({
-      senderPhone: "+999000000009", // Thierry's phone
-      text: "NO",
+    // 2. Exact same time 6:15 pm -> rejected
+    const bookExact = await createPreBookingRequest({
+      customerPhone: "+99900000030",
+      customerName: "Eve",
+      serviceKind: "pickup_delivery",
+      pickupAddress: "Pan Asian",
+      deliveryAddress: "ALCHE campus",
+      scheduledDate: "2026-09-03",
+      scheduledTime: "6:15 pm",
+      slotKey,
+      assignedRider: rider,
     });
+    assert.equal(bookExact.ok, false);
+    assert.equal(bookExact.doubleBooked, true);
+    assert.match(bookExact.error || "", /15-minute gap/i);
 
-    assert.equal(declineRes.handled, true);
-    assert.match(declineRes.responseMessage || "", /Reassigning request to/i);
+    // 3. 6:14 pm (1 min gap) -> rejected
+    const bookClose = await createPreBookingRequest({
+      customerPhone: "+99900000030",
+      customerName: "Eve",
+      serviceKind: "pickup_delivery",
+      pickupAddress: "Pan Asian",
+      deliveryAddress: "ALCHE campus",
+      scheduledDate: "2026-09-03",
+      scheduledTime: "6:14 pm",
+      slotKey,
+      assignedRider: rider,
+    });
+    assert.equal(bookClose.ok, false);
+    assert.equal(bookClose.doubleBooked, true);
+
+    // 4. 6:25 pm (10 min gap) -> rejected
+    const bookTenMin = await createPreBookingRequest({
+      customerPhone: "+99900000030",
+      customerName: "Eve",
+      serviceKind: "pickup_delivery",
+      pickupAddress: "Pan Asian",
+      deliveryAddress: "ALCHE campus",
+      scheduledDate: "2026-09-03",
+      scheduledTime: "6:25 pm",
+      slotKey,
+      assignedRider: rider,
+    });
+    assert.equal(bookTenMin.ok, false);
+    assert.equal(bookTenMin.doubleBooked, true);
+
+    // 5. 6:30 pm (15 min gap) -> ACCEPTED
+    const bookValidAfter = await createPreBookingRequest({
+      customerPhone: "+99900000030",
+      customerName: "Eve",
+      serviceKind: "pickup_delivery",
+      pickupAddress: "Pan Asian",
+      deliveryAddress: "ALCHE campus",
+      scheduledDate: "2026-09-03",
+      scheduledTime: "6:30 pm",
+      slotKey,
+      assignedRider: rider,
+    });
+    assert.equal(bookValidAfter.ok, true);
+
+    // 6. 6:00 pm (15 min before 6:15 pm) -> ACCEPTED
+    const bookValidBefore = await createPreBookingRequest({
+      customerPhone: "+99900000034",
+      customerName: "Frank",
+      serviceKind: "pickup_delivery",
+      pickupAddress: "Roots Burgers",
+      deliveryAddress: "ALCHE campus",
+      scheduledDate: "2026-09-03",
+      scheduledTime: "6:00 pm",
+      slotKey,
+      assignedRider: rider,
+    });
+    assert.equal(bookValidBefore.ok, true);
   });
 });

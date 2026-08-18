@@ -59,20 +59,60 @@ export async function savePreBooking(booking: PreBooking): Promise<void> {
   }
 }
 
+export function parseTimeToMinutes(timeStr: string): number | null {
+  if (!timeStr) return null;
+  const clean = timeStr.toLowerCase().trim();
+
+  // Match e.g. "6:10 pm", "06:10pm", "6:10", "18:10", "6pm", "6 pm"
+  const match = clean.match(/(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/i);
+  if (!match) return null;
+
+  let hours = parseInt(match[1], 10);
+  const minutes = match[2] ? parseInt(match[2], 10) : 0;
+  const meridian = match[3]?.toLowerCase();
+
+  if (meridian === "pm" && hours < 12) {
+    hours += 12;
+  } else if (meridian === "am" && hours === 12) {
+    hours = 0;
+  }
+
+  if (hours < 0 || hours > 23 || minutes < 0 || minutes > 59) return null;
+  return hours * 60 + minutes;
+}
+
+export function formatMinutesToTime(minutes: number): string {
+  const h24 = Math.floor(minutes / 60) % 24;
+  const m = minutes % 60;
+  const meridian = h24 >= 12 ? "pm" : "am";
+  const h12 = h24 % 12 === 0 ? 12 : h24 % 12;
+  const mStr = m.toString().padStart(2, "0");
+  return `${h12}:${mStr} ${meridian}`;
+}
+
+export const MIN_BOOKING_GAP_MINUTES = 15;
 const MAX_DELIVERIES_PER_SLOT = 3;
 
+export interface CheckSlotResult {
+  available: boolean;
+  conflictingBooking?: PreBooking;
+  reason?: "gap_violation" | "trip_limit" | "slot_capacity";
+  suggestedTime?: string;
+}
+
 /**
- * Checks if a rider's slot has available capacity (Anti-Double-Booking Guard).
+ * Checks if a rider's slot has available capacity & enforces the strict 15-minute buffer.
  */
 export async function checkSlotAvailability(args: {
   slotKey: string;
   assignedRider: string;
   customerPhone?: string;
   serviceKind?: string;
-}): Promise<{ available: boolean; conflictingBooking?: PreBooking }> {
+  scheduledTime?: string;
+  scheduledDate?: string;
+}): Promise<CheckSlotResult> {
   const all = await listAllPreBookings();
   const riderNormalized = args.assignedRider.trim().toLowerCase();
-  const cleanCustomer = args.customerPhone?.replace(/\D/g, "");
 
   const activeBookings = all.filter(
     (b) =>
@@ -81,17 +121,49 @@ export async function checkSlotAvailability(args: {
       (b.status === "pending_rider" || b.status === "confirmed" || b.status === "dispatched"),
   );
 
-  // If the same customer already has a pending booking for this slot, allow updating it
-  const isSameCustomer = cleanCustomer && activeBookings.some((b) => b.customerPhone.replace(/\D/g, "") === cleanCustomer);
-  if (isSameCustomer) {
-    return { available: true };
+  // 1. Strict 15-minute gap buffer per rider on the same day/slot
+  if (args.scheduledTime) {
+    const targetMin = parseTimeToMinutes(args.scheduledTime);
+    if (targetMin !== null) {
+      for (const b of activeBookings) {
+        const existingMin = parseTimeToMinutes(b.scheduledTime);
+        if (existingMin !== null) {
+          const diff = Math.abs(targetMin - existingMin);
+          if (diff < MIN_BOOKING_GAP_MINUTES) {
+            // Found a collision within the 15-minute window!
+            const nextAvailableMin = existingMin + MIN_BOOKING_GAP_MINUTES;
+            const suggestedTime = formatMinutesToTime(nextAvailableMin);
+            return {
+              available: false,
+              conflictingBooking: b,
+              reason: "gap_violation",
+              suggestedTime,
+            };
+          }
+        }
+      }
+    }
   }
 
-  // Passenger trips are strictly 1 per slot; Deliveries/errands allow up to MAX_DELIVERIES_PER_SLOT
-  const maxCapacity = args.serviceKind === "trip" ? 1 : MAX_DELIVERIES_PER_SLOT;
+  // 2. Passenger trips are strictly 1 per slot per rider
+  if (args.serviceKind === "trip") {
+    const existingTrip = activeBookings.find((b) => b.serviceKind === "trip");
+    if (existingTrip) {
+      return {
+        available: false,
+        conflictingBooking: existingTrip,
+        reason: "trip_limit",
+      };
+    }
+  }
 
-  if (activeBookings.length >= maxCapacity) {
-    return { available: false, conflictingBooking: activeBookings[0] };
+  // 3. Deliveries/errands allow up to MAX_DELIVERIES_PER_SLOT (3)
+  if (activeBookings.length >= MAX_DELIVERIES_PER_SLOT) {
+    return {
+      available: false,
+      conflictingBooking: activeBookings[0],
+      reason: "slot_capacity",
+    };
   }
 
   return { available: true };
@@ -138,24 +210,37 @@ export async function createPreBookingRequest(args: {
   kiloDeliveryId?: string;
   trackingUrl?: string;
 }> {
-  // 1. Anti-Double-Booking / Capacity Check
+  // 1. Anti-Double-Booking & 15-Minute Gap Check
   const availability = await checkSlotAvailability({
     slotKey: args.slotKey,
     assignedRider: args.assignedRider,
     customerPhone: args.customerPhone,
     serviceKind: args.serviceKind,
+    scheduledTime: args.scheduledTime,
+    scheduledDate: args.scheduledDate,
   });
 
   if (!availability.available) {
-    logWarn("prebooking", "slot capacity reached", {
+    let errorMsg = `Rider ${args.assignedRider} is not available for ${args.scheduledTime}.`;
+    if (availability.reason === "gap_violation" && availability.conflictingBooking) {
+      errorMsg = `Rider ${args.assignedRider} already has a booking at ${availability.conflictingBooking.scheduledTime}. Grabbit requires at least a 15-minute gap between bookings. Please offer ${availability.suggestedTime} or another open time slot.`;
+    } else if (availability.reason === "trip_limit") {
+      errorMsg = `Rider ${args.assignedRider} already has a passenger trip in this slot. Only 1 trip per slot is permitted. Please choose another time slot.`;
+    } else if (availability.reason === "slot_capacity") {
+      errorMsg = `Rider ${args.assignedRider} has reached maximum delivery capacity (3) for this slot. Please choose another time slot.`;
+    }
+
+    logWarn("prebooking", "slot booking rejected", {
       slotKey: args.slotKey,
       assignedRider: args.assignedRider,
-      existingCustomer: availability.conflictingBooking?.customerPhone,
+      reason: availability.reason,
+      errorMsg,
     });
+
     return {
       ok: false,
       doubleBooked: true,
-      error: `Rider ${args.assignedRider} is fully booked for ${args.scheduledTime}. Please choose another time slot.`,
+      error: errorMsg,
     };
   }
 
