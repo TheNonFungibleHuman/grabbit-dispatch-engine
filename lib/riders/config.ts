@@ -62,6 +62,26 @@ export function findRiderByPhone(phone: string): RiderProfile | null {
   return null;
 }
 
+export const ADMIN_PHONES = [
+  "+9990000000003",
+  process.env.ADMIN_PHONE,
+].filter(Boolean) as string[];
+
+export function isAuthorizedRiderOrAdmin(phone: string): {
+  isAuthorized: boolean;
+  isAdmin: boolean;
+  rider: RiderProfile | null;
+} {
+  const cleanPhone = phone.replace(/\D/g, "");
+  const isAdmin = ADMIN_PHONES.some((p) => p.replace(/\D/g, "") === cleanPhone);
+  const rider = findRiderByPhone(phone);
+  return {
+    isAuthorized: Boolean(isAdmin || rider),
+    isAdmin,
+    rider,
+  };
+}
+
 export function getCustomTrackingUrl(deliveryId: string, accessCode?: string | null): string {
   // Custom tracking URL format: https://delivery.grabbit-express.com/track/{deliveryId}/{accessCode}
   const base = (

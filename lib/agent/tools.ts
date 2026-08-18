@@ -142,6 +142,25 @@ export const AGENT_TOOLS = [
       required: ["serviceKind", "scheduledDate", "scheduledTime", "pickupAddress", "deliveryAddress"],
     },
   },
+  {
+    type: "function" as const,
+    name: "check_rider_assigned_trips",
+    description:
+      "Query booked trips and deliveries assigned to a rider or all riders for today or upcoming dates. STRICT SECURITY: Only works for registered Grabbit fleet riders and authorized admin (+9990000000003). If any unauthorized customer asks, returns Access Denied.",
+    parameters: {
+      type: "object",
+      properties: {
+        targetDate: {
+          type: "string",
+          description: "Target date, e.g. 'today', 'tomorrow', '2026-08-19', or 'all'",
+        },
+        targetRiderName: {
+          type: "string",
+          description: "Optional rider name to filter by (e.g. 'Thierry', 'Sherif', 'Moses')",
+        },
+      },
+    },
+  },
 ];
 
 export const DEEPSEEK_AGENT_TOOLS = AGENT_TOOLS.map((tool) => ({
@@ -353,6 +372,18 @@ export async function executeAgentTool(args: {
         status: "confirmed",
         message: `Your ${serviceKind} request for ${scheduledDate} at ${scheduledTime} is confirmed and assigned to rider ${prebookResult.assignedRider || assignedRider}! Live Tracking Link: ${prebookResult.trackingUrl}`,
       };
+    }
+
+    if (args.name === "check_rider_assigned_trips") {
+      const value = parseToolArguments(args.toolArguments);
+      const { getRiderAssignedBookings } = await import("../orders/pre-booking.ts");
+      const result = await getRiderAssignedBookings({
+        callerPhone: args.senderPhone,
+        targetDate: value.targetDate ? String(value.targetDate) : "today",
+        targetRiderName: value.targetRiderName ? String(value.targetRiderName) : undefined,
+      });
+
+      return result;
     }
 
     return { ok: false, error: `Unknown tool: ${args.name}` };

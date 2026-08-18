@@ -156,4 +156,34 @@ describe("pre-booking & anti-double-booking guard", () => {
     });
     assert.equal(bookValidBefore.ok, true);
   });
+
+  it("authorizes only riders and admin to query rider schedules", async () => {
+    const { getRiderAssignedBookings } = await import("./pre-booking.ts");
+
+    // 1. Random customer number -> Access Denied
+    const denied = await getRiderAssignedBookings({
+      callerPhone: "+99900000074",
+      targetDate: "all",
+    });
+    assert.equal(denied.authorized, false);
+    assert.equal(denied.ok, false);
+    assert.match(denied.error || "", /Access Denied/i);
+
+    // 2. Rider phone (+999000000009) -> Authorized
+    const riderQuery = await getRiderAssignedBookings({
+      callerPhone: "+999000000009",
+      targetDate: "all",
+    });
+    assert.equal(riderQuery.authorized, true);
+    assert.equal(riderQuery.ok, true);
+    assert.equal(riderQuery.riderName, "Thierry");
+
+    // 3. Admin phone (+9990000000003) -> Authorized
+    const adminQuery = await getRiderAssignedBookings({
+      callerPhone: "+9990000000003",
+      targetDate: "all",
+    });
+    assert.equal(adminQuery.authorized, true);
+    assert.equal(adminQuery.ok, true);
+  });
 });

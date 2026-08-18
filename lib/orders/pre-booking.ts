@@ -1,6 +1,6 @@
 import { readJson, writeJson } from "../blob/json-store.ts";
 import { formatError, logError, logInfo, logWarn } from "../log.ts";
-import { FLEET_RIDERS, findRiderByName, findRiderByPhone, getCustomTrackingUrl, type RiderProfile } from "../riders/config.ts";
+import { FLEET_RIDERS, findRiderByName, findRiderByPhone, getCustomTrackingUrl, isAuthorizedRiderOrAdmin, type RiderProfile } from "../riders/config.ts";
 import { notifyRiderForBooking } from "../riders/notify-rider.ts";
 import { assignDeliveryRider, createDelivery } from "../kilo/client.ts";
 import { sendCustomerText } from "../wasender/send-tracked.ts";
@@ -592,4 +592,88 @@ export async function handleRiderReply(args: {
       responseMessage: `Trip accepted, but had a temporary hiccup dispatching to Kilo. Support notified.`,
     };
   }
+}
+
+export async function getRiderAssignedBookings(args: {
+  callerPhone: string;
+  targetDate?: string;
+  targetRiderName?: string;
+}): Promise<{
+  ok: boolean;
+  authorized: boolean;
+  riderName?: string;
+  date?: string;
+  bookings?: Array<{
+    id: string;
+    scheduledTime: string;
+    scheduledDate: string;
+    serviceKind: string;
+    customerName: string;
+    customerPhone: string;
+    pickupAddress: string;
+    deliveryAddress: string;
+    assignedRider: string;
+    status: string;
+    trackingUrl?: string;
+  }>;
+  error?: string;
+}> {
+  const auth = isAuthorizedRiderOrAdmin(args.callerPhone);
+  if (!auth.isAuthorized) {
+    return {
+      ok: false,
+      authorized: false,
+      error: "Access Denied: You do not have permission to view rider schedules.",
+    };
+  }
+
+  const all = await listAllPreBookings();
+  const targetRider = auth.isAdmin
+    ? args.targetRiderName?.trim() || null
+    : auth.rider?.name;
+
+  // Filter active bookings
+  const activeBookings = all.filter((b) => {
+    if (b.status === "cancelled" || b.status === "declined") return false;
+    if (targetRider && !b.assignedRider.toLowerCase().includes(targetRider.toLowerCase())) {
+      return false;
+    }
+    if (args.targetDate && args.targetDate.toLowerCase() !== "all") {
+      const isTodayQuery = args.targetDate.toLowerCase() === "today";
+      if (isTodayQuery) {
+        const now = new Date();
+        const yyyy = now.getFullYear();
+        const mm = String(now.getMonth() + 1).padStart(2, "0");
+        const dd = String(now.getDate()).padStart(2, "0");
+        const todayStr = `${yyyy}-${mm}-${dd}`;
+        return b.scheduledDate === "today" || b.scheduledDate === todayStr || b.slotKey.startsWith(todayStr);
+      } else {
+        return (
+          b.scheduledDate.toLowerCase().includes(args.targetDate.toLowerCase()) ||
+          b.slotKey.includes(args.targetDate)
+        );
+      }
+    }
+    return true;
+  });
+
+  return {
+    ok: true,
+    authorized: true,
+    riderName: targetRider || "All Fleet Riders",
+    date: args.targetDate || "today",
+    bookings: activeBookings.map((b) => ({
+      id: b.id,
+      scheduledTime: b.scheduledTime,
+      scheduledDate: b.scheduledDate,
+      serviceKind: b.serviceKind,
+      customerName: b.customerName,
+      customerPhone: b.customerPhone,
+      pickupAddress: b.pickupAddress,
+      deliveryAddress: b.deliveryAddress,
+      assignedRider: b.assignedRider,
+      status: b.status,
+      trackingUrl: b.trackingUrl,
+    })),
+  };
 }
