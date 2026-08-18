@@ -1,6 +1,6 @@
 import { put } from "@vercel/blob";
-import { getSupabaseClient } from "../supabase/client";
-import { logInfo, logWarn } from "../log";
+import { getSupabaseClient } from "../supabase/client.ts";
+import { logInfo, logWarn } from "../log.ts";
 
 export async function uploadPackageImage(args: {
   senderPhone: string;

@@ -1,4 +1,4 @@
-import { uploadPackageImage } from "./blob";
+import { uploadPackageImage } from "./blob.ts";
 
 const WASENDER_API_BASE =
   process.env.WASENDER_API_BASE_URL ?? "https://www.wasenderapi.com/api";

@@ -191,6 +191,6 @@ export async function processIncomingUserMessage(
   });
 }
 
-export { generateAgentReply } from "./deepseek";
-export { sanitizeWhatsAppText } from "./format";
-export { buildGrabbitSystemInstruction } from "./prompt";
+export { generateAgentReply } from "./deepseek.ts";
+export { sanitizeWhatsAppText } from "./format.ts";
+export { buildGrabbitSystemInstruction } from "./prompt.ts";
