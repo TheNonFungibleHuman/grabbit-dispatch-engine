@@ -24,7 +24,6 @@ export async function handleWasenderEvent(
 
   switch (payload.event) {
     case "messages.received":
-    case "messages-personal.received":
       await handleIncomingMessage(payload as MessagesReceivedEvent);
       break;
     case "session.status":

@@ -78,12 +78,19 @@ export async function POST(request: Request) {
         }
       : { event: payload.event };
 
+  if (payload.event === "messages-personal.received") {
+    logInfo("webhook", "ignored duplicate personal event (using messages.received only)", {
+      event: payload.event,
+    });
+    return NextResponse.json({ received: true, ignored: true });
+  }
+
   logInfo("webhook", "accepted", {
     ...eventPreview,
     ackMs: Date.now() - startedAt,
   });
 
-  // Ack Wasender immediately; Gemini + outbound send continue in the background.
+  // Ack Wasender immediately; Gemini/DeepSeek + outbound send continue in the background.
   after(async () => {
     const bgStartedAt = Date.now();
     try {

@@ -39,7 +39,7 @@ export const AGENT_TOOLS = [
     type: "function" as const,
     name: "book_kilo_delivery",
     description:
-      "Book a delivery/errand on the Kilo fleet after the customer confirmed the summary — ONLY when delivery availability status is OPEN right now in Mauritius time with a rider in the current slot. Never book for later/tomorrow. Prefer WhatsApp user as receiver (receiverIsWhatsAppUser=true) unless they gave a different receiver. Package images come from stored WhatsApp photos when required. Prefer service location ids + units when matched. For errands set errandMode (at_place/link/photo). Do not call when availability is CLOSED.",
+      "Book an immediate on-demand delivery/errand on the Kilo fleet after the customer confirms the order summary. For scheduled or future slots (e.g. later today or tomorrow), use schedule_trip_or_delivery instead.",
     parameters: {
       type: "object",
       properties: {
@@ -247,9 +247,7 @@ export async function buildAgentContextNote(args: {
     knowledgeRevisionNote,
     availabilityNote,
     "Menu help: guide the order in chat. Suggest known restaurants/items from live knowledge and discovery. Never tell the customer to go check an app menu themselves when you can help collect items here. If a curated link exists in discovery, you may use it as a reference while still placing the order here.",
-    "Availability: Mauritius time only. Book via API ONLY while status is OPEN with a rider in the current slot. Never create a Kilo delivery for later/tomorrow.",
-    "When CLOSED: hard stop delivery intake. Menus/hours OK. Tell them to come back in an open slot to place it. Never say logged/queued/team will process.",
-    "Trips: reception/info only (coverage + open windows). Humans handle trip booking. Never say a trip is booked, reserved, or logged for dispatch.",
+    "Pre-booking & Auto-Dispatch: Customers CAN pre-book deliveries and passenger trips for ANY open future slot on the schedule (e.g. 6:00 pm - 7:00 pm today, or tomorrow). Never tell customers to come back later. When confirmed, immediately use schedule_trip_or_delivery to lock in the booking and dispatch.",
     "Tone: no love/heart emoji. Never restart greeting on short thanks/ok when history exists. Do not treat 'yes' as a done acknowledgement.",
     transcriptNote,
     discoveryNote,
