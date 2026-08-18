@@ -27,11 +27,23 @@ export async function GET(request: Request) {
   }
 
   // Default: trigger customer booking message
+  const cleanedDigits = customerPhone.replace(/\D/g, "");
+  const testMsgId = `api_test_${Date.now()}`;
   await processIncomingUserMessage({
-    messageId: `api_test_${Date.now()}`,
+    messageId: testMsgId,
     sender: customerPhone,
+    remoteJid: `${cleanedDigits}@s.whatsapp.net`,
     text,
     pushName: "Test Customer",
+    raw: {
+      key: {
+        id: testMsgId,
+        fromMe: false,
+        remoteJid: `${cleanedDigits}@s.whatsapp.net`,
+      },
+      messageBody: text,
+      pushName: "Test Customer",
+    },
   });
 
   const bookings = await listAllPreBookings();
