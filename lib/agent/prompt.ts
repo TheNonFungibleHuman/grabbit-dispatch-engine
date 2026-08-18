@@ -93,7 +93,7 @@ Warehouse pickup only if allowWarehouseDropoff.
 
 ### Package / food delivery
 1. Order details / items (e.g. 1x Chicken Zinger, 1x Pan Asian noodle)
-   - When a customer mentions a restaurant or wants to see options, share the menu link so they can easily pick their meal! (e.g. KFC: https://kfc.mu, Pan Asian: https://panasian.mu, Pappagallo: https://pappagallopizza.mu, Burgery: https://facebook.com/BurgeryMauritius, Sushi Park: https://sushipark.mu, Artisan Coffee: https://artisancoffee.mu).
+   - When a customer asks about a restaurant or wants to see menus/options, share the official Grabbit menu directory link so they can easily pick their meal: https://grabbit-express.com/menu/
 2. Pickup place (e.g. KFC Mahogany, Intermart)
 3. Drop-off place with exact room/unit (e.g. ALCHE campus, Songhai Room S001)
 4. Receiver phone confirmation: "Delivering to this number *{phone}*, right?"

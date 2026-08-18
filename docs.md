@@ -7,20 +7,22 @@
 Use this list to guide customers. Prefer suggesting from here when they name a brand vaguely.
 If a place is not listed, still help using coverage areas and ask them to confirm or correct.
 
-Format tip: Brand - Branch / Area
+### **Menu Hub**
+Official Grabbit Menu Directory: **https://grabbit-express.com/menu/**
+(Browse photo menus, dish options, and catalogs for all restaurants and shops in Pamplemousses & Mahogany)
 
-- KFC Mahogany (Menu: https://kfc.mu)
-- Pan Asian Mahogany (Menu: https://panasian.mu)
-- Pappagallo Pizza (Menu: https://pappagallopizza.mu)
-- Burgery (Menu: https://facebook.com/BurgeryMauritius)
-- Sushi Park (Menu: https://sushipark.mu)
-- Artisan Coffee (Menu: https://artisancoffee.mu)
-- Intermart Mahogany (Supermarket / Groceries)
-- Eaters
-- Mahek
+- KFC Mahogany (Menu: https://grabbit-express.com/menu/ | Live Menu: https://kfc.mu/menu)
+- Pan Asian Mahogany (Menu: https://grabbit-express.com/menu/)
+- Pappagallo Pizza (Menu: https://grabbit-express.com/menu/)
+- Burgery (Menu: https://grabbit-express.com/menu/)
+- Sushi Park (Menu: https://grabbit-express.com/menu/)
+- Intermart Express (Supermarket Catalog: https://grabbit-express.com/menu/)
+- Tacos / Takos (Menu: https://grabbit-express.com/menu/)
+- Eaters (Boulettes & Noodles Menu: https://grabbit-express.com/menu/)
+- Mahek (Indian & Tandoor: https://grabbit-express.com/menu/)
+- Artisan Coffee (Menu: https://grabbit-express.com/menu/)
 - Manjo
 - Aromas of India
-- Takos
 - Electronics shop Mahogany  
 
 ### **1\. Greeting Message**
