@@ -387,11 +387,7 @@ export async function handleRiderReply(args: {
     cleanText.startsWith("decline");
 
   if (!isAccept && !isDecline) {
-    // If rider sent another message, acknowledge them without letting it fall to customer AI
-    return {
-      handled: true,
-      responseMessage: `Hi ${rider.name}, to respond to trip requests, reply *YES* to accept or *NO* to decline.`,
-    };
+    return { handled: false };
   }
 
   // Find latest pending pre-booking for this rider (or latest pending if in test mode)
