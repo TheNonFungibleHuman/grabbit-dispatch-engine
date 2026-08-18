@@ -4,7 +4,7 @@ import { FLEET_RIDERS, findRiderByName, findRiderByPhone, getCustomTrackingUrl, 
 import { notifyRiderForBooking } from "../riders/notify-rider.ts";
 import { assignDeliveryRider, createDelivery } from "../kilo/client.ts";
 import { sendCustomerText } from "../wasender/send-tracked.ts";
-import type { CreateKiloDeliveryInput, KiloPackageSize } from "../kilo/types.ts";
+import type { CreateKiloDeliveryInput, KiloErrandMode, KiloPackageSize, KiloServiceKind } from "../kilo/types.ts";
 
 export interface PreBooking {
   id: string;
@@ -60,32 +60,59 @@ export async function savePreBooking(booking: PreBooking): Promise<void> {
   }
 }
 
+const MAX_DELIVERIES_PER_SLOT = 3;
+
 /**
- * Checks if a rider's slot is already booked (Anti-Double-Booking Guard).
+ * Checks if a rider's slot has available capacity (Anti-Double-Booking Guard).
  */
 export async function checkSlotAvailability(args: {
   slotKey: string;
   assignedRider: string;
+  customerPhone?: string;
+  serviceKind?: string;
 }): Promise<{ available: boolean; conflictingBooking?: PreBooking }> {
   const all = await listAllPreBookings();
   const riderNormalized = args.assignedRider.trim().toLowerCase();
+  const cleanCustomer = args.customerPhone?.replace(/\D/g, "");
 
-  const conflict = all.find(
+  const activeBookings = all.filter(
     (b) =>
       b.slotKey === args.slotKey &&
       b.assignedRider.toLowerCase().includes(riderNormalized) &&
       (b.status === "pending_rider" || b.status === "confirmed" || b.status === "dispatched"),
   );
 
-  if (conflict) {
-    return { available: false, conflictingBooking: conflict };
+  // If the same customer already has a pending booking for this slot, allow updating it
+  const isSameCustomer = cleanCustomer && activeBookings.some((b) => b.customerPhone.replace(/\D/g, "") === cleanCustomer);
+  if (isSameCustomer) {
+    return { available: true };
+  }
+
+  // Passenger trips are strictly 1 per slot; Deliveries/errands allow up to MAX_DELIVERIES_PER_SLOT
+  const maxCapacity = args.serviceKind === "trip" ? 1 : MAX_DELIVERIES_PER_SLOT;
+
+  if (activeBookings.length >= maxCapacity) {
+    return { available: false, conflictingBooking: activeBookings[0] };
   }
 
   return { available: true };
 }
 
+export async function cancelPreBooking(id: string): Promise<boolean> {
+  const all = await listAllPreBookings();
+  const found = all.find((b) => b.id === id);
+  if (!found) return false;
+  found.status = "cancelled";
+  await savePreBooking(found);
+  return true;
+}
+
+export async function clearAllPreBookings(): Promise<void> {
+  await writeJson(INDEX_PATH, { ids: [] });
+}
+
 /**
- * Creates a pre-booking request, checks for double-booking, and notifies the rider.
+ * Creates a pre-booking request, checks for capacity, and notifies the rider.
  */
 export async function createPreBookingRequest(args: {
   customerPhone: string;
@@ -108,14 +135,16 @@ export async function createPreBookingRequest(args: {
   error?: string;
   doubleBooked?: boolean;
 }> {
-  // 1. Anti-Double-Booking Check
+  // 1. Anti-Double-Booking / Capacity Check
   const availability = await checkSlotAvailability({
     slotKey: args.slotKey,
     assignedRider: args.assignedRider,
+    customerPhone: args.customerPhone,
+    serviceKind: args.serviceKind,
   });
 
   if (!availability.available) {
-    logWarn("prebooking", "slot double-booking prevented", {
+    logWarn("prebooking", "slot capacity reached", {
       slotKey: args.slotKey,
       assignedRider: args.assignedRider,
       existingCustomer: availability.conflictingBooking?.customerPhone,
@@ -123,7 +152,7 @@ export async function createPreBookingRequest(args: {
     return {
       ok: false,
       doubleBooked: true,
-      error: `Rider ${args.assignedRider} is already booked for ${args.scheduledTime}. Please choose another time slot.`,
+      error: `Rider ${args.assignedRider} is fully booked for ${args.scheduledTime}. Please choose another time slot.`,
     };
   }
 
@@ -185,12 +214,33 @@ export async function handleRiderReply(args: {
     return { handled: false };
   }
 
-  const cleanText = args.text.trim().toLowerCase();
-  const isAccept = cleanText === "yes" || cleanText === "confirm" || cleanText === "ok" || cleanText === "y";
-  const isDecline = cleanText === "no" || cleanText === "decline" || cleanText === "n";
+  const cleanText = args.text.trim().toLowerCase().replace(/[^a-z0-9 ]/g, "");
+  const isAccept =
+    cleanText === "yes" ||
+    cleanText === "confirm" ||
+    cleanText === "confirmed" ||
+    cleanText === "ok" ||
+    cleanText === "y" ||
+    cleanText === "accept" ||
+    cleanText === "accepted" ||
+    cleanText.startsWith("yes") ||
+    cleanText.startsWith("confirm");
+
+  const isDecline =
+    cleanText === "no" ||
+    cleanText === "decline" ||
+    cleanText === "declined" ||
+    cleanText === "n" ||
+    cleanText === "reject" ||
+    cleanText.startsWith("no") ||
+    cleanText.startsWith("decline");
 
   if (!isAccept && !isDecline) {
-    return { handled: false };
+    // If rider sent another message, acknowledge them without letting it fall to customer AI
+    return {
+      handled: true,
+      responseMessage: `Hi ${rider.name}, to respond to trip requests, reply *YES* to accept or *NO* to decline.`,
+    };
   }
 
   // Find latest pending pre-booking for this rider (or latest pending if in test mode)
@@ -217,7 +267,7 @@ export async function handleRiderReply(args: {
     });
     return {
       handled: true,
-      responseMessage: `Hi ${rider.name}, you have no pending trip requests right now.`,
+      responseMessage: `Hi ${actualRider.name}, you have no pending trip requests right now.`,
     };
   }
 
@@ -227,19 +277,23 @@ export async function handleRiderReply(args: {
 
     logInfo("prebooking", "rider declined booking", {
       bookingId: pending.id,
-      rider: rider.name,
+      rider: actualRider.name,
     });
 
     // Notify customer
-    await sendCustomerText({
-      to: pending.customerPhone,
-      text: `Hello ${pending.customerName || "there"}, rider ${rider.name} is unavailable for your requested time (${pending.scheduledTime}). Would you like to select another time?`,
-      messageId: `decline_${pending.id}_${Date.now()}`,
-    });
+    try {
+      await sendCustomerText({
+        to: pending.customerPhone,
+        text: `Hello ${pending.customerName || "there"}, rider ${actualRider.name} is unavailable for your requested time (${pending.scheduledTime}). Would you like to select another time?`,
+        messageId: `decline_${pending.id}_${Date.now()}`,
+      });
+    } catch (custErr) {
+      logWarn("prebooking", "error notifying customer of decline", formatError(custErr));
+    }
 
     return {
       handled: true,
-      responseMessage: `Understood, ${rider.name}. The request has been declined.`,
+      responseMessage: `Understood, ${actualRider.name}. The request has been declined.`,
     };
   }
 
@@ -250,10 +304,15 @@ export async function handleRiderReply(args: {
   });
 
   try {
-    const isTrip = pending.serviceKind === "trip";
+    const hasPhotos = Boolean(pending.packageImages && pending.packageImages.length > 0);
+    // For food orders, errands, or passenger trips without package photos, use errand with at_place mode
+    const isTripOrErrand = pending.serviceKind === "trip" || pending.serviceKind === "errand" || !hasPhotos;
+    const serviceKind: KiloServiceKind = isTripOrErrand ? "errand" : (pending.serviceKind as any);
+    const errandMode: KiloErrandMode | undefined = serviceKind === "errand" ? "at_place" : undefined;
+
     const kiloPayload: CreateKiloDeliveryInput = {
-      serviceKind: isTrip ? "errand" : (pending.serviceKind as any),
-      errandMode: isTrip ? "at_place" : undefined,
+      serviceKind,
+      errandMode,
       deliveryMode: "pickup",
       senderName: pending.customerName || "Customer",
       senderPhone: pending.customerPhone,
@@ -265,7 +324,7 @@ export async function handleRiderReply(args: {
       deliveryCoords: pending.deliveryCoords || { lat: -20.1026, lng: 57.5620 },
       packageDescription: pending.packageDescription || `${pending.serviceKind.toUpperCase()} booking for ${pending.scheduledTime}`,
       packageSize: pending.packageSize || "small",
-      packageImages: pending.packageImages && pending.packageImages.length > 0 ? pending.packageImages : [],
+      packageImages: hasPhotos ? pending.packageImages! : [],
       customerCollectionMethod: "cash_on_delivery",
       idempotencyKey: `kilo_${pending.id}`,
     };
@@ -322,7 +381,7 @@ export async function handleRiderReply(args: {
 
     return {
       handled: true,
-      responseMessage: `👍 Thanks ${actualRider.name}! The trip for ${pending.customerName} at ${pending.scheduledTime} is confirmed. Tracking link: ${trackingUrl}`,
+      responseMessage: `👍 Thanks ${actualRider.name}! The trip for ${pending.customerName} at ${pending.scheduledTime} is confirmed.\n\nLive Tracking Link: ${trackingUrl}`,
     };
   } catch (error) {
     logError("prebooking", "failed to create Kilo delivery on rider acceptance", error);

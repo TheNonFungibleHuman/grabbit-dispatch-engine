@@ -116,11 +116,11 @@ function ScheduleRefresh(props: { summary: string }) {
 }
 
 export function AdminNav(props: {
-  active: "knowledge" | "messages";
+  active: "knowledge" | "messages" | "slots";
   agentEnabled: boolean;
   scheduleSummary: string;
 }) {
-  const linkClass = (id: "knowledge" | "messages") =>
+  const linkClass = (id: "knowledge" | "messages" | "slots") =>
     [
       "rounded-md px-3 py-2 text-sm font-medium",
       props.active === id
@@ -140,6 +140,9 @@ export function AdminNav(props: {
           </Link>
           <Link href="/admin/messages" className={linkClass("messages")}>
             Messages
+          </Link>
+          <Link href="/admin/slots" className={linkClass("slots")}>
+            Time Slots
           </Link>
         </div>
         <div className="flex flex-wrap items-start gap-3">

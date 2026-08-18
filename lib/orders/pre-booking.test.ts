@@ -62,6 +62,6 @@ describe("pre-booking & anti-double-booking guard", () => {
 
     assert.equal(book2.ok, false);
     assert.equal(book2.doubleBooked, true);
-    assert.match(book2.error || "", /already booked/i);
+    assert.match(book2.error || "", /booked/i);
   });
 });
