@@ -63,11 +63,16 @@ export function findRiderByPhone(phone: string): RiderProfile | null {
 }
 
 export function getCustomTrackingUrl(deliveryId: string, accessCode?: string | null): string {
-  // If custom tracking URL base is configured or default to delivery.grabbit-express.com
+  // Custom tracking URL format: https://delivery.grabbit-express.com/track/{deliveryId}/{accessCode}
   const base = (
     process.env.TRACKING_URL_BASE?.trim() || "https://delivery.grabbit-express.com/track"
   ).replace(/\/+$/, "");
 
-  const codeOrId = accessCode?.trim() || deliveryId;
-  return `${base}/${codeOrId}`;
+  const id = deliveryId?.trim();
+  const code = accessCode?.trim();
+
+  if (id && code) {
+    return `${base}/${id}/${code}`;
+  }
+  return `${base}/${id || code}`;
 }

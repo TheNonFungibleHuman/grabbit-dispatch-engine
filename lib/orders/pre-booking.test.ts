@@ -21,8 +21,7 @@ describe("rider directory & custom tracking", () => {
 
   it("generates custom tracking links with delivery.grabbit-express.com", () => {
     const tracking = getCustomTrackingUrl("del_98765", "ACC-123");
-    assert.match(tracking, /delivery\.grabbit-express\.com\/track\//);
-    assert.match(tracking, /ACC-123/);
+    assert.equal(tracking, "https://delivery.grabbit-express.com/track/del_98765/ACC-123");
   });
 });
 
