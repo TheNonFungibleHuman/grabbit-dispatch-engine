@@ -1,5 +1,5 @@
-import { readJson, writeJson } from "../blob/json-store";
-import { normalizeSender } from "./sessions";
+import { readJson, writeJson } from "../blob/json-store.ts";
+import { normalizeSender } from "./sessions.ts";
 
 export type TranscriptRole = "customer" | "agent" | "note";
 

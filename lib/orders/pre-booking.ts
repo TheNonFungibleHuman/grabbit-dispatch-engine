@@ -246,22 +246,24 @@ export async function createPreBookingRequest(args: {
     trackingUrl,
   });
 
-  // 2. Dispatch instant notification to assigned rider
-  try {
-    await notifyRiderForBooking({
-      bookingId,
-      customerName: args.customerName,
-      customerPhone: args.customerPhone,
-      serviceKind: args.serviceKind,
-      pickupAddress: args.pickupAddress,
-      dropoffAddress: args.deliveryAddress,
-      scheduledTime: `${args.scheduledDate} ${args.scheduledTime}`,
-      assignedRider: actualRider.name,
-      trackingUrl,
-    });
-  } catch (notifErr) {
-    logWarn("prebooking", "rider notification warning", formatError(notifErr));
-  }
+  // 2. Dispatch notification to assigned rider (queued after customer confirmation)
+  setTimeout(async () => {
+    try {
+      await notifyRiderForBooking({
+        bookingId,
+        customerName: args.customerName,
+        customerPhone: args.customerPhone,
+        serviceKind: args.serviceKind,
+        pickupAddress: args.pickupAddress,
+        dropoffAddress: args.deliveryAddress,
+        scheduledTime: `${args.scheduledDate} ${args.scheduledTime}`,
+        assignedRider: actualRider.name,
+        trackingUrl,
+      });
+    } catch (notifErr) {
+      logWarn("prebooking", "rider notification warning", formatError(notifErr));
+    }
+  }, 1000);
 
   return { ok: true, booking, trackingUrl, kiloDeliveryId, assignedRider: actualRider.name };
 }

@@ -2,19 +2,19 @@ import {
   getCapabilities,
   listServiceLocations,
   listWarehouses,
-} from "./client";
+} from "./client.ts";
 import {
   composeServiceLocationAddress,
   expandUnitOptions,
   matchServiceLocations,
   resolveUnitFollowUp,
-} from "./locations";
+} from "./locations.ts";
 import type {
   KiloCapabilities,
   KiloServiceLocation,
   KiloWarehouse,
-} from "./types";
-import { formatError, logInfo, logWarn } from "../log";
+} from "./types.ts";
+import { formatError, logInfo, logWarn } from "../log.ts";
 
 export {
   composeServiceLocationAddress,

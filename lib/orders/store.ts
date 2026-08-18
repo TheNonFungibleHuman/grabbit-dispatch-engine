@@ -1,5 +1,5 @@
-import type { KiloPackageSize } from "../kilo/types";
-import { readJson, writeJson } from "../blob/json-store";
+import type { KiloPackageSize } from "../kilo/types.ts";
+import { readJson, writeJson } from "../blob/json-store.ts";
 
 export interface OrderDraft {
   senderPhone: string;

@@ -6,7 +6,7 @@ export {
   listDeliveries,
   listServiceLocations,
   listWarehouses,
-} from "./client";
+} from "./client.ts";
 export {
   composeServiceLocationAddress,
   expandUnitOptions,
@@ -15,16 +15,16 @@ export {
   pickCollectionMethod,
   resolveUnitFollowUp,
   summarizeDiscoveryForAgent,
-} from "./discovery";
+} from "./discovery.ts";
 export {
   assertApiCoords,
   pinFromServiceLocation,
   pinFromWarehouse,
-} from "./locations";
-export { mapDraftToCreateDeliveryInput, requiresPackageImages, validatePackageImages } from "./map-order";
-export type { DeliveryDraftForKilo } from "./map-order";
-export { statusMessageForCustomer } from "./status-messages";
-export { KiloApiError } from "./types";
+} from "./locations.ts";
+export { mapDraftToCreateDeliveryInput, requiresPackageImages, validatePackageImages } from "./map-order.ts";
+export type { DeliveryDraftForKilo } from "./map-order.ts";
+export { statusMessageForCustomer } from "./status-messages.ts";
+export { KiloApiError } from "./types.ts";
 export type {
   CapabilitiesResponse,
   CreateKiloDeliveryInput,
@@ -39,12 +39,12 @@ export type {
   KiloWebhookPayload,
   ServiceLocationsResponse,
   WarehousesResponse,
-} from "./types";
+} from "./types.ts";
 export {
   extractKiloWebhook,
   isOtpIssuedEvent,
   resolveWebhookNotifyPhone,
   toWhatsAppE164,
-} from "./webhook-payload";
-export type { ExtractedKiloWebhook, KiloWebhookOtp } from "./webhook-payload";
-export { getKiloWebhookSecret, verifyKiloSignature } from "./verify";
+} from "./webhook-payload.ts";
+export type { ExtractedKiloWebhook, KiloWebhookOtp } from "./webhook-payload.ts";
+export { getKiloWebhookSecret, verifyKiloSignature } from "./verify.ts";

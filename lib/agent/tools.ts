@@ -351,7 +351,7 @@ export async function executeAgentTool(args: {
       const tripType = value.tripType as ("one_way" | "round_trip" | undefined);
 
       // 1. Resolve on-duty rider for this target date & time
-      const { getRiderForTargetSlot } = await import("../schedule/availability");
+      const { getRiderForTargetSlot } = await import("../schedule/availability.ts");
       const targetSlot = await getRiderForTargetSlot({
         targetDate: scheduledDate,
         targetTime: scheduledTime,
@@ -367,7 +367,7 @@ export async function executeAgentTool(args: {
       const assignedRider = targetSlot.riders[0];
 
       // 2. Create prebooking with anti-double-booking guard & notify rider
-      const { createPreBookingRequest } = await import("../orders/pre-booking");
+      const { createPreBookingRequest } = await import("../orders/pre-booking.ts");
       const prebookResult = await createPreBookingRequest({
         customerPhone: args.senderPhone,
         customerName,

@@ -1,10 +1,10 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { memoryClear, readJson, writeJson } from "../blob/json-store";
-import { logInfo } from "../log";
-import { prepareKnowledgeForPrompt } from "./knowledge-format";
+import { memoryClear, readJson, writeJson } from "../blob/json-store.ts";
+import { logInfo } from "../log.ts";
+import { prepareKnowledgeForPrompt } from "./knowledge-format.ts";
 
-export { prepareKnowledgeForPrompt } from "./knowledge-format";
+export { prepareKnowledgeForPrompt } from "./knowledge-format.ts";
 
 export const KNOWLEDGE_BLOB_PATH = "grabbit/admin/knowledge.json";
 

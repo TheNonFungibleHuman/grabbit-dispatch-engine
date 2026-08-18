@@ -1,32 +1,32 @@
-import { geocodeAddress } from "../geocode";
+import { geocodeAddress } from "../geocode/index.ts";
 import {
   getDiscoveryBundle,
   matchServiceLocations,
   pickCollectionMethod,
   resolveUnitFollowUp,
-} from "../kilo/discovery";
-import { pinFromServiceLocation, pinFromWarehouse } from "../kilo/locations";
+} from "../kilo/discovery.ts";
+import { pinFromServiceLocation, pinFromWarehouse } from "../kilo/locations.ts";
 import {
   createDelivery,
   mapDraftToCreateDeliveryInput,
   type DeliveryDraftForKilo,
-} from "../kilo";
-import { KiloApiError } from "../kilo/types";
+} from "../kilo/index.ts";
+import { KiloApiError } from "../kilo/types.ts";
 import type {
   KiloCoords,
   KiloDeliveryMode,
   KiloErrandMode,
   KiloPackageSize,
   KiloServiceKind,
-} from "../kilo/types";
-import { requiresPackageImages } from "../kilo/map-order";
-import { formatError, logInfo, logWarn } from "../log";
+} from "../kilo/types.ts";
+import { requiresPackageImages } from "../kilo/map-order.ts";
+import { formatError, logInfo, logWarn } from "../log.ts";
 import {
   clearOrderDraft,
   getOrderDraft,
   saveDeliveryRecord,
-} from "../orders/store";
-import { getAvailabilitySnapshot, clearScheduleCache } from "../schedule/availability";
+} from "../orders/store.ts";
+import { getAvailabilitySnapshot, clearScheduleCache } from "../schedule/availability.ts";
 
 export interface BookDeliveryToolArgs {
   serviceKind?: KiloServiceKind;
