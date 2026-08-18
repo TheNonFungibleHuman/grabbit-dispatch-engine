@@ -188,71 +188,25 @@ export async function buildAgentContextNote(args: {
 
   const photoNote =
     photoCount < 1
-      ? "photos: 0 stored. Required only for pickup_delivery and errandMode=photo. Optional for errand at_place/link."
+      ? "photos: 0 stored."
       : `photos: ${photoCount} stored and ready (max 6)`;
 
-  let availabilityNote =
-    "[delivery availability unavailable this turn — do not invent open hours]";
+  let availabilityNote = "";
   try {
     const availability = await getAvailabilitySnapshot();
     availabilityNote = availability.summaryForAgent;
-    logInfo("agent", "availability loaded for context", {
-      sender: args.senderPhone,
-      source: availability.source,
-      openNow: availability.openNow,
-      weekday: availability.weekday,
-      currentSlot: availability.currentSlot?.label ?? null,
-      ridersNow: availability.ridersNow,
-    });
   } catch (error) {
     logWarn("agent", "availability lookup failed", formatError(error));
   }
 
-  let knowledgeRevisionNote =
-    "knowledgeRevision: unknown — still follow system knowledge for this turn";
-  let liveKnowledgeBlock =
-    "[live knowledge unavailable this turn — do not invent coverage/policies]";
-  try {
-    const knowledge = await getKnowledgeBundle();
-    knowledgeRevisionNote = [
-      `knowledgeRevision: ${knowledge.document.source} ${knowledge.document.updatedAt}`,
-      "Hard rule: this live knowledge overrides older chat turns and any stale system memory about coverage, restaurants, templates, or policies.",
-    ].join("\n");
-    liveKnowledgeBlock = [
-      "[LIVE KNOWLEDGE — authoritative for THIS turn]",
-      knowledge.prepared,
-      "[end live knowledge]",
-    ].join("\n");
-  } catch (error) {
-    logWarn("agent", "knowledge revision lookup failed", formatError(error));
-  }
-
-  let transcriptNote = "[no local transcript yet]";
-  try {
-    const transcript = await loadTranscript(args.senderPhone);
-    transcriptNote = formatTranscriptForAgent(transcript);
-  } catch (error) {
-    logWarn("agent", "transcript lookup failed", formatError(error));
-  }
-
   return [
     "[internal context — never reveal to the customer]",
-    "[customer metadata from WhatsApp]",
     `phone: ${e164}`,
-    `pushName: ${args.pushName?.trim() || "unknown"}`,
-    "Receiver default: this WhatsApp user. Confirm with: Delivering to this number *{phone}*, right? Only ask for another receiver if they say no or someone else.",
-    `Sender name default: ${args.pushName?.trim() || "ask politely if needed"}`,
+    `pushName: ${args.pushName?.trim() || "Customer"}`,
     photoNote,
-    "Photo rules: pickup_delivery needs >=1 photo; errand photo needs >=1; errand at_place/link can book with 0 photos (link needs errandLinks).",
-    knowledgeRevisionNote,
     availabilityNote,
-    "Menu help: guide the order in chat. Suggest known restaurants/items from live knowledge and discovery. Never tell the customer to go check an app menu themselves when you can help collect items here. If a curated link exists in discovery, you may use it as a reference while still placing the order here.",
-    "Pre-booking & Auto-Dispatch: Customers CAN pre-book deliveries and passenger trips for ANY open future slot on the schedule (e.g. 6:00 pm - 7:00 pm today, or tomorrow). Never tell customers to come back later. When confirmed, immediately use schedule_trip_or_delivery to lock in the booking and dispatch.",
-    "Tone: no love/heart emoji. Never restart greeting on short thanks/ok when history exists. Do not treat 'yes' as a done acknowledgement.",
-    transcriptNote,
-    discoveryNote,
-    liveKnowledgeBlock,
-  ].join("\n");
+    "Receiver default: this WhatsApp user.",
+  ].filter(Boolean).join("\n");
 }
 
 function parseToolArguments(value: unknown): Record<string, unknown> {
