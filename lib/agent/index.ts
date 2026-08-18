@@ -1,16 +1,16 @@
-import { generateAgentReply } from "./gemini";
-import { isShortAcknowledgement, sanitizeWhatsAppText } from "./format";
-import { formatError, logError, logInfo, logWarn } from "../log";
-import { persistIncomingPackageImage } from "../media/wasender";
-import { addPackageImageToDraft } from "../orders/store";
-import { sendCustomerText } from "../wasender/send-tracked";
-import type { IncomingUserMessage } from "../wasender/types";
+import { generateAgentReply } from "./deepseek.ts";
+import { isShortAcknowledgement, sanitizeWhatsAppText } from "./format.ts";
+import { formatError, logError, logInfo, logWarn } from "../log.ts";
+import { persistIncomingPackageImage } from "../media/wasender.ts";
+import { addPackageImageToDraft } from "../orders/store.ts";
+import { sendCustomerText } from "../wasender/send-tracked.ts";
+import type { IncomingUserMessage } from "../wasender/types.ts";
 import {
   appendTranscriptEntry,
   isInQuietWindow,
   loadTranscript,
   recentDisabledCustomerMessages,
-} from "./transcript";
+} from "./transcript.ts";
 
 function toE164(phone: string): string {
   const digits = phone.replace(/\D/g, "");
@@ -22,7 +22,7 @@ function toE164(phone: string): string {
 
 function hasImageMessage(message: IncomingUserMessage): boolean {
   return Boolean(
-    message.raw.message &&
+    message.raw?.message &&
       typeof message.raw.message === "object" &&
       "imageMessage" in message.raw.message,
   );
@@ -191,6 +191,6 @@ export async function processIncomingUserMessage(
   });
 }
 
-export { generateAgentReply } from "./gemini";
+export { generateAgentReply } from "./deepseek";
 export { sanitizeWhatsAppText } from "./format";
 export { buildGrabbitSystemInstruction } from "./prompt";

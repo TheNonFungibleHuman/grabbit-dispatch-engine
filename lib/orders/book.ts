@@ -20,7 +20,7 @@ import type {
   KiloServiceKind,
 } from "../kilo/types";
 import { requiresPackageImages } from "../kilo/map-order";
-import { logInfo, logWarn } from "../log";
+import { formatError, logInfo, logWarn } from "../log";
 import {
   clearOrderDraft,
   getOrderDraft,
@@ -634,11 +634,43 @@ export async function bookKiloDeliveryFromChat(args: {
 
     await clearOrderDraft(args.chatSenderPhone);
 
+    // If an on-duty rider is active right now, assign them in Kilo
+    let assignedRiderName: string | null = null;
+    try {
+      const { getAvailabilitySnapshot } = await import("../schedule/availability");
+      const snap = await getAvailabilitySnapshot();
+      if (snap.ridersNow && snap.ridersNow.length > 0) {
+        const { findRiderByName } = await import("../riders/config");
+        const { assignDeliveryRider } = await import("../kilo/client");
+        const activeName = snap.ridersNow[0];
+        const riderProfile = findRiderByName(activeName);
+        if (riderProfile?.kiloRiderId) {
+          try {
+            await assignDeliveryRider(delivery.id, riderProfile.kiloRiderId);
+            assignedRiderName = riderProfile.name;
+            logInfo("kilo", "auto-assigned live on-duty rider", {
+              deliveryId: delivery.id,
+              rider: riderProfile.name,
+            });
+          } catch (assignErr) {
+            logWarn("kilo", "auto-assign rider error", formatError(assignErr));
+          }
+        }
+      }
+    } catch (schedErr) {
+      logWarn("kilo", "availability lookup error during booking", formatError(schedErr));
+    }
+
+    const { getCustomTrackingUrl } = await import("../riders/config");
+    const trackingUrl = getCustomTrackingUrl(delivery.id, delivery.access_code);
+
     return {
       ok: true,
       deliveryId: delivery.id,
       status: delivery.status,
       accessCode: delivery.access_code ?? null,
+      trackingUrl,
+      assignedRider: assignedRiderName,
       pickupLabel: pickup.label,
       deliveryLabel: dropoff.label,
       receiverPhone,

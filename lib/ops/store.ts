@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { readJson, writeJson } from "../blob/json-store";
-import { formatError, logWarn } from "../log";
+import { readJson, writeJson } from "../blob/json-store.ts";
+import { formatError, logWarn } from "../log.ts";
 import {
   applyOpsEvent,
   emptyOpsState,
@@ -11,7 +11,7 @@ import {
   type OpsEventType,
   type OpsState,
   type ThreadOps,
-} from "./model";
+} from "./model.ts";
 
 export type {
   OpsEvent,

@@ -88,6 +88,30 @@ async function onUserMessage(message: IncomingUserMessage): Promise<void> {
     preview: message.text,
   });
 
+  // Check if this message is a YES / NO response from a registered fleet rider
+  try {
+    const { handleRiderReply } = await import("../orders/pre-booking");
+    const riderResult = await handleRiderReply({
+      senderPhone: message.sender,
+      text: message.text,
+    });
+    if (riderResult.handled) {
+      if (riderResult.responseMessage) {
+        const to = message.sender.startsWith("+")
+          ? message.sender
+          : `+${message.sender.replace(/\D/g, "")}`;
+        await sendCustomerText({
+          to,
+          text: riderResult.responseMessage,
+          messageId: `rider_ack_${message.messageId}`,
+        });
+      }
+      return;
+    }
+  } catch (riderErr) {
+    logWarn("wasender", "rider reply check warning", formatError(riderErr));
+  }
+
   const agentOn = await isAgentEnabled();
   if (!agentOn) {
     await appendTranscriptEntry(message.sender, {

@@ -1,5 +1,5 @@
-import { recordOpsEvent } from "../ops/store";
-import { sendTextMessage, type WasenderSendResult } from "./client";
+import { recordOpsEvent } from "../ops/store.ts";
+import { sendTextMessage, type WasenderSendResult } from "./client.ts";
 
 /**
  * Customer-facing send with ops tracking (success / fail / dropped numbers).

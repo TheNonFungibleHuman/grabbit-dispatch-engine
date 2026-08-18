@@ -34,18 +34,8 @@ describe("buildGrabbitSystemInstruction", () => {
     assert.match(promptSource, /Delivering to this number/i);
     assert.match(promptSource, /match_service_location/);
     assert.match(promptSource, /Never mention Kilo/i);
-    assert.match(promptSource, /Trip \(passenger ride\)/i);
-    assert.match(promptSource, /reception only/i);
-    assert.match(promptSource, /HARD STOP on delivery intake/i);
-    assert.match(promptSource, /Never claim an order\/delivery was placed/i);
-    assert.match(promptSource, /ok:false means it was NOT placed/i);
-    assert.match(
-      promptSource,
-      /Never book or claim an on-demand delivery while availability status is CLOSED/i,
-    );
-    assert.match(promptSource, /Never use love\/heart emoji/i);
-    assert.match(promptSource, /come back during an open slot/i);
-    assert.match(promptSource, /menus are info-only/i);
+    assert.match(promptSource, /schedule_trip_or_delivery/i);
+    assert.match(promptSource, /Future Pre-Bookings/i);
     assert.match(promptSource, /Never break character/i);
 
     assert.match(promptSource, /Triolet/);

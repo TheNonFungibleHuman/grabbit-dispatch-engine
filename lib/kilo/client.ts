@@ -9,8 +9,8 @@ import type {
   ListKiloDeliveriesResponse,
   ServiceLocationsResponse,
   WarehousesResponse,
-} from "./types";
-import { KiloApiError } from "./types";
+} from "./types.ts";
+import { KiloApiError } from "./types.ts";
 
 const DEFAULT_BASE = "https://business.kiloapp.org/api/v1";
 
@@ -129,3 +129,28 @@ export async function cancelDelivery(
     },
   );
 }
+
+export async function assignDeliveryRider(
+  deliveryId: string,
+  riderId: string,
+): Promise<{ ok: true; delivery?: KiloDelivery }> {
+  return kiloFetch<{ ok: true; delivery?: KiloDelivery }>(
+    `/deliveries/${encodeURIComponent(deliveryId)}/assign`,
+    {
+      method: "POST",
+      body: JSON.stringify({ riderId }),
+    },
+  );
+}
+
+export async function listFleetRiders(params?: {
+  pickupLat?: number;
+  pickupLng?: number;
+}): Promise<{ ok: true; riders: unknown[] }> {
+  const query = new URLSearchParams();
+  if (params?.pickupLat !== undefined) query.set("pickup_lat", String(params.pickupLat));
+  if (params?.pickupLng !== undefined) query.set("pickup_lng", String(params.pickupLng));
+  const qs = query.toString();
+  return kiloFetch<{ ok: true; riders: unknown[] }>(`/riders${qs ? `?${qs}` : ""}`);
+}
+

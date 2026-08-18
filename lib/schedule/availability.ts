@@ -5,8 +5,10 @@ import { formatError, logInfo, logWarn } from "../log";
 import {
   evaluateAvailability,
   parseRiderScheduleCsv,
+  ridersFromCell,
   type AvailabilityEvaluation,
   type ScheduleSlot,
+  type WeekdayKey,
 } from "./model";
 
 export type {
@@ -225,3 +227,70 @@ export function clearScheduleCache(): void {
   cache = null;
   memoryClear(SCHEDULE_BLOB_PATH);
 }
+
+/**
+ * Finds the on-duty scheduled riders for a specific future target date and time.
+ */
+export async function getRiderForTargetSlot(args: {
+  targetDate: string; // YYYY-MM-DD or 'today' / 'tomorrow'
+  targetTime: string; // e.g. "12:00 pm", "14:30"
+}): Promise<{
+  available: boolean;
+  weekday: WeekdayKey;
+  slotLabel?: string;
+  riders: string[];
+  slotKey: string;
+}> {
+  const { slots } = await loadScheduleSlots();
+  
+  // Resolve target date to WeekdayKey
+  let resolvedDate = args.targetDate.trim();
+  const now = new Date();
+  if (resolvedDate.toLowerCase() === "today") {
+    resolvedDate = now.toISOString().slice(0, 10);
+  } else if (resolvedDate.toLowerCase() === "tomorrow") {
+    const tomorrow = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+    resolvedDate = tomorrow.toISOString().slice(0, 10);
+  }
+
+  const dateObj = new Date(resolvedDate + "T12:00:00Z");
+  const weekdayKeys: WeekdayKey[] = ["SUN", "MON", "TUES", "WED", "THURS", "FRI", "SAT"];
+  const weekday = weekdayKeys[isNaN(dateObj.getTime()) ? now.getDay() : dateObj.getUTCDay()] || "MON";
+
+  // Parse time to minutes
+  let timeMinutes = 12 * 60; // default 12pm
+  const timeRaw = args.targetTime.toLowerCase().trim();
+  const matchMeridiem = timeRaw.match(/^(\d{1,2})(?::(\d{2}))?\s*(am|pm)$/i);
+  const match24 = timeRaw.match(/^(\d{1,2}):(\d{2})$/);
+
+  if (matchMeridiem) {
+    let h = parseInt(matchMeridiem[1], 10);
+    const m = parseInt(matchMeridiem[2] || "0", 10);
+    const pm = matchMeridiem[3].toLowerCase() === "pm";
+    if (pm && h < 12) h += 12;
+    if (!pm && h === 12) h = 0;
+    timeMinutes = h * 60 + m;
+  } else if (match24) {
+    const h = parseInt(match24[1], 10);
+    const m = parseInt(match24[2], 10);
+    timeMinutes = h * 60 + m;
+  }
+
+  // Find slot that covers this time
+  const matchedSlot = slots.find(
+    (s) => timeMinutes >= s.startMinutes && timeMinutes < s.endMinutes,
+  ) || slots[0];
+
+  const cellText = matchedSlot?.byDay[weekday] || "";
+  const riders = ridersFromCell(cellText);
+  const slotKey = `${resolvedDate}_${matchedSlot?.label || "custom"}`;
+
+  return {
+    available: riders.length > 0,
+    weekday,
+    slotLabel: matchedSlot?.label,
+    riders,
+    slotKey,
+  };
+}
+

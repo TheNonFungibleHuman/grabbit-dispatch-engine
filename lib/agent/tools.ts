@@ -2,19 +2,19 @@ import {
   bookKiloDeliveryFromChat,
   matchPlaceForChat,
   type BookDeliveryToolArgs,
-} from "../orders/book";
+} from "../orders/book.ts";
 import {
   getDiscoveryBundle,
   summarizeDiscoveryForAgent,
-} from "../kilo/discovery";
-import { formatError, logError, logInfo, logWarn } from "../log";
-import { getOrderDraft } from "../orders/store";
-import { getAvailabilitySnapshot } from "../schedule/availability";
-import { getKnowledgeBundle } from "../admin/knowledge";
+} from "../kilo/discovery.ts";
+import { formatError, logError, logInfo, logWarn } from "../log.ts";
+import { getOrderDraft } from "../orders/store.ts";
+import { getAvailabilitySnapshot } from "../schedule/availability.ts";
+import { getKnowledgeBundle } from "../admin/knowledge.ts";
 import {
   formatTranscriptForAgent,
   loadTranscript,
-} from "./transcript";
+} from "./transcript.ts";
 
 export const AGENT_TOOLS = [
   {
@@ -108,7 +108,45 @@ export const AGENT_TOOLS = [
       required: ["packageDescription"],
     },
   },
+  {
+    type: "function" as const,
+    name: "schedule_trip_or_delivery",
+    description:
+      "Pre-book or schedule a future delivery or passenger trip for any date/time (even outside current hours). Checks on-duty rider from schedule and prevents double-booking. Notifies the assigned rider to confirm before final dispatch.",
+    parameters: {
+      type: "object",
+      properties: {
+        serviceKind: {
+          type: "string",
+          enum: ["pickup_delivery", "errand", "trip"],
+          description: "trip for passenger ride, pickup_delivery for food/packages, errand for errands",
+        },
+        scheduledDate: {
+          type: "string",
+          description: "Target date in YYYY-MM-DD format or 'today' / 'tomorrow'",
+        },
+        scheduledTime: {
+          type: "string",
+          description: "Target time e.g. '12:00 pm', '8:30 am', '17:00'",
+        },
+        pickupAddress: { type: "string" },
+        deliveryAddress: { type: "string" },
+        customerName: { type: "string" },
+        packageDescription: { type: "string" },
+      },
+      required: ["serviceKind", "scheduledDate", "scheduledTime", "pickupAddress", "deliveryAddress"],
+    },
+  },
 ];
+
+export const DEEPSEEK_AGENT_TOOLS = AGENT_TOOLS.map((tool) => ({
+  type: "function" as const,
+  function: {
+    name: tool.name,
+    description: tool.description,
+    parameters: tool.parameters,
+  },
+}));
 
 export async function buildAgentContextNote(args: {
   senderPhone: string;
@@ -294,6 +332,66 @@ export async function executeAgentTool(args: {
         }
       }
       return result;
+    }
+
+    if (args.name === "schedule_trip_or_delivery") {
+      const value = parseToolArguments(args.toolArguments);
+      const serviceKind = (value.serviceKind as "pickup_delivery" | "errand" | "trip") || "trip";
+      const scheduledDate = String(value.scheduledDate || "today");
+      const scheduledTime = String(value.scheduledTime || "12:00 pm");
+      const pickupAddress = String(value.pickupAddress || "");
+      const deliveryAddress = String(value.deliveryAddress || "");
+      const customerName = String(value.customerName || args.pushName || "Customer");
+      const packageDescription = value.packageDescription ? String(value.packageDescription) : undefined;
+
+      // 1. Resolve on-duty rider for this target date & time
+      const { getRiderForTargetSlot } = await import("../schedule/availability");
+      const targetSlot = await getRiderForTargetSlot({
+        targetDate: scheduledDate,
+        targetTime: scheduledTime,
+      });
+
+      if (!targetSlot.available || targetSlot.riders.length === 0) {
+        return {
+          ok: false,
+          error: `No rider is scheduled on duty on ${targetSlot.weekday} around ${scheduledTime}. Please offer another open time slot.`,
+        };
+      }
+
+      const assignedRider = targetSlot.riders[0];
+
+      // 2. Create prebooking with anti-double-booking guard & notify rider
+      const { createPreBookingRequest } = await import("../orders/pre-booking");
+      const prebookResult = await createPreBookingRequest({
+        customerPhone: args.senderPhone,
+        customerName,
+        serviceKind,
+        pickupAddress,
+        deliveryAddress,
+        packageDescription,
+        scheduledDate,
+        scheduledTime,
+        slotKey: targetSlot.slotKey,
+        assignedRider,
+      });
+
+      if (!prebookResult.ok) {
+        return {
+          ok: false,
+          doubleBooked: prebookResult.doubleBooked ?? false,
+          error: prebookResult.error,
+        };
+      }
+
+      return {
+        ok: true,
+        serviceKind,
+        scheduledDate,
+        scheduledTime,
+        assignedRider,
+        status: "pending_rider_confirmation",
+        message: `Your ${serviceKind} request for ${scheduledDate} at ${scheduledTime} is logged! We have notified rider ${assignedRider} to confirm and will send your live tracking link as soon as it is confirmed.`,
+      };
     }
 
     return { ok: false, error: `Unknown tool: ${args.name}` };
