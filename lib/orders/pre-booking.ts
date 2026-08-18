@@ -134,6 +134,9 @@ export async function createPreBookingRequest(args: {
   booking?: PreBooking;
   error?: string;
   doubleBooked?: boolean;
+  assignedRider?: string;
+  kiloDeliveryId?: string;
+  trackingUrl?: string;
 }> {
   // 1. Anti-Double-Booking / Capacity Check
   const availability = await checkSlotAvailability({
@@ -157,6 +160,55 @@ export async function createPreBookingRequest(args: {
   }
 
   const bookingId = `pb_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+  const actualRider = findRiderByName(args.assignedRider) || FLEET_RIDERS[0];
+  const hasPhotos = Boolean(args.packageImages && args.packageImages.length > 0);
+  const isTripOrErrand = args.serviceKind === "trip" || args.serviceKind === "errand" || !hasPhotos;
+  const kiloServiceKind: KiloServiceKind = isTripOrErrand ? "errand" : (args.serviceKind as any);
+  const kiloErrandMode: KiloErrandMode | undefined = kiloServiceKind === "errand" ? "at_place" : undefined;
+
+  let kiloDeliveryId: string | undefined;
+  let trackingUrl: string | undefined;
+
+  try {
+    const kiloPayload: CreateKiloDeliveryInput = {
+      serviceKind: kiloServiceKind,
+      errandMode: kiloErrandMode,
+      deliveryMode: "pickup",
+      senderName: args.customerName || "Customer",
+      senderPhone: args.customerPhone,
+      receiverName: args.customerName || "Customer",
+      receiverPhone: args.customerPhone,
+      pickupAddress: args.pickupAddress,
+      pickupCoords: args.pickupCoords || { lat: -20.1024, lng: 57.5621 },
+      deliveryAddress: args.deliveryAddress,
+      deliveryCoords: args.deliveryCoords || { lat: -20.1026, lng: 57.5620 },
+      packageDescription: args.packageDescription || `${args.serviceKind.toUpperCase()} booking for ${args.scheduledTime}`,
+      packageSize: args.packageSize || "small",
+      packageImages: hasPhotos ? args.packageImages! : [],
+      customerCollectionMethod: "cash_on_delivery",
+      idempotencyKey: `kilo_${bookingId}`,
+    };
+
+    const kiloRes = await createDelivery(kiloPayload);
+    const delivery = kiloRes.delivery;
+    kiloDeliveryId = delivery.id;
+    trackingUrl = getCustomTrackingUrl(delivery.id, delivery.access_code);
+
+    if (actualRider?.kiloRiderId) {
+      try {
+        await assignDeliveryRider(delivery.id, actualRider.kiloRiderId);
+        logInfo("prebooking", "auto-assigned rider in Kilo", {
+          deliveryId: delivery.id,
+          riderId: actualRider.kiloRiderId,
+        });
+      } catch (assignErr) {
+        logWarn("prebooking", "kilo assign warning", formatError(assignErr));
+      }
+    }
+  } catch (kiloErr) {
+    logError("prebooking", "failed to create Kilo delivery", kiloErr);
+  }
+
   const booking: PreBooking = {
     id: bookingId,
     customerPhone: args.customerPhone,
@@ -173,36 +225,45 @@ export async function createPreBookingRequest(args: {
     scheduledDate: args.scheduledDate,
     scheduledTime: args.scheduledTime,
     slotKey: args.slotKey,
-    assignedRider: args.assignedRider,
+    assignedRider: actualRider.name,
     declinedRiders: [],
-    status: "pending_rider",
+    status: "confirmed",
+    kiloDeliveryId,
+    trackingUrl,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   };
 
   await savePreBooking(booking);
 
-  logInfo("prebooking", "created pre-booking record", {
+  logInfo("prebooking", "created & confirmed pre-booking record", {
     bookingId,
     customer: args.customerPhone,
     slotKey: args.slotKey,
-    assignedRider: args.assignedRider,
+    assignedRider: actualRider.name,
     tripType: args.tripType,
+    kiloDeliveryId,
+    trackingUrl,
   });
 
-  // 2. Dispatch notification to assigned rider
-  await notifyRiderForBooking({
-    bookingId,
-    customerName: args.customerName,
-    customerPhone: args.customerPhone,
-    serviceKind: args.serviceKind,
-    pickupAddress: args.pickupAddress,
-    dropoffAddress: args.deliveryAddress,
-    scheduledTime: `${args.scheduledDate} ${args.scheduledTime}`,
-    assignedRider: args.assignedRider,
-  });
+  // 2. Dispatch instant notification to assigned rider
+  try {
+    await notifyRiderForBooking({
+      bookingId,
+      customerName: args.customerName,
+      customerPhone: args.customerPhone,
+      serviceKind: args.serviceKind,
+      pickupAddress: args.pickupAddress,
+      dropoffAddress: args.deliveryAddress,
+      scheduledTime: `${args.scheduledDate} ${args.scheduledTime}`,
+      assignedRider: actualRider.name,
+      trackingUrl,
+    });
+  } catch (notifErr) {
+    logWarn("prebooking", "rider notification warning", formatError(notifErr));
+  }
 
-  return { ok: true, booking };
+  return { ok: true, booking, trackingUrl, kiloDeliveryId, assignedRider: actualRider.name };
 }
 
 /**
@@ -256,7 +317,7 @@ export async function handleRiderReply(args: {
   const pending = all
     .filter(
       (b) =>
-        b.status === "pending_rider" &&
+        (b.status === "pending_rider" || b.status === "confirmed") &&
         (isTestMode || b.assignedRider.toLowerCase().includes(rider.name.toLowerCase())),
     )
     .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))[0];

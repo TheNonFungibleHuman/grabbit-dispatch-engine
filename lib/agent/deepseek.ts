@@ -195,6 +195,7 @@ export async function generateAgentReply(
 
   let bookingFailure: BookingFailureDetails | null = null;
   let bookingSucceeded = false;
+  let lastSuccessfulTrackingUrl: string | null = null;
   let responseId: string | undefined;
   let finalAssistantText = "";
 
@@ -311,8 +312,15 @@ export async function generateAgentReply(
         }
       }
 
-      if (toolCall.function.name === "schedule_trip_or_delivery" && ok) {
+      if (
+        (toolCall.function.name === "schedule_trip_or_delivery" ||
+          toolCall.function.name === "book_kilo_delivery") &&
+        ok
+      ) {
         bookingSucceeded = true;
+        if (result && typeof result === "object" && "trackingUrl" in result && (result as any).trackingUrl) {
+          lastSuccessfulTrackingUrl = String((result as any).trackingUrl);
+        }
       }
 
       // Add tool output to conversation
@@ -325,6 +333,11 @@ export async function generateAgentReply(
   }
 
   let text = sanitizeWhatsAppText(finalAssistantText);
+
+  // If a booking succeeded but the assistant omitted the live tracking URL, append it!
+  if (bookingSucceeded && lastSuccessfulTrackingUrl && !text.includes(lastSuccessfulTrackingUrl) && !text.includes("delivery.grabbit-express.com")) {
+    text = `${text}\n\n🔴 *Live Tracking Link:*\n${lastSuccessfulTrackingUrl}`;
+  }
 
   // Safety overrides & fallback protections
   if (bookingFailure) {

@@ -11,6 +11,7 @@ export interface RiderNotificationPayload {
   dropoffAddress: string;
   scheduledTime: string;
   assignedRider: string;
+  trackingUrl?: string;
 }
 
 export async function notifyRiderForBooking(
@@ -25,15 +26,17 @@ export async function notifyRiderForBooking(
   }
 
   const messageText = [
-    `🛵 *Grabbit Request — ${payload.serviceKind.toUpperCase()}*`,
-    `Customer: ${payload.customerName} (${payload.customerPhone})`,
+    `🛵 *New Grabbit ${payload.serviceKind.toUpperCase()} Assigned!*`,
+    `You have a scheduled ${payload.serviceKind} during your shift:`,
+    ``,
+    `👤 Customer: *${payload.customerName}* (${payload.customerPhone})`,
     `⏰ Time: *${payload.scheduledTime}*`,
     `📍 Pickup: ${payload.pickupAddress}`,
     `📍 Drop-off: ${payload.dropoffAddress}`,
+    payload.trackingUrl ? `🔴 Live Tracking: ${payload.trackingUrl}` : ``,
     ``,
-    `Are you available for this trip?`,
-    `👉 Reply *YES* to accept or *NO* to decline.`,
-  ].join("\n");
+    `Grabbit Express 🛵⚡`,
+  ].filter(Boolean).join("\n");
 
   logInfo("riders", "dispatching rider notification", {
     rider: rider.name,

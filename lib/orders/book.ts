@@ -664,6 +664,25 @@ export async function bookKiloDeliveryFromChat(args: {
     const { getCustomTrackingUrl } = await import("../riders/config");
     const trackingUrl = getCustomTrackingUrl(delivery.id, delivery.access_code);
 
+    if (assignedRiderName) {
+      try {
+        const { notifyRiderForBooking } = await import("../riders/notify-rider");
+        await notifyRiderForBooking({
+          bookingId: delivery.id,
+          customerName: receiverName || "Customer",
+          customerPhone: receiverPhone,
+          serviceKind,
+          pickupAddress: pickup.label,
+          dropoffAddress: dropoff.label,
+          scheduledTime: "Immediate On-Demand",
+          assignedRider: assignedRiderName,
+          trackingUrl,
+        });
+      } catch (riderNotifErr) {
+        logWarn("kilo", "rider notification error on immediate booking", formatError(riderNotifErr));
+      }
+    }
+
     return {
       ok: true,
       deliveryId: delivery.id,

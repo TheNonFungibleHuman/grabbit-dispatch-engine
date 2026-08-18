@@ -395,9 +395,11 @@ export async function executeAgentTool(args: {
         serviceKind,
         scheduledDate,
         scheduledTime,
-        assignedRider,
-        status: "pending_rider_confirmation",
-        message: `Your ${serviceKind} request for ${scheduledDate} at ${scheduledTime} is logged! We have notified rider ${assignedRider} to confirm and will send your live tracking link as soon as it is confirmed.`,
+        assignedRider: prebookResult.assignedRider || assignedRider,
+        kiloDeliveryId: prebookResult.kiloDeliveryId,
+        trackingUrl: prebookResult.trackingUrl,
+        status: "confirmed",
+        message: `Your ${serviceKind} request for ${scheduledDate} at ${scheduledTime} is confirmed and assigned to rider ${prebookResult.assignedRider || assignedRider}! Live Tracking Link: ${prebookResult.trackingUrl}`,
       };
     }
 

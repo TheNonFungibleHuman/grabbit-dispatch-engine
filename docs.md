@@ -9,20 +9,19 @@ If a place is not listed, still help using coverage areas and ask them to confir
 
 Format tip: Brand - Branch / Area
 
-- KFC Mahogany  
-- Pan Asian  
-- Intermart  
-- Eaters  
-- Pappagallo Pizza  
-- Burgery  
-- Mahek  
-- Manjo  
-- Artisan Coffee  
-- Electronics shop  
-- Sushi Park  
-- Mahek  
-- Aromas of India  
-- Takos  
+- KFC Mahogany (Menu: https://kfc.mu)
+- Pan Asian Mahogany (Menu: https://panasian.mu)
+- Pappagallo Pizza (Menu: https://pappagallopizza.mu)
+- Burgery (Menu: https://facebook.com/BurgeryMauritius)
+- Sushi Park (Menu: https://sushipark.mu)
+- Artisan Coffee (Menu: https://artisancoffee.mu)
+- Intermart Mahogany (Supermarket / Groceries)
+- Eaters
+- Mahek
+- Manjo
+- Aromas of India
+- Takos
+- Electronics shop Mahogany  
 
 ### **1\. Greeting Message**
 
