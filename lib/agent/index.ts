@@ -68,7 +68,7 @@ export async function processIncomingUserMessage(
     messageId: message.messageId,
   });
 
-  if (hasImageMessage(message)) {
+  if (hasImageMessage(message) && message.raw?.message) {
     try {
       const imageUrl = await persistIncomingPackageImage({
         senderPhone: message.sender,

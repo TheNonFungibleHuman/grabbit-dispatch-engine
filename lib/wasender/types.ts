@@ -74,8 +74,8 @@ export type MessagesReceivedEvent =
 export interface IncomingUserMessage {
   messageId: string;
   sender: string;
-  remoteJid: string;
+  remoteJid?: string;
   text: string;
   pushName?: string;
-  raw: WasenderIncomingMessage;
+  raw?: WasenderIncomingMessage;
 }
