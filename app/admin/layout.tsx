@@ -13,8 +13,8 @@ export default function AdminLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <div className="min-h-full bg-[#f3f5f1] text-[#14201a]">
-      <div className="mx-auto w-full max-w-5xl px-4 py-8 sm:px-6">
+    <div className="min-h-screen bg-[var(--bg-surface)] text-[var(--text-ink)] transition-colors duration-200">
+      <div className="mx-auto w-full max-w-6xl px-4 py-8 sm:px-6 lg:px-8 space-y-6">
         {children}
       </div>
     </div>

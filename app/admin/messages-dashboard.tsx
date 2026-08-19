@@ -19,13 +19,13 @@ function formatWhen(iso?: string): string {
 function eventLabel(type: OpsEvent["type"]): string {
   switch (type) {
     case "inbound_received":
-      return "In";
+      return "Inbound";
     case "outbound_sent":
       return "Sent";
     case "outbound_failed":
-      return "Send failed";
+      return "Send Failed";
     case "agent_failed":
-      return "Agent failed";
+      return "Agent Failed";
     case "takeover_cleared":
       return "Handled";
     default:
@@ -36,16 +36,18 @@ function eventLabel(type: OpsEvent["type"]): string {
 function StatCard(props: { label: string; value: number; warn?: boolean }) {
   return (
     <div
-      className={`rounded-xl border bg-white p-4 ${
-        props.warn ? "border-[#f0c2c2]" : "border-[#d7dfd1]"
+      className={`rounded-[20px] bg-[var(--bg-card)] border p-4 shadow-sm ${
+        props.warn
+          ? "border-rose-500/30 dark:border-rose-500/30"
+          : "border-[#E8E5DC] dark:border-[#1D2620]"
       }`}
     >
-      <p className="text-xs font-medium uppercase tracking-wide text-[#4b5a50]">
+      <p className="text-[11px] font-semibold uppercase tracking-wider text-[#6C746E] dark:text-[#8E9690]">
         {props.label}
       </p>
       <p
-        className={`mt-2 text-3xl font-semibold tabular-nums ${
-          props.warn ? "text-[#9b2c2c]" : "text-[#14201a]"
+        className={`mt-2 font-display text-2xl font-bold tabular-nums ${
+          props.warn ? "text-rose-600 dark:text-rose-400" : "text-[#101412] dark:text-[#F6F3EC]"
         }`}
       >
         {props.value}
@@ -66,18 +68,18 @@ function TakeoverRow(props: { thread: ThreadOps }) {
   }, [state.ok, router]);
 
   return (
-    <li className="rounded-xl border border-[#f0c2c2] bg-[#fff8f8] p-4">
+    <li className="rounded-[20px] border border-rose-500/30 bg-rose-500/5 p-4 transition-all">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <p className="font-semibold tabular-nums">+{props.thread.phone}</p>
-          <p className="mt-1 text-sm text-[#9b2c2c]">
-            {props.thread.takeoverReason || "Needs human takeover"}
+          <span className="font-display font-bold text-sm text-[#101412] dark:text-[#F6F3EC]">
+            +{props.thread.phone}
+          </span>
+          <p className="mt-0.5 text-xs text-rose-600 dark:text-rose-400 font-medium">
+            {props.thread.takeoverReason || "Needs human operator takeover"}
           </p>
-          <p className="mt-1 text-xs text-[#4b5a50]">
+          <p className="mt-1 text-[11px] text-[#6C746E] dark:text-[#8E9690]">
             Last activity {formatWhen(props.thread.updatedAt)}
-            {props.thread.lastInboundAt
-              ? ` · last inbound ${formatWhen(props.thread.lastInboundAt)}`
-              : ""}
+            {props.thread.lastInboundAt ? ` · inbound ${formatWhen(props.thread.lastInboundAt)}` : ""}
           </p>
         </div>
         <form action={action}>
@@ -85,14 +87,14 @@ function TakeoverRow(props: { thread: ThreadOps }) {
           <button
             type="submit"
             disabled={pending}
-            className="rounded-md bg-[#1f7a4c] px-3 py-2 text-sm font-semibold text-white hover:bg-[#18643e] disabled:opacity-60"
+            className="px-3.5 py-1.5 rounded-full bg-[#7ed957] hover:bg-[#6fc847] text-[#101412] font-bold text-xs shadow-sm transition-all disabled:opacity-50"
           >
-            {pending ? "Saving…" : "Mark handled"}
+            {pending ? "Saving..." : "Mark Handled"}
           </button>
         </form>
       </div>
       {state.message && !state.ok ? (
-        <p className="mt-2 text-sm text-[#9b2c2c]">{state.message}</p>
+        <p className="mt-2 text-xs text-rose-600 dark:text-rose-400">{state.message}</p>
       ) : null}
     </li>
   );
@@ -108,47 +110,63 @@ export function MessagesDashboard(props: {
   scheduleSummary: string;
 }) {
   return (
-    <div className="space-y-8">
+    <div className="space-y-6">
       <AdminNav
         active="messages"
         agentEnabled={props.agentEnabled}
         scheduleSummary={props.scheduleSummary}
       />
 
-      <header>
-        <h1 className="text-3xl font-semibold tracking-tight">Messages</h1>
-        <p className="mt-2 max-w-2xl text-sm leading-6 text-[#4b5a50]">
-          Successful sends, failures, and numbers that dropped so you can take
-          over on WhatsApp. Updated {formatWhen(props.updatedAt)}.
-        </p>
-      </header>
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <h1 className="font-display text-2xl font-bold text-[#101412] dark:text-[#F6F3EC]">
+            Live Activity & Support Queue
+          </h1>
+          <p className="text-xs text-[#6C746E] dark:text-[#8E9690] mt-1">
+            Real-time WhatsApp traffic, message delivery status, and human operator takeover alerts.
+          </p>
+        </div>
+        <span className="text-[11px] text-[#6C746E] dark:text-[#8E9690]">
+          Updated: {formatWhen(props.updatedAt)}
+        </span>
+      </div>
 
-      <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+      {/* Stats Cards */}
+      <section className="grid grid-cols-2 sm:grid-cols-5 gap-3.5">
         <StatCard label="Inbound" value={props.stats.inbound} />
         <StatCard label="Sent OK" value={props.stats.outboundSuccess} />
         <StatCard
-          label="Send failed"
+          label="Send Failed"
           value={props.stats.outboundFailed}
           warn={props.stats.outboundFailed > 0}
         />
         <StatCard
-          label="Agent failed"
+          label="Agent Failed"
           value={props.stats.agentFailed}
           warn={props.stats.agentFailed > 0}
         />
         <StatCard
-          label="Needs takeover"
+          label="Needs Takeover"
           value={props.stats.needsTakeover}
           warn={props.stats.needsTakeover > 0}
         />
       </section>
 
-      <section className="space-y-3">
-        <h2 className="text-lg font-semibold">Needs takeover</h2>
+      {/* Human Takeover Queue */}
+      <section className="rounded-[24px] bg-[var(--bg-card)] border border-[#E8E5DC] dark:border-[#1D2620] p-6 shadow-sm space-y-4">
+        <div className="flex items-center justify-between">
+          <h2 className="font-display text-base font-bold text-[#101412] dark:text-[#F6F3EC]">
+            Human Takeover Queue
+          </h2>
+          <span className="text-xs text-[#6C746E] dark:text-[#8E9690]">
+            {props.takeovers.length} active alerts
+          </span>
+        </div>
+
         {props.takeovers.length < 1 ? (
-          <p className="rounded-xl border border-[#d7dfd1] bg-white px-4 py-3 text-sm text-[#4b5a50]">
-            No dropped numbers right now.
-          </p>
+          <div className="p-8 text-center rounded-[16px] bg-[#F6F3EC] dark:bg-[#0B0F0C] border border-[#E8E5DC] dark:border-[#1D2620] text-xs text-[#6C746E] dark:text-[#8E9690]">
+            All conversations are currently handled by the AI agent. No dropped numbers.
+          </div>
         ) : (
           <ul className="space-y-3">
             {props.takeovers.map((thread) => (
@@ -158,60 +176,58 @@ export function MessagesDashboard(props: {
         )}
       </section>
 
-      <section className="space-y-3">
-        <h2 className="text-lg font-semibold">Recent numbers</h2>
-        <div className="overflow-x-auto rounded-xl border border-[#d7dfd1] bg-white">
-          <table className="min-w-full text-left text-sm">
-            <thead className="border-b border-[#e4ebe0] text-xs uppercase tracking-wide text-[#4b5a50]">
+      {/* Recent Numbers Table */}
+      <section className="rounded-[24px] bg-[var(--bg-card)] border border-[#E8E5DC] dark:border-[#1D2620] overflow-hidden shadow-sm">
+        <div className="p-5 border-b border-[#E8E5DC] dark:border-[#1D2620]">
+          <h2 className="font-display text-base font-bold text-[#101412] dark:text-[#F6F3EC]">
+            Recent WhatsApp Conversations
+          </h2>
+        </div>
+
+        <div className="overflow-x-auto">
+          <table className="w-full text-left text-xs">
+            <thead className="bg-[#F6F3EC] dark:bg-[#0B0F0C] text-[#6C746E] dark:text-[#8E9690] border-b border-[#E8E5DC] dark:border-[#1D2620] uppercase tracking-wider font-semibold">
               <tr>
-                <th className="px-4 py-3 font-medium">Phone</th>
-                <th className="px-4 py-3 font-medium">Status</th>
-                <th className="px-4 py-3 font-medium">In</th>
-                <th className="px-4 py-3 font-medium">Sent</th>
-                <th className="px-4 py-3 font-medium">Failed</th>
-                <th className="px-4 py-3 font-medium">Updated</th>
+                <th className="p-3.5 font-semibold">Phone</th>
+                <th className="p-3.5 font-semibold">Status</th>
+                <th className="p-3.5 font-semibold">Inbound</th>
+                <th className="p-3.5 font-semibold">Sent</th>
+                <th className="p-3.5 font-semibold">Failed</th>
+                <th className="p-3.5 font-semibold">Last Active</th>
               </tr>
             </thead>
-            <tbody>
+            <tbody className="divide-y divide-[#E8E5DC] dark:divide-[#1D2620]">
               {props.recentThreads.length < 1 ? (
                 <tr>
-                  <td
-                    colSpan={6}
-                    className="px-4 py-6 text-[#4b5a50]"
-                  >
+                  <td colSpan={6} className="p-8 text-center text-[#6C746E] dark:text-[#8E9690]">
                     No message activity recorded yet.
                   </td>
                 </tr>
               ) : (
                 props.recentThreads.map((thread) => (
-                  <tr
-                    key={thread.phone}
-                    className="border-b border-[#eef2ea] last:border-0"
-                  >
-                    <td className="px-4 py-3 font-medium tabular-nums">
+                  <tr key={thread.phone} className="hover:bg-[#F6F3EC]/50 dark:hover:bg-[#0B0F0C]/50 transition-colors">
+                    <td className="p-3.5 font-semibold font-mono text-[#101412] dark:text-[#F6F3EC]">
                       +{thread.phone}
                     </td>
-                    <td className="px-4 py-3">
+                    <td className="p-3.5">
                       {thread.needsTakeover ? (
-                        <span className="rounded-full bg-[#fee2e2] px-2 py-0.5 text-xs font-semibold text-[#9b2c2c]">
+                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20">
                           Takeover
                         </span>
                       ) : thread.lastOutboundOk === false ? (
-                        <span className="rounded-full bg-[#ffedd5] px-2 py-0.5 text-xs font-semibold text-[#9a3412]">
-                          Last send failed
+                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">
+                          Send Failed
                         </span>
                       ) : (
-                        <span className="rounded-full bg-[#eefaf2] px-2 py-0.5 text-xs font-semibold text-[#14532d]">
+                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold bg-[#7ed957]/15 text-[#101412] dark:text-[#7ed957] border border-[#7ed957]/30">
                           OK
                         </span>
                       )}
                     </td>
-                    <td className="px-4 py-3 tabular-nums">{thread.inboundCount}</td>
-                    <td className="px-4 py-3 tabular-nums">
-                      {thread.successOutCount}
-                    </td>
-                    <td className="px-4 py-3 tabular-nums">{thread.failOutCount}</td>
-                    <td className="px-4 py-3 text-[#4b5a50]">
+                    <td className="p-3.5 tabular-nums text-[#101412] dark:text-[#F6F3EC]">{thread.inboundCount}</td>
+                    <td className="p-3.5 tabular-nums text-[#101412] dark:text-[#F6F3EC]">{thread.successOutCount}</td>
+                    <td className="p-3.5 tabular-nums text-[#6C746E] dark:text-[#8E9690]">{thread.failOutCount}</td>
+                    <td className="p-3.5 text-[#6C746E] dark:text-[#8E9690]">
                       {formatWhen(thread.updatedAt)}
                     </td>
                   </tr>
@@ -222,34 +238,34 @@ export function MessagesDashboard(props: {
         </div>
       </section>
 
-      <section className="space-y-3">
-        <h2 className="text-lg font-semibold">Event feed</h2>
+      {/* Activity Event Feed */}
+      <section className="rounded-[24px] bg-[var(--bg-card)] border border-[#E8E5DC] dark:border-[#1D2620] p-6 shadow-sm space-y-4">
+        <h2 className="font-display text-base font-bold text-[#101412] dark:text-[#F6F3EC]">
+          Event Feed
+        </h2>
         <ul className="space-y-2">
           {props.recentEvents.length < 1 ? (
-            <li className="rounded-xl border border-[#d7dfd1] bg-white px-4 py-3 text-sm text-[#4b5a50]">
-              No events yet. They appear as WhatsApp traffic flows.
+            <li className="p-6 text-center text-xs text-[#6C746E] dark:text-[#8E9690]">
+              No events yet. They will appear as WhatsApp messages flow through.
             </li>
           ) : (
-            props.recentEvents.slice(0, 60).map((item) => (
+            props.recentEvents.slice(0, 40).map((item) => (
               <li
                 key={item.id}
-                className="rounded-lg border border-[#d7dfd1] bg-white px-4 py-3 text-sm"
+                className="p-3 rounded-xl bg-[#F6F3EC] dark:bg-[#0B0F0C] border border-[#E8E5DC] dark:border-[#1D2620] text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-2"
               >
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="rounded-full bg-[#eef2ea] px-2 py-0.5 text-xs font-semibold">
+                <div className="flex items-center gap-2">
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-[var(--bg-card)] border border-[#E8E5DC] dark:border-[#1D2620] text-[#101412] dark:text-[#F6F3EC]">
                     {eventLabel(item.type)}
                   </span>
-                  <span className="font-medium tabular-nums">+{item.phone}</span>
-                  <span className="text-xs text-[#4b5a50]">
-                    {formatWhen(item.at)}
-                  </span>
+                  <span className="font-mono font-semibold text-[#101412] dark:text-[#F6F3EC]">+{item.phone}</span>
+                  {item.preview && (
+                    <span className="text-[#6C746E] dark:text-[#8E9690] truncate max-w-sm">· {item.preview}</span>
+                  )}
                 </div>
-                {item.error ? (
-                  <p className="mt-1 text-[#9b2c2c]">{item.error}</p>
-                ) : null}
-                {item.preview ? (
-                  <p className="mt-1 text-[#4b5a50]">{item.preview}</p>
-                ) : null}
+                <span className="text-[11px] text-[#6C746E] dark:text-[#8E9690]">
+                  {formatWhen(item.at)}
+                </span>
               </li>
             ))
           )}

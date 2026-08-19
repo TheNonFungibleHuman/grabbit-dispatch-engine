@@ -12,10 +12,10 @@ export function LoginForm() {
   const [state, action, pending] = useActionState(loginAdminAction, initialState);
 
   return (
-    <form action={action} className="space-y-5">
-      <div className="space-y-2">
-        <label htmlFor="password" className="block text-sm font-medium">
-          Password
+    <form action={action} className="space-y-4">
+      <div className="space-y-1.5">
+        <label htmlFor="password" className="block text-xs font-semibold text-[#101412] dark:text-[#F6F3EC]">
+          Admin Password
         </label>
         <input
           id="password"
@@ -23,12 +23,13 @@ export function LoginForm() {
           type="password"
           autoComplete="current-password"
           required
-          className="w-full rounded-md border border-[#c9d2c6] bg-white px-3 py-2.5 text-base outline-none ring-[#1f7a4c] focus:ring-2"
+          placeholder="Enter dashboard password"
+          className="w-full rounded-[14px] border border-[#E8E5DC] dark:border-[#1D2620] bg-[#F6F3EC] dark:bg-[#0B0F0C] px-3.5 py-2.5 text-xs text-[#101412] dark:text-[#F6F3EC] outline-none focus:border-[#7ed957] transition-colors"
         />
       </div>
 
       {state.message ? (
-        <p className="text-sm text-[#9b2c2c]" role="alert">
+        <p className="text-xs text-rose-600 dark:text-rose-400 font-semibold" role="alert">
           {state.message}
         </p>
       ) : null}
@@ -36,9 +37,9 @@ export function LoginForm() {
       <button
         type="submit"
         disabled={pending}
-        className="w-full rounded-md bg-[#1f7a4c] px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-[#18643e] disabled:opacity-60"
+        className="w-full rounded-full bg-[#101412] dark:bg-[#F6F3EC] hover:bg-[#7ed957] dark:hover:bg-[#7ed957] hover:text-[#101412] dark:hover:text-[#101412] px-4 py-2.5 text-xs font-bold text-white dark:text-[#101412] transition-all shadow-sm disabled:opacity-50"
       >
-        {pending ? "Signing in…" : "Sign in"}
+        {pending ? "Signing in..." : "Sign in to Dashboard"}
       </button>
     </form>
   );
