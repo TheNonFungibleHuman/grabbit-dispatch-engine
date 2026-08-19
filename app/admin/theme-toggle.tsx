@@ -9,8 +9,7 @@ export function ThemeToggle() {
   useEffect(() => {
     setMounted(true);
     const stored = localStorage.getItem("grabbit-theme");
-    const systemPrefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
-    const shouldBeDark = stored === "dark" || (!stored && systemPrefersDark);
+    const shouldBeDark = stored === "dark";
     setIsDark(shouldBeDark);
     if (shouldBeDark) {
       document.documentElement.classList.add("dark");

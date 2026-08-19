@@ -1,5 +1,7 @@
 @import "tailwindcss";
 
+@custom-variant dark (&:where(.dark, .dark *));
+
 :root {
   --font-display: var(--font-sora), -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   --font-body: var(--font-manrope), -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
@@ -7,6 +9,7 @@
   --bg-surface: #F6F3EC;
   --bg-card: #FFFFFF;
   --bg-subtle: #EDEAE2;
+  --bg-inner: #F6F3EC;
   --text-ink: #101412;
   --text-muted: #6C746E;
   --text-faint: #9EA5A0;
@@ -25,6 +28,7 @@
   --bg-surface: #0B0F0C;
   --bg-card: #121714;
   --bg-subtle: #171E1A;
+  --bg-inner: #171E1A;
   --text-ink: #F6F3EC;
   --text-muted: #8E9690;
   --text-faint: #565E58;
@@ -43,7 +47,7 @@ body {
   background-color: var(--bg-surface);
   color: var(--text-ink);
   font-family: var(--font-body);
-  transition: background-color 0.2s ease, color 0.2s ease;
+  transition: background-color 0.15s ease, color 0.15s ease;
 }
 
 h1, h2, h3, h4, .font-display {

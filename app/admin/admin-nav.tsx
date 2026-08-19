@@ -89,10 +89,10 @@ export function AdminNav(props: {
       <header className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between pb-6 border-b border-[#E8E5DC] dark:border-[#1D2620]">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
-            {/* Grabbit Minimal Geometric Logo */}
+            {/* Grabbit Minimal Geometric 4-Segment Logo (Reference Style) */}
             <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-[#101412] dark:bg-[#F6F3EC] text-white dark:text-[#101412] shadow-sm">
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M11 2H5a3 3 0 0 0-3 3v6h9V2zM13 2v9h9V5a3 3 0 0 0-3-3h-6zM2 13v6a3 3 0 0 0 3 3h6v-9H2zM13 22h6a3 3 0 0 0 3-3v-6h-9v9z" />
               </svg>
             </div>
             <div>
