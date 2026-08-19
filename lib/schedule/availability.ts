@@ -118,6 +118,64 @@ function loadLocalSchedule(): ScheduleSlot[] {
   return parseRiderScheduleCsv(csv);
 }
 
+export function clearScheduleCache(): void {
+  cache = null;
+  memoryClear(SCHEDULE_BLOB_PATH);
+}
+
+export function slotsToCsv(slots: ScheduleSlot[]): string {
+  const header = ["TIME SLOT", "MON", "TUES", "WED", "THURS", "FRI", "SAT", "SUN"];
+  const rows = [header.join(",")];
+  for (const slot of slots) {
+    const cells = [
+      `"${slot.label}"`,
+      `"${slot.byDay.MON || "No Rider Available"}"`,
+      `"${slot.byDay.TUES || "No Rider Available"}"`,
+      `"${slot.byDay.WED || "No Rider Available"}"`,
+      `"${slot.byDay.THURS || "No Rider Available"}"`,
+      `"${slot.byDay.FRI || "No Rider Available"}"`,
+      `"${slot.byDay.SAT || "No Rider Available"}"`,
+      `"${slot.byDay.SUN || "No Rider Available"}"`,
+    ];
+    rows.push(cells.join(","));
+  }
+  return rows.join("\n");
+}
+
+export async function saveScheduleFromAdmin(slots: ScheduleSlot[] | string): Promise<{
+  ok: boolean;
+  slots: ScheduleSlot[];
+  updatedAt: string;
+}> {
+  const csv = typeof slots === "string" ? slots : slotsToCsv(slots);
+  const parsed = parseRiderScheduleCsv(csv);
+  if (parsed.length === 0) {
+    throw new Error("Cannot save empty or invalid schedule");
+  }
+
+  const stored: StoredSchedule = {
+    csv,
+    updatedAt: new Date().toISOString(),
+    source: "remote",
+    slotCount: parsed.length,
+  };
+
+  clearScheduleCache();
+  await writeJson(SCHEDULE_BLOB_PATH, stored);
+  cache = { fetchedAt: Date.now(), slots: parsed, source: "blob" };
+
+  logInfo("schedule", "admin saved updated rider schedule", {
+    slots: parsed.length,
+    updatedAt: stored.updatedAt,
+  });
+
+  return {
+    ok: true,
+    slots: parsed,
+    updatedAt: stored.updatedAt,
+  };
+}
+
 async function loadScheduleSlots(args?: {
   forceRemote?: boolean;
 }): Promise<{
@@ -132,6 +190,22 @@ async function loadScheduleSlots(args?: {
     return { slots: cache.slots, source: cache.source };
   }
 
+  // 1. Try Blob / Supabase first (admin published schedule)
+  try {
+    const blob = await loadBlobSchedule();
+    if (blob) {
+      cache = { fetchedAt: Date.now(), slots: blob.slots, source: "blob" };
+      logInfo("schedule", "loaded rider schedule from admin publish", {
+        slots: blob.slots.length,
+        updatedAt: blob.updatedAt,
+      });
+      return { slots: blob.slots, source: "blob" };
+    }
+  } catch (error) {
+    logWarn("schedule", "blob schedule read failed", formatError(error));
+  }
+
+  // 2. Try remote Google Sheet if forced or configured
   if (args?.forceRemote || getSheetCsvUrl()) {
     try {
       const csv = await fetchRemoteCsv();
@@ -157,20 +231,7 @@ async function loadScheduleSlots(args?: {
     }
   }
 
-  try {
-    const blob = await loadBlobSchedule();
-    if (blob) {
-      cache = { fetchedAt: Date.now(), slots: blob.slots, source: "blob" };
-      logInfo("schedule", "loaded rider schedule from Blob publish", {
-        slots: blob.slots.length,
-        updatedAt: blob.updatedAt,
-      });
-      return { slots: blob.slots, source: "blob" };
-    }
-  } catch (error) {
-    logWarn("schedule", "blob schedule read failed", formatError(error));
-  }
-
+  // 3. Fallback to local default schedule
   const slots = loadLocalSchedule();
   cache = { fetchedAt: Date.now(), slots, source: "local" };
   logInfo("schedule", "loaded local rider schedule", { slots: slots.length });
@@ -222,11 +283,6 @@ export function summarizeAvailabilityForAdmin(
   ].join(" · ");
 }
 
-/** Soft reset for tests / booking gate */
-export function clearScheduleCache(): void {
-  cache = null;
-  memoryClear(SCHEDULE_BLOB_PATH);
-}
 
 /**
  * Finds the on-duty scheduled riders for a specific future target date and time.

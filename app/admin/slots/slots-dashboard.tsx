@@ -46,9 +46,23 @@ export function SlotsDashboard(props: {
   upcomingDays?: DayOpenSlots[];
 }) {
   const [bookings, setBookings] = useState<PreBooking[]>(props.initialBookings);
+  const [slots, setSlots] = useState<ScheduleSlot[]>(props.slots || []);
   const [loading, setLoading] = useState(false);
+  const [isEditing, setIsEditing] = useState(false);
+  const [isDirty, setIsDirty] = useState(false);
+  const [savingSchedule, setSavingSchedule] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
-  const [testingMoses, setTestingMoses] = useState(false);
+
+  const RIDER_PRESETS = [
+    { label: "— Closed / No Rider —", value: "No Rider Available" },
+    { label: "🚴 Thierry", value: "THIERRY(Delivery)" },
+    { label: "🚴 Sherif", value: "SHERIF" },
+    { label: "🚴 Moses", value: "MOSES" },
+    { label: "🚴 Moses & Thierry", value: "MOSES, THIERRY(Delivery)" },
+    { label: "🚴 Sherif & Thierry", value: "SHERIF, THIERRY(Delivery)" },
+    { label: "🚴 Moses & Sherif", value: "MOSES, SHERIF" },
+    { label: "🚴 All 3 (Thierry, Sherif, Moses)", value: "SHERIF, MOSES, THIERRY(Delivery)" },
+  ];
 
   async function refreshBookings() {
     setLoading(true);
@@ -62,6 +76,80 @@ export function SlotsDashboard(props: {
       console.error("Refresh error:", err);
     } finally {
       setLoading(false);
+    }
+  }
+
+  function handleCellChange(slotIdx: number, day: WeekdayKey, value: string) {
+    const updated = [...slots];
+    updated[slotIdx] = {
+      ...updated[slotIdx],
+      byDay: {
+        ...updated[slotIdx].byDay,
+        [day]: value,
+      },
+    };
+    setSlots(updated);
+    setIsDirty(true);
+  }
+
+  function handleLabelChange(slotIdx: number, label: string) {
+    const updated = [...slots];
+    updated[slotIdx] = {
+      ...updated[slotIdx],
+      label,
+    };
+    setSlots(updated);
+    setIsDirty(true);
+  }
+
+  function handleAddSlot() {
+    const newSlot: ScheduleSlot = {
+      label: "2:00 pm - 3:00 pm",
+      startMinutes: 14 * 60,
+      endMinutes: 15 * 60,
+      byDay: {
+        MON: "No Rider Available",
+        TUES: "No Rider Available",
+        WED: "No Rider Available",
+        THURS: "No Rider Available",
+        FRI: "No Rider Available",
+        SAT: "No Rider Available",
+        SUN: "No Rider Available",
+      },
+    };
+    setSlots([...slots, newSlot]);
+    setIsDirty(true);
+    setIsEditing(true);
+  }
+
+  function handleDeleteSlot(slotIdx: number) {
+    if (!confirm(`Delete time slot "${slots[slotIdx].label}"?`)) return;
+    const updated = slots.filter((_, idx) => idx !== slotIdx);
+    setSlots(updated);
+    setIsDirty(true);
+  }
+
+  async function handleSaveSchedule() {
+    setSavingSchedule(true);
+    setMessage(null);
+    try {
+      const res = await fetch("/api/schedule", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ slots }),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        setIsDirty(false);
+        setIsEditing(false);
+        setMessage("✅ Schedule updated and immediately synced with AI knowledge!");
+      } else {
+        setMessage(`❌ Error saving schedule: ${data.error || "Unknown error"}`);
+      }
+    } catch (err) {
+      setMessage(`❌ Failed to save schedule: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setSavingSchedule(false);
     }
   }
 
@@ -143,6 +231,25 @@ export function SlotsDashboard(props: {
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-2">
+            {isDirty && (
+              <button
+                onClick={handleSaveSchedule}
+                disabled={savingSchedule}
+                className="px-3.5 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-sm shadow-lg shadow-emerald-900/40 animate-pulse flex items-center gap-1.5"
+              >
+                {savingSchedule ? "Saving..." : "💾 Save Changes"}
+              </button>
+            )}
+            <button
+              onClick={() => setIsEditing(!isEditing)}
+              className={`px-3 py-1.5 rounded-lg border text-sm font-medium transition-colors ${
+                isEditing
+                  ? "bg-amber-950/80 text-amber-300 border-amber-700"
+                  : "bg-slate-800 hover:bg-slate-700 text-slate-300 border-slate-700"
+              }`}
+            >
+              {isEditing ? "👁️ View Mode" : "✏️ Edit Schedule"}
+            </button>
             <button
               onClick={refreshBookings}
               disabled={loading}
@@ -168,21 +275,37 @@ export function SlotsDashboard(props: {
         )}
 
         {/* 1. Daily Rider Schedule Matrix */}
-        {props.slots && props.slots.length > 0 && (
+        {slots.length > 0 && (
           <div className="bg-slate-900/70 border border-slate-800 rounded-xl overflow-hidden shadow-xl">
             <div className="p-4 border-b border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
               <div>
                 <h2 className="font-semibold text-white flex items-center gap-2">
                   📅 Weekly Rider Duty Schedule
-                  <span className="text-xs px-2 py-0.5 rounded bg-slate-800 text-slate-400 font-normal">
-                    Live Dispatch Matrix
-                  </span>
+                  {isEditing ? (
+                    <span className="text-xs px-2 py-0.5 rounded bg-amber-950 text-amber-300 border border-amber-800 font-medium">
+                      ✏️ Edit Mode Active
+                    </span>
+                  ) : (
+                    <span className="text-xs px-2 py-0.5 rounded bg-slate-800 text-slate-400 font-normal">
+                      Live Matrix
+                    </span>
+                  )}
                 </h2>
                 <p className="text-xs text-slate-400 mt-0.5">
-                  Assigned riders for each time slot. The AI matches bookings directly to these shifts.
+                  {isEditing
+                    ? "Select riders from the dropdowns below. Click 'Save Changes' to instantly update the AI dispatch."
+                    : "Assigned riders for each time slot. Click 'Edit Schedule' to update shifts seamlessly."}
                 </p>
               </div>
-              <div className="flex items-center gap-2 text-xs">
+              <div className="flex flex-wrap items-center gap-2 text-xs">
+                {isEditing && (
+                  <button
+                    onClick={handleAddSlot}
+                    className="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-emerald-400 border border-emerald-800 font-medium flex items-center gap-1"
+                  >
+                    ➕ Add Time Slot
+                  </button>
+                )}
                 <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-emerald-950 text-emerald-300 border border-emerald-800">
                   <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span> Thierry
                 </span>
@@ -199,7 +322,7 @@ export function SlotsDashboard(props: {
               <table className="w-full text-left text-xs border-collapse">
                 <thead className="bg-slate-950/80 text-slate-400 border-b border-slate-800 uppercase tracking-wider font-semibold">
                   <tr>
-                    <th className="p-3 w-36 border-r border-slate-800/80">Time Slot</th>
+                    <th className="p-3 w-44 border-r border-slate-800/80">Time Slot</th>
                     {DAYS.map((day) => {
                       const isToday = props.currentWeekday === day.key;
                       return (
@@ -221,18 +344,28 @@ export function SlotsDashboard(props: {
                         </th>
                       );
                     })}
+                    {isEditing && <th className="p-3 text-right w-16">Delete</th>}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800/50">
-                  {props.slots.map((slot, sIdx) => {
+                  {slots.map((slot, sIdx) => {
                     return (
                       <tr key={sIdx} className="hover:bg-slate-800/20 transition-colors">
-                        <td className="p-3 font-semibold text-slate-200 border-r border-slate-800/80 whitespace-nowrap bg-slate-950/40">
-                          {slot.label}
+                        <td className="p-2.5 font-semibold text-slate-200 border-r border-slate-800/80 whitespace-nowrap bg-slate-950/40">
+                          {isEditing ? (
+                            <input
+                              type="text"
+                              value={slot.label}
+                              onChange={(e) => handleLabelChange(sIdx, e.target.value)}
+                              className="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs text-white focus:border-emerald-500 focus:outline-none"
+                            />
+                          ) : (
+                            slot.label
+                          )}
                         </td>
                         {DAYS.map((day) => {
                           const isToday = props.currentWeekday === day.key;
-                          const cellValue = slot.byDay[day.key] || "-";
+                          const cellValue = slot.byDay[day.key] || "No Rider Available";
                           const style = getRiderBadgeStyle(cellValue);
                           const isClosed =
                             !cellValue ||
@@ -243,18 +376,48 @@ export function SlotsDashboard(props: {
                           return (
                             <td
                               key={day.key}
-                              className={`p-2.5 text-center border-r border-slate-800/40 last:border-r-0 ${
+                              className={`p-2 text-center border-r border-slate-800/40 last:border-r-0 ${
                                 isToday ? "bg-emerald-950/20" : ""
                               }`}
                             >
-                              <span
-                                className={`inline-block w-full py-1 px-2 rounded-lg border text-xs font-medium ${style.bg} ${style.text} ${style.border}`}
-                              >
-                                {isClosed ? "—" : cellValue}
-                              </span>
+                              {isEditing ? (
+                                <select
+                                  value={cellValue}
+                                  onChange={(e) => handleCellChange(sIdx, day.key, e.target.value)}
+                                  className={`w-full text-xs font-medium py-1 px-1.5 rounded border focus:outline-none focus:ring-1 focus:ring-emerald-500 ${style.bg} ${style.text} ${style.border}`}
+                                >
+                                  {RIDER_PRESETS.map((opt) => (
+                                    <option key={opt.value} value={opt.value} className="bg-slate-900 text-white">
+                                      {opt.label}
+                                    </option>
+                                  ))}
+                                  {!RIDER_PRESETS.some((p) => p.value === cellValue) && (
+                                    <option value={cellValue} className="bg-slate-900 text-white">
+                                      {cellValue}
+                                    </option>
+                                  )}
+                                </select>
+                              ) : (
+                                <span
+                                  className={`inline-block w-full py-1 px-2 rounded-lg border text-xs font-medium ${style.bg} ${style.text} ${style.border}`}
+                                >
+                                  {isClosed ? "—" : cellValue}
+                                </span>
+                              )}
                             </td>
                           );
                         })}
+                        {isEditing && (
+                          <td className="p-2 text-right">
+                            <button
+                              onClick={() => handleDeleteSlot(sIdx)}
+                              className="p-1 rounded text-rose-400 hover:bg-rose-950 hover:text-rose-300"
+                              title="Delete Slot"
+                            >
+                              🗑️
+                            </button>
+                          </td>
+                        )}
                       </tr>
                     );
                   })}
