@@ -87,6 +87,34 @@ export async function notifyRiderForBooking(
       }
     }
 
+    // Email notification via Resend if configured
+    if (rider.email && process.env.RESEND_API_KEY?.trim()) {
+      try {
+        const emailRes = await fetch("https://api.resend.com/emails", {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${process.env.RESEND_API_KEY.trim()}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            from: process.env.RESEND_FROM_EMAIL || "Grabbit Dispatch <onboarding@resend.dev>",
+            to: rider.email,
+            subject: `🛵 New Grabbit ${payload.serviceKind.toUpperCase()} Assigned - ${payload.scheduledTime}`,
+            text: messageText,
+          }),
+        });
+        if (emailRes.ok) {
+          logInfo("riders", "email notification sent to rider via Resend", {
+            rider: rider.name,
+            email: rider.email,
+          });
+          return { ok: true, channel: "email" };
+        }
+      } catch (err) {
+        logError("riders", "failed to send email to rider", err);
+      }
+    }
+
     logInfo("riders", "rider email/chat notification logged", {
       rider: rider.name,
       email: rider.email,
