@@ -132,3 +132,88 @@ export async function notifyRiderForBooking(
 
   return { ok: false, channel: "none", error: "No viable notification channel" };
 }
+
+export interface RiderReschedulePayload {
+  bookingId: string;
+  customerName: string;
+  customerPhone: string;
+  serviceKind: "delivery" | "trip" | string;
+  pickupAddress: string;
+  dropoffAddress: string;
+  oldScheduledTime: string;
+  newScheduledTime: string;
+  assignedRider: string;
+  trackingUrl?: string;
+  kiloDeliveryId?: string;
+}
+
+export async function notifyRiderOfReschedule(
+  payload: RiderReschedulePayload,
+): Promise<{ ok: boolean; channel: string; error?: string }> {
+  const rider = findRiderByName(payload.assignedRider);
+  if (!rider) {
+    return { ok: false, channel: "none", error: `Rider ${payload.assignedRider} profile not found` };
+  }
+
+  const messageText = [
+    `🔄 *${payload.serviceKind.toUpperCase()} TIME UPDATE / RESCHEDULED*`,
+    `Attention ${rider.name}: A customer has moved their scheduled ${payload.serviceKind} time.`,
+    ``,
+    `👤 Customer: *${payload.customerName}* (${payload.customerPhone})`,
+    `⏱️ Time Change: ~${payload.oldScheduledTime}~ ➔ *${payload.newScheduledTime}*`,
+    `📍 Pickup: ${payload.pickupAddress}`,
+    `📍 Drop-off: ${payload.dropoffAddress}`,
+    payload.trackingUrl ? `🔴 Live Tracking: ${payload.trackingUrl}` : ``,
+    ``,
+    `ℹ️ *Note:* This is an update to your existing assigned trip ${payload.kiloDeliveryId || ''}, NOT a new booking.`,
+    `Grabbit Express 🛵⚡`,
+  ].filter(Boolean).join("\n");
+
+  logInfo("riders", "dispatching rider reschedule update", {
+    rider: rider.name,
+    channel: rider.channel,
+    bookingId: payload.bookingId,
+    newTime: payload.newScheduledTime,
+  });
+
+  // 1. Google Chat
+  if (rider.channel === "google_chat") {
+    const webhookUrl = process.env.GOOGLE_CHAT_WEBHOOK_URL?.trim();
+    if (webhookUrl) {
+      try {
+        const res = await fetch(webhookUrl, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            text: `*Grabbit Dispatch Update for ${rider.name}*\n${messageText}`,
+          }),
+        });
+        if (res.ok) {
+          logInfo("riders", "google chat webhook reschedule notification sent", {
+            rider: rider.name,
+          });
+          return { ok: true, channel: "google_chat" };
+        }
+      } catch (err) {
+        logError("riders", "failed to send google chat webhook", err);
+      }
+    }
+  }
+
+  // 2. WhatsApp
+  const targetPhone = process.env.TEST_RIDER_PHONE?.trim() || rider.phone;
+  if (targetPhone && rider.channel === "whatsapp") {
+    try {
+      await sendCustomerText({
+        to: targetPhone,
+        text: messageText,
+        messageId: `rider_reschedule_${payload.bookingId}_${Date.now()}`,
+      });
+      return { ok: true, channel: "whatsapp" };
+    } catch (err) {
+      return { ok: false, channel: "whatsapp", error: String(formatError(err).message || err) };
+    }
+  }
+
+  return { ok: true, channel: "logged" };
+}

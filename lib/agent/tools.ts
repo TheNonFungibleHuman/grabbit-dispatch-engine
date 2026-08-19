@@ -144,6 +144,26 @@ export const AGENT_TOOLS = [
   },
   {
     type: "function" as const,
+    name: "reschedule_trip_or_delivery",
+    description:
+      "Reschedule, move, delay, or postpone an existing confirmed trip or delivery for a customer to a new time or date. Checks rider capacity and updates the assigned rider with a reschedule alert.",
+    parameters: {
+      type: "object",
+      properties: {
+        newScheduledTime: {
+          type: "string",
+          description: "New requested time e.g. '12:45 pm', '1:00 pm', '6:30 pm'",
+        },
+        newScheduledDate: {
+          type: "string",
+          description: "Optional new date if moving to another day, e.g. 'today', 'tomorrow', or 'YYYY-MM-DD'",
+        },
+      },
+      required: ["newScheduledTime"],
+    },
+  },
+  {
+    type: "function" as const,
     name: "check_rider_assigned_trips",
     description:
       "Query booked trips and deliveries assigned to a rider or all riders for today or upcoming dates. STRICT SECURITY: Only works for registered Grabbit fleet riders and authorized admin (+9990000000003). If any unauthorized customer asks, returns Access Denied.",
@@ -380,6 +400,63 @@ export async function executeAgentTool(args: {
         trackingUrl,
         status: "confirmed",
         message: `Your ${serviceKind} request for ${scheduledDate} at ${scheduledTime} is confirmed and assigned to rider ${prebookResult.assignedRider || assignedRider}! Live Tracking Link: ${trackingUrl}`,
+      };
+    }
+
+    if (args.name === "reschedule_trip_or_delivery") {
+      const value = parseToolArguments(args.toolArguments);
+      const newScheduledTime = String(value.newScheduledTime || "");
+      const newScheduledDate = value.newScheduledDate ? String(value.newScheduledDate) : "today";
+
+      if (!newScheduledTime) {
+        return { ok: false, error: "newScheduledTime is required to reschedule." };
+      }
+
+      // 1. Resolve on-duty rider for this new target date & time
+      const { getRiderForTargetSlot } = await import("../schedule/availability.ts");
+      const targetSlot = await getRiderForTargetSlot({
+        targetDate: newScheduledDate,
+        targetTime: newScheduledTime,
+      });
+
+      if (!targetSlot.available || targetSlot.riders.length === 0) {
+        return {
+          ok: false,
+          error: `No rider is scheduled on duty on ${targetSlot.weekday} around ${newScheduledTime}. Please offer another open time slot.`,
+        };
+      }
+
+      const assignedRider = targetSlot.riders[0];
+
+      // 2. Reschedule prebooking and notify rider
+      const { reschedulePreBookingRequest } = await import("../orders/pre-booking.ts");
+      const result = await reschedulePreBookingRequest({
+        customerPhone: args.senderPhone,
+        newScheduledDate,
+        newScheduledTime,
+        newSlotKey: targetSlot.slotKey,
+        newAssignedRider: assignedRider,
+      });
+
+      if (!result.ok) {
+        return {
+          ok: false,
+          doubleBooked: result.doubleBooked ?? false,
+          error: result.error,
+        };
+      }
+
+      const trackingUrl = result.trackingUrl || "https://delivery.grabbit-express.com";
+
+      return {
+        ok: true,
+        serviceKind: result.booking?.serviceKind || "booking",
+        newScheduledDate,
+        newScheduledTime,
+        assignedRider: result.booking?.assignedRider || assignedRider,
+        kiloDeliveryId: result.booking?.kiloDeliveryId,
+        trackingUrl,
+        message: `Your booking is now rescheduled to ${newScheduledDate} at ${newScheduledTime} with rider ${result.booking?.assignedRider || assignedRider}! Live Tracking Link: ${trackingUrl}`,
       };
     }
 

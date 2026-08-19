@@ -1,7 +1,7 @@
 import { readJson, writeJson } from "../blob/json-store.ts";
 import { formatError, logError, logInfo, logWarn } from "../log.ts";
 import { FLEET_RIDERS, findRiderByName, findRiderByPhone, getCustomTrackingUrl, isAuthorizedRiderOrAdmin, type RiderProfile } from "../riders/config.ts";
-import { notifyRiderForBooking } from "../riders/notify-rider.ts";
+import { notifyRiderForBooking, notifyRiderOfReschedule } from "../riders/notify-rider.ts";
 import { assignDeliveryRider, createDelivery } from "../kilo/client.ts";
 import { sanitizeKiloName } from "../kilo/map-order.ts";
 import { sendCustomerText } from "../wasender/send-tracked.ts";
@@ -224,6 +224,110 @@ export async function cancelPreBooking(id: string): Promise<boolean> {
 
 export async function clearAllPreBookings(): Promise<void> {
   await writeJson(INDEX_PATH, { ids: [] });
+}
+
+/**
+ * Reschedules an existing active pre-booking for a customer to a new time or date.
+ */
+export async function reschedulePreBookingRequest(args: {
+  customerPhone: string;
+  newScheduledDate?: string;
+  newScheduledTime: string;
+  newSlotKey: string;
+  newAssignedRider: string;
+}): Promise<{
+  ok: boolean;
+  booking?: PreBooking;
+  doubleBooked?: boolean;
+  error?: string;
+  trackingUrl?: string;
+}> {
+  const all = await listAllPreBookings();
+  const phoneClean = args.customerPhone.replace(/\D/g, "");
+
+  // Find customer's latest active booking
+  const activeBooking = all
+    .filter(
+      (b) =>
+        b.customerPhone.replace(/\D/g, "") === phoneClean &&
+        (b.status === "pending_rider" || b.status === "confirmed" || b.status === "dispatched"),
+    )
+    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0];
+
+  if (!activeBooking) {
+    return {
+      ok: false,
+      error: "No active booking found for your phone number to reschedule.",
+    };
+  }
+
+  // Check availability for the new target time
+  const targetDate = args.newScheduledDate || activeBooking.scheduledDate;
+  const targetSlotKey = args.newSlotKey || activeBooking.slotKey;
+  const rider = args.newAssignedRider || activeBooking.assignedRider;
+
+  // Run capacity check excluding this existing booking
+  const check = await checkSlotAvailability({
+    slotKey: targetSlotKey,
+    assignedRider: rider,
+    customerPhone: args.customerPhone,
+    serviceKind: activeBooking.serviceKind,
+    scheduledTime: args.newScheduledTime,
+    scheduledDate: targetDate,
+  });
+
+  // If there's a conflict and it is NOT this same booking
+  if (!check.available && check.conflictingBooking?.id !== activeBooking.id) {
+    let errorMsg = `Rider ${rider} already has a booking around ${args.newScheduledTime}.`;
+    if (check.reason === "gap_violation" && check.suggestedTime) {
+      errorMsg = `Rider ${rider} already has a booking at ${check.conflictingBooking?.scheduledTime}. Grabbit requires at least a 15-minute gap between bookings. Please offer ${check.suggestedTime} or another open time slot.`;
+    }
+    return {
+      ok: false,
+      doubleBooked: true,
+      error: errorMsg,
+    };
+  }
+
+  const oldTime = activeBooking.scheduledTime;
+  activeBooking.scheduledTime = args.newScheduledTime;
+  activeBooking.scheduledDate = targetDate;
+  activeBooking.slotKey = targetSlotKey;
+  activeBooking.assignedRider = rider;
+  activeBooking.updatedAt = new Date().toISOString();
+
+  await savePreBooking(activeBooking);
+  logInfo("prebooking", "booking rescheduled", {
+    bookingId: activeBooking.id,
+    oldTime,
+    newTime: args.newScheduledTime,
+    rider,
+  });
+
+  // Dispatch reschedule notification to the rider
+  try {
+    await notifyRiderOfReschedule({
+      bookingId: activeBooking.id,
+      customerName: activeBooking.customerName,
+      customerPhone: activeBooking.customerPhone,
+      serviceKind: activeBooking.serviceKind,
+      pickupAddress: activeBooking.pickupAddress,
+      dropoffAddress: activeBooking.deliveryAddress,
+      oldScheduledTime: oldTime,
+      newScheduledTime: args.newScheduledTime,
+      assignedRider: rider,
+      trackingUrl: activeBooking.trackingUrl,
+      kiloDeliveryId: activeBooking.kiloDeliveryId,
+    });
+  } catch (err) {
+    logWarn("prebooking", "failed to notify rider of reschedule", formatError(err));
+  }
+
+  return {
+    ok: true,
+    booking: activeBooking,
+    trackingUrl: activeBooking.trackingUrl,
+  };
 }
 
 /**

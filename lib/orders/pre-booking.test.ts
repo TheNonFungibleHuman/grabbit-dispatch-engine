@@ -231,4 +231,37 @@ describe("pre-booking & anti-double-booking guard", () => {
     });
     assert.equal(trip3.ok, true);
   });
+
+  it("reschedules an existing booking, updates the record and checks time buffers", async () => {
+    const { reschedulePreBookingRequest } = await import("./pre-booking.ts");
+    const slotKey = "2026-09-06_17:00-18:00";
+    const rider = "Moses";
+
+    // 1. Initial booking at 5:00 pm
+    const initial = await createPreBookingRequest({
+      customerPhone: "+99900000061",
+      customerName: "RescheduleUser",
+      serviceKind: "trip",
+      pickupAddress: "ALCHE gate",
+      deliveryAddress: "Mahogany",
+      scheduledDate: "2026-09-06",
+      scheduledTime: "5:00 pm",
+      slotKey,
+      assignedRider: rider,
+    });
+    assert.equal(initial.ok, true);
+
+    // 2. Reschedule to 5:30 pm -> SUCCESS
+    const rescheduled = await reschedulePreBookingRequest({
+      customerPhone: "+99900000061",
+      newScheduledDate: "2026-09-06",
+      newScheduledTime: "5:30 pm",
+      newSlotKey: slotKey,
+      newAssignedRider: rider,
+    });
+
+    assert.equal(rescheduled.ok, true);
+    assert.equal(rescheduled.booking?.scheduledTime, "5:30 pm");
+    assert.equal(rescheduled.booking?.assignedRider, rider);
+  });
 });
