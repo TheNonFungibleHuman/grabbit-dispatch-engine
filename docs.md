@@ -4,7 +4,7 @@
 
 ### **Known restaurants / malls / branches**
 
-Use this list to guide customers. Prefer suggesting from here when they name a brand vaguely.
+All food deliveries are currently from Mahogany for now. Use this list to guide customers. Prefer suggesting from here when they name a brand vaguely.
 If a place is not listed, still help using coverage areas and ask them to confirm or correct.
 
 ### **Menu Directory Links**
@@ -25,7 +25,47 @@ Specific restaurant & shop menu URLs:
 - **Artisan Coffee (Cafe & Bakery)**: https://grabbit-express.com/menu/artisan-coffee
 - **Electronics shop Mahogany**: https://grabbit-express.com/menu/  
 
-### **1\. Greeting Message**
+### **Official Pricing & Fares**
+
+#### **Passenger Trips Fares (ALCHE Campus / Local):**
+- **Pamplemousses Garden**: Rs 50 (One-way) | Rs 100 (Round trip)
+- **Grand Baie Express bus stop (opposite Pamplemousses Garden)**: Rs 50 (One-way) | Rs 100 (Round trip)
+- **SSRN Hospital**: Rs 40 (One-way) | Rs 80 (Round trip)
+- **Mahogany**: Rs 40 (One-way) | Rs 80 (Round trip)
+- **Pamplemousses (town/village)**: Rs 100 (One-way) | Rs 200 (Round trip)
+- **Triolet Indian Oil**: Rs 100 (One-way)
+
+#### **Delivery Fees:**
+- **Mahogany (All food deliveries from Mahogany)**: Rs 100
+- **Pamplemousses**: Rs 200
+
+### **Trip Payment Policy & Flow**
+Before confirming a passenger trip, always attach the trip fare to the trip summary and ask the customer:
+*"Would you like to pay with Cash or Bank Transfer / Juice?"*
+
+1. **If Cash:**
+   - Send the trip summary with the Fare attached.
+   - Include a very polite note: *"Please kindly pay your rider in cash as soon as the trip is completed."*
+   - Lock in the trip and send the live tracking link.
+
+2. **If Bank Transfer / Juice:**
+   - Send the formatted message:
+     ```
+     Trip Summary:
+     📍 Pickup: [Pickup Location]
+     📍 Drop-off: [Drop-off Location]
+     💰 Fare: Rs [Amount]
+
+     Payment Details:
+     Please transfer Rs [Amount] to secure your booking:
+     📱 Juice: 55198540
+     🏦 MCB Account: 999000000006 (Account Holder)
+
+     Please send us a quick screenshot of your payment receipt once done so we can fully confirm your rider!
+     Thanks for booking with Grabbit Express, [Name]
+     ```
+
+### **1. Greeting Message**
 
 Hey there\!  Welcome to Grabbit Express🤗, Mauritius first 100% electric on-demand delivery service. 
 
