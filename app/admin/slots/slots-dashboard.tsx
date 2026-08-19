@@ -4,15 +4,51 @@ import { useState } from "react";
 import Link from "next/link";
 import { AdminNav } from "@/app/admin/admin-nav";
 import type { PreBooking } from "@/lib/orders/pre-booking";
+import type { DayOpenSlots, ScheduleSlot, WeekdayKey } from "@/lib/schedule/model";
+
+const DAYS: { key: WeekdayKey; label: string; full: string }[] = [
+  { key: "MON", label: "Mon", full: "Monday" },
+  { key: "TUES", label: "Tue", full: "Tuesday" },
+  { key: "WED", label: "Wed", full: "Wednesday" },
+  { key: "THURS", label: "Thu", full: "Thursday" },
+  { key: "FRI", label: "Fri", full: "Friday" },
+  { key: "SAT", label: "Sat", full: "Saturday" },
+  { key: "SUN", label: "Sun", full: "Sunday" },
+];
+
+function getRiderBadgeStyle(riderName?: string): { bg: string; text: string; border: string } {
+  if (!riderName) return { bg: "bg-slate-900/40", text: "text-slate-500", border: "border-slate-800/40" };
+  const clean = riderName.toLowerCase().trim();
+  if (clean.includes("thierry")) {
+    return { bg: "bg-emerald-950/80", text: "text-emerald-300", border: "border-emerald-700/60" };
+  }
+  if (clean.includes("sherif")) {
+    return { bg: "bg-cyan-950/80", text: "text-cyan-300", border: "border-cyan-700/60" };
+  }
+  if (clean.includes("moses")) {
+    return { bg: "bg-purple-950/80", text: "text-purple-300", border: "border-purple-700/60" };
+  }
+  if (clean.includes("no rider") || clean.includes("closed") || clean === "-" || clean === "n/a") {
+    return { bg: "bg-slate-950/40", text: "text-slate-600", border: "border-slate-800/30" };
+  }
+  return { bg: "bg-amber-950/80", text: "text-amber-300", border: "border-amber-700/60" };
+}
 
 export function SlotsDashboard(props: {
   initialBookings: PreBooking[];
   agentEnabled: boolean;
   scheduleSummary: string;
+  slots?: ScheduleSlot[];
+  currentWeekday?: WeekdayKey;
+  mauritiusNow?: string;
+  openNow?: boolean;
+  currentRiders?: string[];
+  upcomingDays?: DayOpenSlots[];
 }) {
   const [bookings, setBookings] = useState<PreBooking[]>(props.initialBookings);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [testingMoses, setTestingMoses] = useState(false);
 
   async function refreshBookings() {
     setLoading(true);
@@ -52,7 +88,7 @@ export function SlotsDashboard(props: {
     if (!confirm("Are you sure you want to clear ALL pre-bookings and reset all slots?")) return;
     setLoading(true);
     try {
-      const res = await fetch("/api/slots?clearAll=true", {
+      const res = await fetch(`/api/slots?clearAll=true`, {
         method: "DELETE",
       });
       const data = await res.json();
@@ -64,6 +100,28 @@ export function SlotsDashboard(props: {
       console.error(err);
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function handleTestMosesDispatch() {
+    setTestingMoses(true);
+    setMessage(null);
+    try {
+      const res = await fetch("/api/test-dispatch?action=test_moses");
+      const data = await res.json();
+      if (data.testResult?.ok) {
+        setMessage(
+          `✅ Test dispatch sent to Moses via ${data.testResult.channel}! (Google Chat Webhook: ${
+            data.googleChatWebhookConfigured ? "Configured" : "Not Set"
+          })`,
+        );
+      } else {
+        setMessage(`⚠️ Test dispatch result: ${data.message || JSON.stringify(data)}`);
+      }
+    } catch (err) {
+      setMessage(`❌ Failed to send Moses dispatch: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setTestingMoses(false);
     }
   }
 
@@ -82,16 +140,38 @@ export function SlotsDashboard(props: {
         {/* Header */}
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-800 pb-6">
           <div>
-            <h1 className="text-xl font-bold text-[#1f7a4c]">🛵 Grabbit Time Slots & Pre-Bookings</h1>
-            <p className="text-sm text-slate-500 mt-1">{props.scheduleSummary}</p>
+            <h1 className="text-xl font-bold text-[#1f7a4c]">🛵 Grabbit Rider Shifts & Time Slots</h1>
+            <div className="flex flex-wrap items-center gap-3 text-sm text-slate-400 mt-1">
+              <span>🇲🇺 Mauritius: <strong className="text-white">{props.mauritiusNow || "Live"}</strong></span>
+              <span>•</span>
+              <span>
+                Status:{" "}
+                <span
+                  className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold ${
+                    props.openNow
+                      ? "bg-emerald-950 text-emerald-300 border border-emerald-800"
+                      : "bg-rose-950 text-rose-300 border border-rose-800"
+                  }`}
+                >
+                  {props.openNow ? "🟢 Open Now" : "🔴 Closed Now"}
+                </span>
+              </span>
+              {props.currentRiders && props.currentRiders.length > 0 && (
+                <>
+                  <span>•</span>
+                  <span>On Duty: <strong className="text-amber-300">{props.currentRiders.join(", ")}</strong></span>
+                </>
+              )}
+            </div>
           </div>
-          <div className="flex items-center gap-3">
-            <Link
-              href="/admin"
-              className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-sm"
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              onClick={handleTestMosesDispatch}
+              disabled={testingMoses}
+              className="px-3 py-1.5 rounded-lg bg-purple-900/60 hover:bg-purple-800 text-purple-200 border border-purple-700/50 text-sm font-medium disabled:opacity-50 flex items-center gap-1.5"
             >
-              ← Admin Home
-            </Link>
+              {testingMoses ? "Sending..." : "💬 Test Moses Google Chat"}
+            </button>
             <button
               onClick={refreshBookings}
               disabled={loading}
@@ -109,7 +189,111 @@ export function SlotsDashboard(props: {
           </div>
         </div>
 
-        {/* Stats */}
+        {message && (
+          <div className="p-3 bg-slate-900 border border-emerald-600/60 rounded-xl text-emerald-300 text-sm flex items-center justify-between shadow-lg">
+            <span>{message}</span>
+            <button onClick={() => setMessage(null)} className="text-slate-400 hover:text-white text-xs">✕</button>
+          </div>
+        )}
+
+        {/* 1. Daily Rider Schedule Matrix */}
+        {props.slots && props.slots.length > 0 && (
+          <div className="bg-slate-900/70 border border-slate-800 rounded-xl overflow-hidden shadow-xl">
+            <div className="p-4 border-b border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div>
+                <h2 className="font-semibold text-white flex items-center gap-2">
+                  📅 Weekly Rider Duty Schedule
+                  <span className="text-xs px-2 py-0.5 rounded bg-slate-800 text-slate-400 font-normal">
+                    Live Dispatch Matrix
+                  </span>
+                </h2>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  Assigned riders for each time slot. The AI matches bookings directly to these shifts.
+                </p>
+              </div>
+              <div className="flex items-center gap-2 text-xs">
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-emerald-950 text-emerald-300 border border-emerald-800">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span> Thierry
+                </span>
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-cyan-950 text-cyan-300 border border-cyan-800">
+                  <span className="w-1.5 h-1.5 rounded-full bg-cyan-400"></span> Sherif
+                </span>
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-purple-950 text-purple-300 border border-purple-800">
+                  <span className="w-1.5 h-1.5 rounded-full bg-purple-400"></span> Moses
+                </span>
+              </div>
+            </div>
+
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs border-collapse">
+                <thead className="bg-slate-950/80 text-slate-400 border-b border-slate-800 uppercase tracking-wider font-semibold">
+                  <tr>
+                    <th className="p-3 w-36 border-r border-slate-800/80">Time Slot</th>
+                    {DAYS.map((day) => {
+                      const isToday = props.currentWeekday === day.key;
+                      return (
+                        <th
+                          key={day.key}
+                          className={`p-3 text-center border-r border-slate-800/60 last:border-r-0 ${
+                            isToday ? "bg-emerald-950/50 text-emerald-300 font-bold" : ""
+                          }`}
+                        >
+                          <div className="flex items-center justify-center gap-1">
+                            <span>{day.label}</span>
+                            {isToday && (
+                              <span className="px-1.5 py-0.2 rounded text-[10px] bg-emerald-600 text-white font-bold">
+                                TODAY
+                              </span>
+                            )}
+                          </div>
+                          <div className="text-[10px] opacity-60 font-normal">{day.full}</div>
+                        </th>
+                      );
+                    })}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-800/50">
+                  {props.slots.map((slot, sIdx) => {
+                    return (
+                      <tr key={sIdx} className="hover:bg-slate-800/20 transition-colors">
+                        <td className="p-3 font-semibold text-slate-200 border-r border-slate-800/80 whitespace-nowrap bg-slate-950/40">
+                          {slot.label}
+                        </td>
+                        {DAYS.map((day) => {
+                          const isToday = props.currentWeekday === day.key;
+                          const cellValue = slot.byDay[day.key] || "-";
+                          const style = getRiderBadgeStyle(cellValue);
+                          const isClosed =
+                            !cellValue ||
+                            cellValue.toLowerCase().includes("closed") ||
+                            cellValue.toLowerCase().includes("no rider") ||
+                            cellValue === "-";
+
+                          return (
+                            <td
+                              key={day.key}
+                              className={`p-2.5 text-center border-r border-slate-800/40 last:border-r-0 ${
+                                isToday ? "bg-emerald-950/20" : ""
+                              }`}
+                            >
+                              <span
+                                className={`inline-block w-full py-1 px-2 rounded-lg border text-xs font-medium ${style.bg} ${style.text} ${style.border}`}
+                              >
+                                {isClosed ? "—" : cellValue}
+                              </span>
+                            </td>
+                          );
+                        })}
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        {/* 2. Stats Summary */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
           <div className="bg-slate-900/70 border border-slate-800 rounded-xl p-4">
             <div className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Total Bookings</div>

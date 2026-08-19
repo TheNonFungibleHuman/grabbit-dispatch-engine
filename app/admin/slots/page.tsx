@@ -24,6 +24,12 @@ export default async function AdminSlotsPage() {
       initialBookings={bookings}
       agentEnabled={agentSwitch.enabled}
       scheduleSummary={summarizeAvailabilityForAdmin(schedule)}
+      slots={schedule.slots}
+      currentWeekday={schedule.weekday}
+      mauritiusNow={schedule.mauritiusNowLabel}
+      openNow={schedule.openNow}
+      currentRiders={schedule.ridersNow}
+      upcomingDays={schedule.upcomingDays}
     />
   );
 }

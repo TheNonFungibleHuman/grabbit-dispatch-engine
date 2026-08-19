@@ -10,6 +10,29 @@ export async function GET(request: Request) {
     searchParams.get("text") ||
     "Hi, I want to book a trip from ALCHE main gate to Mahogany Promenade tomorrow at 12:00 PM.";
 
+  if (action === "test_moses") {
+    const { notifyRiderForBooking } = await import("@/lib/riders/notify-rider");
+    const testResult = await notifyRiderForBooking({
+      bookingId: `test_moses_${Date.now()}`,
+      customerName: "Deen (Test)",
+      customerPhone: "+9990000000003",
+      serviceKind: "trip",
+      pickupAddress: "ALCHE Campus main gate",
+      dropoffAddress: "Mahogany Promenade",
+      scheduledTime: "12:00 pm",
+      assignedRider: "Moses",
+      trackingUrl: "https://delivery.grabbit-express.com/track/DEL_2026_041/MOSES_TEST",
+    });
+    return NextResponse.json({
+      status: "moses_dispatch_tested",
+      googleChatWebhookConfigured: Boolean(process.env.GOOGLE_CHAT_WEBHOOK_URL),
+      testResult,
+      message: testResult.ok
+        ? `Successfully sent Google Chat notification to Moses!`
+        : `Notification failed: ${testResult.error || "Check GOOGLE_CHAT_WEBHOOK_URL"}`,
+    });
+  }
+
   if (action === "rider_confirm") {
     const riderPhone = process.env.TEST_RIDER_PHONE || "+99900000027";
     const replyText = searchParams.get("reply") || "YES";
