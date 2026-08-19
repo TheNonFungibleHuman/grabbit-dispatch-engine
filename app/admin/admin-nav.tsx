@@ -21,16 +21,32 @@ export function AdminNav(props: {
   const router = useRouter();
   const pathname = usePathname();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-
-  const [agentState, agentAction, agentPending] = useActionState(
-    setAgentEnabledAction,
-    initialState,
-  );
-
+  const [enabled, setEnabled] = useState(props.agentEnabled);
+  const [pending, setPending] = useState(false);
 
   useEffect(() => {
-    if (agentState.ok) router.refresh();
-  }, [agentState.ok, router]);
+    setEnabled(props.agentEnabled);
+  }, [props.agentEnabled]);
+
+  async function handleToggle() {
+    const next = !enabled;
+    setEnabled(next); // Instant 0ms optimistic visual toggle!
+    setPending(true);
+    try {
+      const formData = new FormData();
+      formData.append("enabled", String(next));
+      const res = await setAgentEnabledAction(initialState, formData);
+      if (res.ok) {
+        router.refresh();
+      } else {
+        setEnabled(!next); // Revert on failure
+      }
+    } catch {
+      setEnabled(!next);
+    } finally {
+      setPending(false);
+    }
+  }
 
   const navItems = [
     {
@@ -120,30 +136,24 @@ export function AdminNav(props: {
 
         {/* Action Controls Top Bar */}
         <div className="flex flex-wrap items-center gap-2.5">
-          {/* AI Status Badge & Toggle */}
-          <form action={agentAction}>
-            <input
-              type="hidden"
-              name="enabled"
-              value={props.agentEnabled ? "false" : "true"}
-            />
-            <button
-              type="submit"
-              disabled={agentPending}
-              className={`inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full text-xs font-semibold transition-all border shadow-sm ${
-                props.agentEnabled
-                  ? "bg-[#FFFFFF] dark:bg-[#121714] text-[#101412] dark:text-[#F6F3EC] border-[#7ed957] hover:border-[#6fc847]"
-                  : "bg-[#FFFFFF] dark:bg-[#121714] text-[#9b2c2c] border-[#f0c2c2] hover:bg-[#fff5f5]"
+          {/* AI Status Badge & Instant Real-Time Toggle */}
+          <button
+            type="button"
+            onClick={handleToggle}
+            disabled={pending}
+            className={`inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full text-xs font-semibold transition-all border shadow-sm ${
+              enabled
+                ? "bg-[#FFFFFF] dark:bg-[#121714] text-[#101412] dark:text-[#F6F3EC] border-[#7ed957] hover:border-[#6fc847]"
+                : "bg-[#FFFFFF] dark:bg-[#121714] text-[#9b2c2c] border-[#f0c2c2] hover:bg-[#fff5f5]"
+            }`}
+          >
+            <span
+              className={`h-2 w-2 rounded-full ${
+                enabled ? "bg-[#7ed957] animate-pulse" : "bg-[#9b2c2c]"
               }`}
-            >
-              <span
-                className={`h-2 w-2 rounded-full ${
-                  props.agentEnabled ? "bg-[#7ed957] animate-pulse" : "bg-[#9b2c2c]"
-                }`}
-              />
-              <span>{agentPending ? "Updating..." : props.agentEnabled ? "AI Active" : "AI Paused"}</span>
-            </button>
-          </form>
+            />
+            <span>{pending ? "Updating..." : enabled ? "AI Active" : "AI Paused"}</span>
+          </button>
 
           {/* Theme Toggle */}
           <ThemeToggle />

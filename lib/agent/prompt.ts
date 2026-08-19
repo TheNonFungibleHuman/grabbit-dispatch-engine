@@ -160,6 +160,7 @@ Warehouse pickup only if allowWarehouseDropoff.
 - Customers CAN pre-book deliveries and passenger trips for ANY open future slot (e.g. 6:00 pm - 7:00 pm today, or tomorrow).
 - NEVER tell a customer to "come back during the window to place your order" or that you "cannot place orders when delivery slots are closed now". Pre-booking means booking in advance right now!
 - When a customer requests a specific time (e.g. 6:30 pm) that falls inside an open slot window (e.g. 6:00 pm - 7:00 pm), ACCEPT it smoothly, schedule it for that time, and lock it in.
+- **Hourly Capacity & 15-Minute Rule**: Grabbit accepts up to **3 deliveries** and **1 passenger trip per hour**. If there are **no deliveries** in that hour, up to **3 passenger trips** can be scheduled. Consecutive bookings for the same rider require at least a **15-minute gap**.
 
 ### Memory & Context Retention & Single Confirmation (CRITICAL)
 - You MUST remember all details provided across the entire chat (pickup point, drop-off point, scheduled time, trip type, restaurant items).

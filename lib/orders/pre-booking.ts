@@ -91,7 +91,10 @@ export function formatMinutesToTime(minutes: number): string {
 }
 
 export const MIN_BOOKING_GAP_MINUTES = 15;
-const MAX_DELIVERIES_PER_SLOT = 3;
+export const MAX_DELIVERIES_PER_HOUR = 3;
+export const MAX_TRIPS_PER_HOUR_DEFAULT = 1;
+export const MAX_TRIPS_PER_HOUR_NO_DELIVERIES = 3;
+export const MAX_TOTAL_PER_HOUR = 3;
 
 export interface CheckSlotResult {
   available: boolean;
@@ -101,7 +104,12 @@ export interface CheckSlotResult {
 }
 
 /**
- * Checks if a rider's slot has available capacity & enforces the strict 15-minute buffer.
+ * Checks if a rider's hour window has available capacity & enforces the strict 15-minute buffer.
+ * Capacity rule per hour:
+ * - Up to 3 deliveries and 1 trip per hour.
+ * - If there are zero deliveries in that hour, up to 3 passenger trips can be booked.
+ * - Maximum total bookings per hour = 3.
+ * - Minimum gap between bookings for the same rider = 15 minutes.
  */
 export async function checkSlotAvailability(args: {
   slotKey: string;
@@ -114,23 +122,25 @@ export async function checkSlotAvailability(args: {
   const all = await listAllPreBookings();
   const riderNormalized = args.assignedRider.trim().toLowerCase();
 
-  const activeBookings = all.filter(
+  // Find all active bookings for this rider
+  const allRiderActiveBookings = all.filter(
     (b) =>
-      b.slotKey === args.slotKey &&
       b.assignedRider.toLowerCase().includes(riderNormalized) &&
       (b.status === "pending_rider" || b.status === "confirmed" || b.status === "dispatched"),
   );
 
-  // 1. Strict 15-minute gap buffer per rider on the same day/slot
-  if (args.scheduledTime) {
-    const targetMin = parseTimeToMinutes(args.scheduledTime);
-    if (targetMin !== null) {
-      for (const b of activeBookings) {
+  const targetMin = args.scheduledTime ? parseTimeToMinutes(args.scheduledTime) : null;
+  const targetDate = args.scheduledDate || "";
+
+  // 1. Strict 15-minute gap buffer per rider on the same date/slot
+  if (targetMin !== null) {
+    for (const b of allRiderActiveBookings) {
+      const isSameDay = !targetDate || !b.scheduledDate || b.scheduledDate === targetDate || b.slotKey === args.slotKey;
+      if (isSameDay) {
         const existingMin = parseTimeToMinutes(b.scheduledTime);
         if (existingMin !== null) {
           const diff = Math.abs(targetMin - existingMin);
           if (diff < MIN_BOOKING_GAP_MINUTES) {
-            // Found a collision within the 15-minute window!
             const nextAvailableMin = existingMin + MIN_BOOKING_GAP_MINUTES;
             const suggestedTime = formatMinutesToTime(nextAvailableMin);
             return {
@@ -145,25 +155,58 @@ export async function checkSlotAvailability(args: {
     }
   }
 
-  // 2. Passenger trips are strictly 1 per slot per rider
-  if (args.serviceKind === "trip") {
-    const existingTrip = activeBookings.find((b) => b.serviceKind === "trip");
-    if (existingTrip) {
+  // 2. Hourly Capacity Check (3 deliveries + 1 trip per hour, or up to 3 trips if 0 deliveries)
+  if (targetMin !== null) {
+    const hourStart = Math.floor(targetMin / 60) * 60;
+    const hourEnd = hourStart + 60;
+
+    const bookingsInHour = allRiderActiveBookings.filter((b) => {
+      const isSameDay = !targetDate || !b.scheduledDate || b.scheduledDate === targetDate || b.slotKey === args.slotKey;
+      if (!isSameDay) return false;
+      const bMin = parseTimeToMinutes(b.scheduledTime);
+      return bMin !== null && bMin >= hourStart && bMin < hourEnd;
+    });
+
+    const deliveriesInHour = bookingsInHour.filter((b) => b.serviceKind !== "trip");
+    const tripsInHour = bookingsInHour.filter((b) => b.serviceKind === "trip");
+    const isTripRequest = args.serviceKind === "trip";
+
+    // Rule A: Max total bookings per hour is 3
+    if (bookingsInHour.length >= MAX_TOTAL_PER_HOUR) {
       return {
         available: false,
-        conflictingBooking: existingTrip,
-        reason: "trip_limit",
+        conflictingBooking: bookingsInHour[0],
+        reason: "slot_capacity",
       };
     }
-  }
 
-  // 3. Deliveries/errands allow up to MAX_DELIVERIES_PER_SLOT (3)
-  if (activeBookings.length >= MAX_DELIVERIES_PER_SLOT) {
-    return {
-      available: false,
-      conflictingBooking: activeBookings[0],
-      reason: "slot_capacity",
-    };
+    if (isTripRequest) {
+      // If there are deliveries booked in this hour, max trips is 1
+      if (deliveriesInHour.length > 0 && tripsInHour.length >= MAX_TRIPS_PER_HOUR_DEFAULT) {
+        return {
+          available: false,
+          conflictingBooking: tripsInHour[0] || deliveriesInHour[0],
+          reason: "trip_limit",
+        };
+      }
+      // If 0 deliveries in this hour, max trips is up to 3
+      if (tripsInHour.length >= MAX_TRIPS_PER_HOUR_NO_DELIVERIES) {
+        return {
+          available: false,
+          conflictingBooking: tripsInHour[0],
+          reason: "trip_limit",
+        };
+      }
+    } else {
+      // Delivery / Errand request: max deliveries in hour is 3
+      if (deliveriesInHour.length >= MAX_DELIVERIES_PER_HOUR) {
+        return {
+          available: false,
+          conflictingBooking: deliveriesInHour[0],
+          reason: "slot_capacity",
+        };
+      }
+    }
   }
 
   return { available: true };

@@ -186,4 +186,49 @@ describe("pre-booking & anti-double-booking guard", () => {
     assert.equal(adminQuery.authorized, true);
     assert.equal(adminQuery.ok, true);
   });
+
+  it("enforces hourly capacity rules: 3 deliveries + 1 trip, or 3 trips if 0 deliveries", async () => {
+    const slotKey = "2026-09-05_11:30-13:30";
+    const rider = "Moses";
+
+    // 1. Hour 11:30 - 12:30: 0 deliveries -> can book 3 trips with 15-min gap
+    const trip1 = await createPreBookingRequest({
+      customerPhone: "+99900000036",
+      customerName: "TripUser1",
+      serviceKind: "trip",
+      pickupAddress: "ALCHE gate",
+      deliveryAddress: "Mahogany",
+      scheduledDate: "2026-09-05",
+      scheduledTime: "11:30 am",
+      slotKey,
+      assignedRider: rider,
+    });
+    assert.equal(trip1.ok, true);
+
+    const trip2 = await createPreBookingRequest({
+      customerPhone: "+99900000039",
+      customerName: "TripUser2",
+      serviceKind: "trip",
+      pickupAddress: "ALCHE gate",
+      deliveryAddress: "Mahogany",
+      scheduledDate: "2026-09-05",
+      scheduledTime: "11:45 am",
+      slotKey,
+      assignedRider: rider,
+    });
+    assert.equal(trip2.ok, true);
+
+    const trip3 = await createPreBookingRequest({
+      customerPhone: "+99900000040",
+      customerName: "TripUser3",
+      serviceKind: "trip",
+      pickupAddress: "ALCHE gate",
+      deliveryAddress: "Mahogany",
+      scheduledDate: "2026-09-05",
+      scheduledTime: "12:00 pm", // new hour (12:00-13:00)
+      slotKey,
+      assignedRider: rider,
+    });
+    assert.equal(trip3.ok, true);
+  });
 });
