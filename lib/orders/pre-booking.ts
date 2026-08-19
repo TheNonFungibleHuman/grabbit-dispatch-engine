@@ -3,6 +3,7 @@ import { formatError, logError, logInfo, logWarn } from "../log.ts";
 import { FLEET_RIDERS, findRiderByName, findRiderByPhone, getCustomTrackingUrl, isAuthorizedRiderOrAdmin, type RiderProfile } from "../riders/config.ts";
 import { notifyRiderForBooking } from "../riders/notify-rider.ts";
 import { assignDeliveryRider, createDelivery } from "../kilo/client.ts";
+import { sanitizeKiloName } from "../kilo/map-order.ts";
 import { sendCustomerText } from "../wasender/send-tracked.ts";
 import type { CreateKiloDeliveryInput, KiloErrandMode, KiloPackageSize, KiloServiceKind } from "../kilo/types.ts";
 
@@ -302,9 +303,9 @@ export async function createPreBookingRequest(args: {
       serviceKind: kiloServiceKind,
       errandMode: kiloErrandMode,
       deliveryMode: "pickup",
-      senderName: args.customerName || "Customer",
+      senderName: sanitizeKiloName(args.customerName),
       senderPhone: args.customerPhone,
-      receiverName: args.customerName || "Customer",
+      receiverName: sanitizeKiloName(args.customerName),
       receiverPhone: args.customerPhone,
       pickupAddress: args.pickupAddress,
       pickupCoords: args.pickupCoords || { lat: -20.1024, lng: 57.5621 },

@@ -9,6 +9,13 @@ import type {
 import type { GeoCoords } from "../geocode";
 
 /** Photos required: pickup_delivery, or errand with errandMode=photo. */
+export function sanitizeKiloName(name?: string, fallback = "Customer"): string {
+  const trimmed = (name || "").trim();
+  if (trimmed.length >= 2) return trimmed;
+  if (trimmed.length === 1) return `Customer ${trimmed}`;
+  return fallback;
+}
+
 export function requiresPackageImages(
   serviceKind: KiloServiceKind,
   errandMode?: KiloErrandMode | null,
@@ -152,11 +159,11 @@ export function mapDraftToCreateDeliveryInput(
   const payload: CreateKiloDeliveryInput = {
     serviceKind,
     deliveryMode,
-    senderName: draft.senderName.trim(),
+    senderName: sanitizeKiloName(draft.senderName),
     senderPhone: normalizePhone(draft.senderPhone),
     senderEmail: draft.senderEmail?.trim() || undefined,
     pickupContactSameAsSender: draft.pickupContactSameAsSender ?? true,
-    receiverName: draft.receiverName.trim(),
+    receiverName: sanitizeKiloName(draft.receiverName),
     receiverPhone: normalizePhone(draft.receiverPhone),
     pickupAddress: draft.pickupAddress.trim(),
     pickupCoords: {

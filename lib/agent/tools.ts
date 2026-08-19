@@ -368,6 +368,8 @@ export async function executeAgentTool(args: {
         logWarn("agent", "failed to mark schedule booking quiet window", formatError(error));
       }
 
+      const trackingUrl = prebookResult.trackingUrl || "https://delivery.grabbit-express.com";
+
       return {
         ok: true,
         serviceKind,
@@ -375,9 +377,9 @@ export async function executeAgentTool(args: {
         scheduledTime,
         assignedRider: prebookResult.assignedRider || assignedRider,
         kiloDeliveryId: prebookResult.kiloDeliveryId,
-        trackingUrl: prebookResult.trackingUrl,
+        trackingUrl,
         status: "confirmed",
-        message: `Your ${serviceKind} request for ${scheduledDate} at ${scheduledTime} is confirmed and assigned to rider ${prebookResult.assignedRider || assignedRider}! Live Tracking Link: ${prebookResult.trackingUrl}`,
+        message: `Your ${serviceKind} request for ${scheduledDate} at ${scheduledTime} is confirmed and assigned to rider ${prebookResult.assignedRider || assignedRider}! Live Tracking Link: ${trackingUrl}`,
       };
     }
 
