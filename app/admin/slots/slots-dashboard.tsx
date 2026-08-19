@@ -103,28 +103,6 @@ export function SlotsDashboard(props: {
     }
   }
 
-  async function handleTestMosesDispatch() {
-    setTestingMoses(true);
-    setMessage(null);
-    try {
-      const res = await fetch("/api/test-dispatch?action=test_moses");
-      const data = await res.json();
-      if (data.testResult?.ok) {
-        setMessage(
-          `✅ Test dispatch sent to Moses via ${data.testResult.channel}! (Google Chat Webhook: ${
-            data.googleChatWebhookConfigured ? "Configured" : "Not Set"
-          })`,
-        );
-      } else {
-        setMessage(`⚠️ Test dispatch result: ${data.message || JSON.stringify(data)}`);
-      }
-    } catch (err) {
-      setMessage(`❌ Failed to send Moses dispatch: ${err instanceof Error ? err.message : String(err)}`);
-    } finally {
-      setTestingMoses(false);
-    }
-  }
-
   const activeCount = bookings.filter(
     (b) => b.status === "pending_rider" || b.status === "confirmed" || b.status === "dispatched",
   ).length;
@@ -165,13 +143,6 @@ export function SlotsDashboard(props: {
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            <button
-              onClick={handleTestMosesDispatch}
-              disabled={testingMoses}
-              className="px-3 py-1.5 rounded-lg bg-purple-900/60 hover:bg-purple-800 text-purple-200 border border-purple-700/50 text-sm font-medium disabled:opacity-50 flex items-center gap-1.5"
-            >
-              {testingMoses ? "Sending..." : "💬 Test Moses Google Chat"}
-            </button>
             <button
               onClick={refreshBookings}
               disabled={loading}
