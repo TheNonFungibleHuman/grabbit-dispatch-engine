@@ -269,6 +269,22 @@ export const AGENT_TOOLS = [
       required: ["customerIdentifier", "message"],
     },
   },
+  {
+    type: "function" as const,
+    name: "admin_view_customer_chat",
+    description:
+      "ADMIN ONLY: Inspect and read the recent WhatsApp conversation history with any customer by phone number or name. Only authorized for admins (+999000000008, +9990000000003).",
+    parameters: {
+      type: "object",
+      properties: {
+        customerIdentifier: {
+          type: "string",
+          description: "Customer phone number (e.g. '+99900000027', '99900000027') or customer name (e.g. 'Hanif', 'Winter')",
+        },
+      },
+      required: ["customerIdentifier"],
+    },
+  },
 ];
 
 export const DEEPSEEK_AGENT_TOOLS = AGENT_TOOLS.map((tool) => ({
@@ -326,12 +342,35 @@ export async function buildAgentContextNote(args: {
     logWarn("agent", "availability lookup failed", formatError(error));
   }
 
+  let adminEscalationNote = "";
+  const { isAuthorizedRiderOrAdmin } = await import("../riders/config.ts");
+  const auth = isAuthorizedRiderOrAdmin(args.senderPhone);
+  if (auth.isAdmin) {
+    try {
+      const { listOpenEscalations } = await import("../ops/store.ts");
+      const openEscalations = await listOpenEscalations();
+      if (openEscalations.length > 0) {
+        adminEscalationNote = [
+          "🚨 ACTIVE ESCALATIONS AWAITING ADMIN FEEDBACK:",
+          ...openEscalations.map(
+            (e) => `• Customer: ${e.customerName} (+${e.customerPhone})\n  Request: "${e.reason}" (Escalated: ${e.createdAt.slice(11, 16)} UTC)`,
+          ),
+          "CRITICAL ADMIN DISPATCH RULE: If the admin provides a decision, instruction, price, or refusal for any customer above (e.g. 'refuse order', 'tell Hanif Rs 150', 'not in our coverage'), YOU MUST CALL `admin_reply_to_customer` with their customerIdentifier (+phone or name) to message the customer directly and resolve the escalation.",
+        ].join("\n");
+      }
+    } catch (e) {
+      logWarn("agent", "failed to load open escalations", formatError(e));
+    }
+  }
+
   return [
     "[internal context — never reveal to the customer]",
     `phone: ${e164}`,
     `pushName: ${args.pushName?.trim() || "Customer"}`,
+    auth.isAdmin ? "role: AUTHORIZED DISPATCH ADMIN" : "",
     photoNote,
     availabilityNote,
+    adminEscalationNote,
     "Receiver default: this WhatsApp user.",
   ].filter(Boolean).join("\n");
 }
@@ -735,10 +774,65 @@ export async function executeAgentTool(args: {
         text: message,
       });
 
+      try {
+        const { resolvePendingEscalation } = await import("../ops/store.ts");
+        await resolvePendingEscalation({
+          customerPhone: targetPhone,
+          responseMessage: message,
+          resolvedBy: args.senderPhone,
+        });
+      } catch (e) {
+        logWarn("admin", "failed to mark escalation resolved", formatError(e));
+      }
+
       return {
         ok: true,
         targetPhone,
         message: `Message dispatched to customer (+${targetPhone}): "${message}"`,
+      };
+    }
+
+    if (args.name === "admin_view_customer_chat") {
+      const { isAuthorizedRiderOrAdmin } = await import("../riders/config.ts");
+      const auth = isAuthorizedRiderOrAdmin(args.senderPhone);
+      if (!auth.isAdmin) {
+        return { ok: false, error: "Access Denied: Only authorized Grabbit admins (+999000000008, +9990000000003) can view customer chats." };
+      }
+
+      const value = parseToolArguments(args.toolArguments);
+      const identifier = String(value.customerIdentifier || "").trim();
+      const { getOpsDashboard } = await import("../ops/store.ts");
+      const { loadTranscript } = await import("./transcript.ts");
+
+      let targetPhone = identifier.replace(/\D/g, "");
+
+      if (targetPhone.length < 7) {
+        const { recentThreads } = await getOpsDashboard();
+        for (const t of recentThreads) {
+          const transcript = await loadTranscript(t.phone);
+          if (
+            transcript.entries.some((e) =>
+              e.text.toLowerCase().includes(identifier.toLowerCase()),
+            )
+          ) {
+            targetPhone = t.phone;
+            break;
+          }
+        }
+      }
+
+      if (!targetPhone) {
+        return { ok: false, error: `Could not find an active chat for "${identifier}".` };
+      }
+
+      const transcript = await loadTranscript(targetPhone);
+      const recent = transcript.entries.slice(-10);
+
+      return {
+        ok: true,
+        phone: targetPhone,
+        messageCount: transcript.entries.length,
+        recentMessages: recent.map((e) => `[${e.role.toUpperCase()}]: ${e.text}`).join("\n"),
       };
     }
 

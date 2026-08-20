@@ -273,10 +273,21 @@ export async function notifyAdminEscalation(args: {
     `Customer: *${args.customerName}* (${args.customerPhone})`,
     `Reason: ${args.reason}`,
     args.recentContext ? `Context: ${args.recentContext}` : ``,
-    `Please check the dashboard or WhatsApp thread to assist.`,
+    `Reply to this message with your decision or instruction to relay it directly to the customer.`,
   ].filter(Boolean).join("\n");
 
   logInfo("riders", "dispatching admin escalation", { phone: args.customerPhone, reason: args.reason });
+
+  try {
+    const { recordPendingEscalation } = await import("../ops/store.ts");
+    await recordPendingEscalation({
+      customerPhone: args.customerPhone,
+      customerName: args.customerName,
+      reason: args.reason,
+    });
+  } catch (escErr) {
+    logWarn("riders", "failed to record pending escalation", formatError(escErr));
+  }
 
   // 1. Google Chat
   const webhookUrl = process.env.GOOGLE_CHAT_WEBHOOK_URL?.trim();

@@ -94,3 +94,96 @@ export async function getOpsDashboard(): Promise<{
     recentThreads: listRecentThreads(state),
   };
 }
+
+export interface PendingEscalation {
+  id: string;
+  customerPhone: string;
+  customerName: string;
+  reason: string;
+  createdAt: string;
+  status: "open" | "resolved";
+  resolvedAt?: string;
+  resolvedBy?: string;
+  responseMessage?: string;
+}
+
+const ESCALATIONS_STORE_PATH = "grabbit/ops/escalations.json";
+
+export async function loadEscalations(): Promise<PendingEscalation[]> {
+  try {
+    const list = await readJson<PendingEscalation[]>(ESCALATIONS_STORE_PATH);
+    return Array.isArray(list) ? list : [];
+  } catch {
+    return [];
+  }
+}
+
+export async function saveEscalations(list: PendingEscalation[]): Promise<void> {
+  await writeJson(ESCALATIONS_STORE_PATH, list);
+}
+
+export async function recordPendingEscalation(input: {
+  customerPhone: string;
+  customerName: string;
+  reason: string;
+}): Promise<PendingEscalation> {
+  const cleanPhone = input.customerPhone.replace(/\D/g, "");
+  const list = await loadEscalations();
+
+  const escalation: PendingEscalation = {
+    id: `esc_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+    customerPhone: cleanPhone,
+    customerName: input.customerName,
+    reason: input.reason,
+    createdAt: new Date().toISOString(),
+    status: "open",
+  };
+
+  const updated = list.map((e) =>
+    e.customerPhone === cleanPhone && e.status === "open"
+      ? { ...e, status: "resolved" as const, resolvedAt: new Date().toISOString() }
+      : e,
+  );
+
+  updated.unshift(escalation);
+  await saveEscalations(updated.slice(0, 50));
+  return escalation;
+}
+
+export async function listOpenEscalations(): Promise<PendingEscalation[]> {
+  const list = await loadEscalations();
+  return list.filter((e) => e.status === "open");
+}
+
+export async function resolvePendingEscalation(args: {
+  customerPhone: string;
+  responseMessage?: string;
+  resolvedBy?: string;
+}): Promise<boolean> {
+  const cleanPhone = args.customerPhone.replace(/\D/g, "");
+  const list = await loadEscalations();
+  let found = false;
+
+  const updated = list.map((e) => {
+    if (e.customerPhone.includes(cleanPhone) || cleanPhone.includes(e.customerPhone)) {
+      if (e.status === "open") {
+        found = true;
+        return {
+          ...e,
+          status: "resolved" as const,
+          resolvedAt: new Date().toISOString(),
+          resolvedBy: args.resolvedBy,
+          responseMessage: args.responseMessage,
+        };
+      }
+    }
+    return e;
+  });
+
+  if (found) {
+    await saveEscalations(updated);
+  }
+
+  return found;
+}
+
