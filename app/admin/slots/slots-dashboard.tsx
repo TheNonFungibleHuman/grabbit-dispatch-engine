@@ -63,7 +63,7 @@ export function SlotsDashboard(props: {
     }
   }, []);
 
-  const [selectedDate, setSelectedDate] = useState<string>(todayMauritius);
+  const [selectedDate, setSelectedDate] = useState<string>("ALL");
 
   const RIDER_PRESETS = [
     { label: "Closed / No Rider", value: "No Rider Available" },
@@ -540,22 +540,26 @@ export function SlotsDashboard(props: {
 
           {/* Date Filter & Search bar */}
           <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 w-full sm:w-auto">
-            <div className="flex items-center gap-1.5 bg-[#F6F3EC] dark:bg-[#0B0F0C] border border-[#E8E5DC] dark:border-[#1D2620] rounded-full px-3 py-1 text-xs">
-              <span className="text-[#6C746E] dark:text-[#8E9690] text-[11px] font-semibold">Date:</span>
+            <div className="flex items-center gap-1.5 bg-[#F6F3EC] dark:bg-[#0B0F0C] border border-[#E8E5DC] dark:border-[#1D2620] rounded-full px-3.5 py-1.5 text-xs shadow-xs">
+              <span className="text-[#6C746E] dark:text-[#8E9690] text-[11px] font-semibold">Filter Date:</span>
               <select
                 value={selectedDate}
                 onChange={(e) => setSelectedDate(e.target.value)}
-                className="bg-transparent text-[#101412] dark:text-[#F6F3EC] font-semibold text-xs focus:outline-none cursor-pointer"
+                className="bg-transparent text-[#101412] dark:text-[#F6F3EC] font-bold text-xs focus:outline-none cursor-pointer pr-1"
               >
-                <option value={todayMauritius}>Today ({todayMauritius})</option>
-                {uniqueDates
-                  .filter((d) => d !== todayMauritius)
-                  .map((d) => (
-                    <option key={d} value={d}>
-                      {d}
-                    </option>
-                  ))}
                 <option value="ALL">All Dates ({bookings.length})</option>
+                {uniqueDates.map((d) => {
+                  const count = bookings.filter((b) => b.scheduledDate === d).length;
+                  const isToday = d === todayMauritius;
+                  const isTomorrow = d === "2026-08-21";
+                  const isYesterday = d === "2026-08-19";
+                  const prefix = isToday ? "Today" : isTomorrow ? "Tomorrow" : isYesterday ? "Yesterday" : d;
+                  return (
+                    <option key={d} value={d}>
+                      {prefix} ({d}) — {count} {count === 1 ? "booking" : "bookings"}
+                    </option>
+                  );
+                })}
               </select>
             </div>
 
@@ -569,6 +573,45 @@ export function SlotsDashboard(props: {
               />
             </div>
           </div>
+        </div>
+
+        {/* Quick Date Tabs */}
+        <div className="px-5 py-2.5 bg-[#F6F3EC]/60 dark:bg-[#0B0F0C]/60 border-b border-[#E8E5DC] dark:border-[#1D2620] flex flex-wrap items-center gap-1.5 text-xs">
+          <button
+            onClick={() => setSelectedDate("ALL")}
+            className={`px-3 py-1 rounded-full text-xs font-semibold transition-all ${
+              selectedDate === "ALL"
+                ? "bg-[#101412] dark:bg-[#F6F3EC] text-white dark:text-[#101412] shadow-xs"
+                : "bg-[var(--bg-card)] text-[#6C746E] dark:text-[#8E9690] hover:text-[#101412] dark:hover:text-[#F6F3EC] border border-[#E8E5DC] dark:border-[#1D2620]"
+            }`}
+          >
+            All Bookings ({bookings.length})
+          </button>
+          {uniqueDates.map((d) => {
+            const count = bookings.filter((b) => b.scheduledDate === d).length;
+            const isToday = d === todayMauritius;
+            const isTomorrow = d === "2026-08-21";
+            const isYesterday = d === "2026-08-19";
+            const label = isTomorrow ? "Tomorrow" : isToday ? "Today" : isYesterday ? "Yesterday" : d;
+            return (
+              <button
+                key={d}
+                onClick={() => setSelectedDate(d)}
+                className={`px-3 py-1 rounded-full text-xs font-semibold transition-all flex items-center gap-1.5 ${
+                  selectedDate === d
+                    ? "bg-[#7ed957] text-[#101412] font-bold shadow-xs"
+                    : "bg-[var(--bg-card)] text-[#6C746E] dark:text-[#8E9690] hover:text-[#101412] dark:hover:text-[#F6F3EC] border border-[#E8E5DC] dark:border-[#1D2620]"
+                }`}
+              >
+                <span>{label}</span>
+                <span className={`text-[10px] px-1.5 py-0.2 rounded-full ${
+                  selectedDate === d ? "bg-[#101412] text-white" : "bg-[#EDEAE2] dark:bg-[#171E1A] text-[#6C746E] dark:text-[#8E9690]"
+                }`}>
+                  {count}
+                </span>
+              </button>
+            );
+          })}
         </div>
 
         {filteredBookings.length === 0 ? (

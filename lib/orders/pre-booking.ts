@@ -226,6 +226,28 @@ export async function clearAllPreBookings(): Promise<void> {
   await writeJson(INDEX_PATH, { ids: [] });
 }
 
+export function resolveIsoDate(dateStr?: string): string {
+  if (!dateStr || dateStr.toLowerCase() === "today") {
+    try {
+      return new Intl.DateTimeFormat("en-CA", { timeZone: "Indian/Mauritius" }).format(new Date());
+    } catch {
+      return new Date().toISOString().slice(0, 10);
+    }
+  }
+  if (dateStr.toLowerCase() === "tomorrow") {
+    try {
+      const now = new Date();
+      now.setDate(now.getDate() + 1);
+      return new Intl.DateTimeFormat("en-CA", { timeZone: "Indian/Mauritius" }).format(now);
+    } catch {
+      const now = new Date();
+      now.setDate(now.getDate() + 1);
+      return now.toISOString().slice(0, 10);
+    }
+  }
+  return dateStr;
+}
+
 /**
  * Reschedules an existing active pre-booking for a customer to a new time or date.
  */
@@ -262,7 +284,7 @@ export async function reschedulePreBookingRequest(args: {
   }
 
   // Check availability for the new target time
-  const targetDate = args.newScheduledDate || activeBooking.scheduledDate;
+  const targetDate = resolveIsoDate(args.newScheduledDate || activeBooking.scheduledDate);
   const targetSlotKey = args.newSlotKey || activeBooking.slotKey;
   const rider = args.newAssignedRider || activeBooking.assignedRider;
 
@@ -358,6 +380,8 @@ export async function createPreBookingRequest(args: {
   kiloDeliveryId?: string;
   trackingUrl?: string;
 }> {
+  const targetIsoDate = resolveIsoDate(args.scheduledDate);
+
   // 1. Anti-Double-Booking & 15-Minute Gap Check
   const availability = await checkSlotAvailability({
     slotKey: args.slotKey,
@@ -365,7 +389,7 @@ export async function createPreBookingRequest(args: {
     customerPhone: args.customerPhone,
     serviceKind: args.serviceKind,
     scheduledTime: args.scheduledTime,
-    scheduledDate: args.scheduledDate,
+    scheduledDate: targetIsoDate,
   });
 
   if (!availability.available) {
@@ -418,7 +442,7 @@ export async function createPreBookingRequest(args: {
       packageDescription: args.packageDescription || `${args.serviceKind.toUpperCase()} booking for ${args.scheduledTime}`,
       packageSize: args.packageSize || "small",
       packageImages: hasPhotos ? args.packageImages! : [],
-      customerCollectionMethod: "cash_on_delivery",
+      customerCollectionMethod: args.serviceKind === "trip" ? "cash_on_delivery" : "online_checkout",
       idempotencyKey: `kilo_${bookingId}`,
     };
 
@@ -455,7 +479,7 @@ export async function createPreBookingRequest(args: {
     packageImages: args.packageImages || [],
     pickupCoords: args.pickupCoords,
     deliveryCoords: args.deliveryCoords,
-    scheduledDate: args.scheduledDate,
+    scheduledDate: targetIsoDate,
     scheduledTime: args.scheduledTime,
     slotKey: args.slotKey,
     assignedRider: actualRider.name,
