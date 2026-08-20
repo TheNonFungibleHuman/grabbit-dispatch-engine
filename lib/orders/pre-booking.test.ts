@@ -264,4 +264,31 @@ describe("pre-booking & anti-double-booking guard", () => {
     assert.equal(rescheduled.booking?.scheduledTime, "5:30 pm");
     assert.equal(rescheduled.booking?.assignedRider, rider);
   });
+
+  it("handles live rider status check and admin escalation", async () => {
+    const { notifyRiderCustomerInquiry, notifyAdminEscalation } = await import("../riders/notify-rider.ts");
+    
+    const riderCheck = await notifyRiderCustomerInquiry({
+      assignedRider: "Moses",
+      customerName: "TestCustomer",
+      customerPhone: "+99900000074",
+      inquiry: "Where is my driver?",
+      trackingUrl: "https://delivery.grabbit-express.com/track/DEL_123/ABC",
+    });
+    assert.equal(riderCheck.ok, true);
+
+    const adminEsc = await notifyAdminEscalation({
+      customerPhone: "+99900000074",
+      customerName: "TestCustomer",
+      reason: "Complex multi-vendor dispute",
+    });
+    assert.equal(adminEsc.ok, true);
+  });
+
+  it("processes pre-ride reminders safely", async () => {
+    const { processUpcomingBookingReminders } = await import("../schedule/reminders.ts");
+    const res = await processUpcomingBookingReminders();
+    assert.equal(typeof res.processed, "number");
+    assert.equal(Array.isArray(res.reminded), true);
+  });
 });

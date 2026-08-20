@@ -164,6 +164,38 @@ export const AGENT_TOOLS = [
   },
   {
     type: "function" as const,
+    name: "check_with_rider",
+    description:
+      "Send a real-time status inquiry to the assigned rider when a customer asks for a live update, where their driver is, or reports an in-flight delay. Returns active delivery info and live map link.",
+    parameters: {
+      type: "object",
+      properties: {
+        inquiryMessage: {
+          type: "string",
+          description: "Summary of customer inquiry e.g. 'Customer is asking where the rider is' or 'Checking on order delay'",
+        },
+      },
+      required: ["inquiryMessage"],
+    },
+  },
+  {
+    type: "function" as const,
+    name: "escalate_to_admin",
+    description:
+      "Alert the human dispatch admin (+999000000008 and Google Chat) when a customer request is confusing, an edge case occurs, or human intervention is required.",
+    parameters: {
+      type: "object",
+      properties: {
+        reason: {
+          type: "string",
+          description: "Explanation of why admin intervention is needed",
+        },
+      },
+      required: ["reason"],
+    },
+  },
+  {
+    type: "function" as const,
     name: "check_rider_assigned_trips",
     description:
       "Query booked trips and deliveries assigned to a rider or all riders for today or upcoming dates. STRICT SECURITY: Only works for registered Grabbit fleet riders and authorized admin (+9990000000003). If any unauthorized customer asks, returns Access Denied.",
@@ -457,6 +489,74 @@ export async function executeAgentTool(args: {
         kiloDeliveryId: result.booking?.kiloDeliveryId,
         trackingUrl,
         message: `Your booking is now rescheduled to ${newScheduledDate} at ${newScheduledTime} with rider ${result.booking?.assignedRider || assignedRider}! Live Tracking Link: ${trackingUrl}`,
+      };
+    }
+
+    if (args.name === "check_with_rider") {
+      const value = parseToolArguments(args.toolArguments);
+      const inquiryMessage = String(value.inquiryMessage || "Customer is checking on order status");
+
+      const { listAllPreBookings } = await import("../orders/pre-booking.ts");
+      const { notifyRiderCustomerInquiry } = await import("../riders/notify-rider.ts");
+      const phoneClean = args.senderPhone.replace(/\D/g, "");
+
+      const all = await listAllPreBookings();
+      const activeBooking = all
+        .filter(
+          (b) =>
+            b.customerPhone.replace(/\D/g, "") === phoneClean &&
+            (b.status === "pending_rider" || b.status === "confirmed" || b.status === "dispatched"),
+        )
+        .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0];
+
+      if (!activeBooking) {
+        return {
+          ok: false,
+          error: "No active delivery or trip found in progress for your number.",
+        };
+      }
+
+      await notifyRiderCustomerInquiry({
+        assignedRider: activeBooking.assignedRider,
+        customerName: activeBooking.customerName || args.pushName || "Customer",
+        customerPhone: args.senderPhone,
+        inquiry: inquiryMessage,
+        bookingId: activeBooking.id,
+        kiloDeliveryId: activeBooking.kiloDeliveryId,
+        trackingUrl: activeBooking.trackingUrl,
+      });
+
+      return {
+        ok: true,
+        assignedRider: activeBooking.assignedRider,
+        scheduledTime: activeBooking.scheduledTime,
+        trackingUrl: activeBooking.trackingUrl || "https://delivery.grabbit-express.com",
+        message: `I've sent an alert to rider ${activeBooking.assignedRider}. You can also follow their real-time map location here: ${activeBooking.trackingUrl || 'https://delivery.grabbit-express.com'}`,
+      };
+    }
+
+    if (args.name === "escalate_to_admin") {
+      const value = parseToolArguments(args.toolArguments);
+      const reason = String(value.reason || "Customer inquiry needs admin assistance");
+
+      const { notifyAdminEscalation } = await import("../riders/notify-rider.ts");
+      const { recordOpsEvent } = await import("../ops/store.ts");
+
+      await notifyAdminEscalation({
+        customerPhone: args.senderPhone,
+        customerName: args.pushName || "Customer",
+        reason,
+      });
+
+      await recordOpsEvent({
+        phone: args.senderPhone,
+        type: "agent_failed",
+        preview: `Escalated: ${reason}`,
+      });
+
+      return {
+        ok: true,
+        message: "I've flagged this to our dispatch team so a human operator can assist right away!",
       };
     }
 

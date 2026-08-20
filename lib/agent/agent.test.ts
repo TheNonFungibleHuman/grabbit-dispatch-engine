@@ -24,21 +24,16 @@ describe("buildGrabbitSystemInstruction", () => {
 
     assert.match(promptSource, /Grabbit Express/);
     assert.match(promptSource, /single asterisks/i);
-    assert.match(promptSource, /double dashes/i);
-    assert.match(promptSource, /Do not mix in anyone else's order/i);
-    assert.match(promptSource, /Smart guiding/i);
-    assert.match(promptSource, /Delivering to this number/i);
-    assert.match(promptSource, /One-Way/i);
-    assert.match(promptSource, /Round Trip/i);
-    assert.match(promptSource, /Waiting Policy/i);
+    assert.match(promptSource, /Strict Domain Guardrail/i);
+    assert.match(promptSource, /Payment Policy/i);
     assert.match(promptSource, /Never mention Kilo/i);
     assert.match(promptSource, /schedule_trip_or_delivery/i);
-    assert.match(promptSource, /Never break character/i);
+    assert.match(promptSource, /check_with_rider/i);
+    assert.match(promptSource, /escalate_to_admin/i);
 
-    assert.match(promptSource, /Triolet/);
     assert.match(knowledge, /Pamplemousses/);
-    assert.match(knowledge, /100% electric/i);
-    assert.match(knowledge, /Known restaurants/i);
+    assert.match(knowledge, /Menu Directory/i);
+    assert.match(knowledge, /Official Pricing/i);
   });
 });
 

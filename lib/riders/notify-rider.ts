@@ -217,3 +217,135 @@ export async function notifyRiderOfReschedule(
 
   return { ok: true, channel: "logged" };
 }
+
+export async function notifyRiderCustomerInquiry(args: {
+  assignedRider: string;
+  customerName: string;
+  customerPhone: string;
+  inquiry: string;
+  bookingId?: string;
+  kiloDeliveryId?: string;
+  trackingUrl?: string;
+}): Promise<{ ok: boolean; channel: string }> {
+  const rider = findRiderByName(args.assignedRider);
+  if (!rider) return { ok: false, channel: "none" };
+
+  const messageText = [
+    `⚠️ *CUSTOMER STATUS INQUIRY*`,
+    `Customer *${args.customerName}* (${args.customerPhone}) is asking for an update on their order/ride:`,
+    `"${args.inquiry}"`,
+    ``,
+    args.trackingUrl ? `🔴 Live Tracking: ${args.trackingUrl}` : ``,
+    `Please check your live map or reach out if there are any delays!`,
+    `Grabbit Express 🛵⚡`,
+  ].filter(Boolean).join("\n");
+
+  logInfo("riders", "dispatching customer inquiry to rider", { rider: rider.name, inquiry: args.inquiry });
+
+  if (rider.channel === "google_chat") {
+    const webhookUrl = process.env.GOOGLE_CHAT_WEBHOOK_URL?.trim();
+    if (webhookUrl) {
+      try {
+        await fetch(webhookUrl, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text: `*Grabbit Customer Alert for ${rider.name}*\n${messageText}` }),
+        });
+        return { ok: true, channel: "google_chat" };
+      } catch (err) {
+        logError("riders", "failed to send inquiry to google chat", err);
+      }
+    }
+  }
+
+  return { ok: true, channel: "logged" };
+}
+
+export async function notifyAdminEscalation(args: {
+  customerPhone: string;
+  customerName: string;
+  reason: string;
+  recentContext?: string;
+}): Promise<{ ok: boolean }> {
+  const adminPhone = "+999000000008";
+  const messageText = [
+    `🚨 *GRABBIT DISPATCH ADMIN ESCALATION*`,
+    `Customer: *${args.customerName}* (${args.customerPhone})`,
+    `Reason: ${args.reason}`,
+    args.recentContext ? `Context: ${args.recentContext}` : ``,
+    `Please check the dashboard or WhatsApp thread to assist.`,
+  ].filter(Boolean).join("\n");
+
+  logInfo("riders", "dispatching admin escalation", { phone: args.customerPhone, reason: args.reason });
+
+  // 1. Google Chat
+  const webhookUrl = process.env.GOOGLE_CHAT_WEBHOOK_URL?.trim();
+  if (webhookUrl) {
+    try {
+      await fetch(webhookUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: messageText }),
+      });
+    } catch (err) {
+      logError("riders", "failed to send escalation to google chat", err);
+    }
+  }
+
+  // 2. WhatsApp to Admin
+  try {
+    await sendCustomerText({
+      to: adminPhone,
+      text: messageText,
+      messageId: `admin_esc_${Date.now()}`,
+    });
+  } catch (err) {
+    logWarn("riders", "failed to send whatsapp to admin", formatError(err));
+  }
+
+  return { ok: true };
+}
+
+export async function notifyRiderRideReminder(args: {
+  assignedRider: string;
+  customerName: string;
+  customerPhone: string;
+  scheduledTime: string;
+  pickupAddress: string;
+  dropoffAddress: string;
+  serviceKind: string;
+  trackingUrl?: string;
+}): Promise<{ ok: boolean }> {
+  const rider = findRiderByName(args.assignedRider);
+  if (!rider) return { ok: false };
+
+  const messageText = [
+    `⏰ *UPCOMING ${args.serviceKind.toUpperCase()} IN 25 MINUTES!*`,
+    `Attention ${rider.name}: Your scheduled run starts at *${args.scheduledTime}*.`,
+    ``,
+    `👤 Customer: *${args.customerName}* (${args.customerPhone})`,
+    `📍 Pickup: ${args.pickupAddress}`,
+    `📍 Drop-off: ${args.dropoffAddress}`,
+    args.trackingUrl ? `🔴 Live Tracking: ${args.trackingUrl}` : ``,
+    `Please prepare for pickup! 🛵⚡`,
+  ].filter(Boolean).join("\n");
+
+  logInfo("riders", "dispatching 25-min reminder to rider", { rider: rider.name, time: args.scheduledTime });
+
+  if (rider.channel === "google_chat") {
+    const webhookUrl = process.env.GOOGLE_CHAT_WEBHOOK_URL?.trim();
+    if (webhookUrl) {
+      try {
+        await fetch(webhookUrl, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text: `*Reminder for ${rider.name}*\n${messageText}` }),
+        });
+      } catch (err) {
+        logError("riders", "failed to send reminder to google chat", err);
+      }
+    }
+  }
+
+  return { ok: true };
+}

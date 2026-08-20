@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { AdminNav } from "@/app/admin/admin-nav";
 import type { PreBooking } from "@/lib/orders/pre-booking";
 import type { DayOpenSlots, ScheduleSlot, WeekdayKey } from "@/lib/schedule/model";
@@ -52,6 +52,18 @@ export function SlotsDashboard(props: {
   const [savingSchedule, setSavingSchedule] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
+
+  const todayMauritius = useMemo(() => {
+    try {
+      return new Intl.DateTimeFormat("en-CA", {
+        timeZone: "Indian/Mauritius",
+      }).format(new Date());
+    } catch {
+      return new Date().toISOString().split("T")[0];
+    }
+  }, []);
+
+  const [selectedDate, setSelectedDate] = useState<string>(todayMauritius);
 
   const RIDER_PRESETS = [
     { label: "Closed / No Rider", value: "No Rider Available" },
@@ -195,7 +207,32 @@ export function SlotsDashboard(props: {
     (b) => b.status === "pending_rider" || b.status === "confirmed" || b.status === "dispatched",
   ).length;
 
-  const filteredBookings = bookings.filter((b) => {
+  const uniqueDates = useMemo(() => {
+    const dates = new Set([todayMauritius, ...bookings.map((b) => b.scheduledDate).filter(Boolean)]);
+    return Array.from(dates).sort().reverse();
+  }, [todayMauritius, bookings]);
+
+  function parseTimeToMinutesHelper(timeStr: string): number {
+    const match = timeStr.match(/^(\d{1,2}):(\d{2})\s*(am|pm)?$/i);
+    if (!match) return 0;
+    let h = parseInt(match[1], 10);
+    const m = parseInt(match[2], 10);
+    const period = match[3]?.toLowerCase();
+    if (period === "pm" && h < 12) h += 12;
+    if (period === "am" && h === 12) h = 0;
+    return h * 60 + m;
+  }
+
+  const sortedBookings = useMemo(() => {
+    return [...bookings].sort((a, b) => {
+      const dateCmp = (b.scheduledDate || "").localeCompare(a.scheduledDate || "");
+      if (dateCmp !== 0) return dateCmp;
+      return parseTimeToMinutesHelper(a.scheduledTime || "") - parseTimeToMinutesHelper(b.scheduledTime || "");
+    });
+  }, [bookings]);
+
+  const filteredBookings = sortedBookings.filter((b) => {
+    if (selectedDate !== "ALL" && b.scheduledDate !== selectedDate) return false;
     if (!searchQuery.trim()) return true;
     const q = searchQuery.toLowerCase();
     return (
@@ -501,15 +538,36 @@ export function SlotsDashboard(props: {
             <p className="text-xs text-[#6C746E] dark:text-[#8E9690]">Max 3 deliveries / 1 trip per slot</p>
           </div>
 
-          {/* Search bar */}
-          <div className="relative w-full sm:w-64">
-            <input
-              type="text"
-              placeholder="Search customer, rider, slot..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full rounded-full bg-[#F6F3EC] dark:bg-[#0B0F0C] border border-[#E8E5DC] dark:border-[#1D2620] px-4 py-2 text-xs text-[#101412] dark:text-[#F6F3EC] placeholder-[#6C746E] focus:border-[#7ed957] focus:outline-none"
-            />
+          {/* Date Filter & Search bar */}
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 w-full sm:w-auto">
+            <div className="flex items-center gap-1.5 bg-[#F6F3EC] dark:bg-[#0B0F0C] border border-[#E8E5DC] dark:border-[#1D2620] rounded-full px-3 py-1 text-xs">
+              <span className="text-[#6C746E] dark:text-[#8E9690] text-[11px] font-semibold">Date:</span>
+              <select
+                value={selectedDate}
+                onChange={(e) => setSelectedDate(e.target.value)}
+                className="bg-transparent text-[#101412] dark:text-[#F6F3EC] font-semibold text-xs focus:outline-none cursor-pointer"
+              >
+                <option value={todayMauritius}>Today ({todayMauritius})</option>
+                {uniqueDates
+                  .filter((d) => d !== todayMauritius)
+                  .map((d) => (
+                    <option key={d} value={d}>
+                      {d}
+                    </option>
+                  ))}
+                <option value="ALL">All Dates ({bookings.length})</option>
+              </select>
+            </div>
+
+            <div className="relative w-full sm:w-60">
+              <input
+                type="text"
+                placeholder="Search customer, rider, slot..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full rounded-full bg-[#F6F3EC] dark:bg-[#0B0F0C] border border-[#E8E5DC] dark:border-[#1D2620] px-4 py-2 text-xs text-[#101412] dark:text-[#F6F3EC] placeholder-[#6C746E] focus:border-[#7ed957] focus:outline-none"
+              />
+            </div>
           </div>
         </div>
 

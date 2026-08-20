@@ -21,7 +21,7 @@ export interface ChatTranscript {
   entries: TranscriptEntry[];
 }
 
-const MAX_ENTRIES = 40;
+const MAX_ENTRIES = 12;
 
 function transcriptPath(sender: string): string {
   return `grabbit/sessions/${normalizeSender(sender)}/transcript.json`;
@@ -62,7 +62,7 @@ export async function appendTranscriptEntry(
   transcript.entries.push({
     at: entry.at ?? new Date().toISOString(),
     role: entry.role,
-    text: entry.text.slice(0, 500),
+    text: entry.text.slice(0, 400),
     whileAgentDisabled: entry.whileAgentDisabled,
     messageId: entry.messageId,
   });
@@ -91,7 +91,7 @@ export function isInQuietWindow(transcript: ChatTranscript, now = Date.now()): b
 
 export function recentDisabledCustomerMessages(
   transcript: ChatTranscript,
-  limit = 12,
+  limit = 6,
 ): TranscriptEntry[] {
   const disabled = transcript.entries.filter(
     (entry) => entry.role === "customer" && entry.whileAgentDisabled,
@@ -103,21 +103,20 @@ export function formatTranscriptForAgent(
   transcript: ChatTranscript,
   opts?: { includeDisabledGap?: boolean },
 ): string {
-  const lines: string[] = ["[recent WhatsApp thread for this number only]"];
+  const lines: string[] = ["[recent chat thread]"];
 
   const gap = recentDisabledCustomerMessages(transcript);
   if (opts?.includeDisabledGap !== false && gap.length > 0) {
     lines.push(
-      "[while AI was OFF — customer still messaged; a human may have replied on WhatsApp]",
+      "[messages while agent was paused]",
       ...gap.map(
         (entry) =>
           `• customer (${entry.at.slice(11, 16)} UTC): ${entry.text || "(media/empty)"}`,
       ),
-      "Hard rule: do NOT greet as a new chat. Do NOT restart intake. Continue naturally from this thread.",
     );
   }
 
-  const recent = transcript.entries.slice(-16);
+  const recent = transcript.entries.slice(-8);
   if (recent.length) {
     lines.push("[latest turns]");
     for (const entry of recent) {
@@ -133,7 +132,7 @@ export function formatTranscriptForAgent(
 
   if (isInQuietWindow(transcript)) {
     lines.push(
-      "[quiet window] A delivery/order was recently handled. If they only say thanks/ok/nice, reply in ONE short line. Do not restart greeting or sales intake unless they ask for a new order.",
+      "[quiet window: booking active. If customer only sends thanks/ok, reply in 1 line without restarting intake]",
     );
   }
 
