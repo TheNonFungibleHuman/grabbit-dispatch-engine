@@ -68,11 +68,18 @@ export const ADMIN_PHONES = [
   process.env.ADMIN_PHONE,
 ].filter(Boolean) as string[];
 
-export function isAuthorizedRiderOrAdmin(phone: string): {
+export function isAuthorizedRiderOrAdmin(phone?: string): {
   isAuthorized: boolean;
   isAdmin: boolean;
   rider: RiderProfile | null;
 } {
+  if (!phone) {
+    return {
+      isAuthorized: false,
+      isAdmin: false,
+      rider: null,
+    };
+  }
   const cleanPhone = phone.replace(/\D/g, "");
   const isAdmin = ADMIN_PHONES.some((p) => p.replace(/\D/g, "") === cleanPhone);
   const rider = findRiderByPhone(phone);
