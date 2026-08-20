@@ -36,12 +36,16 @@ export function statusMessageForCustomer(args: {
     ].join(" ");
   }
 
+  const trackingUrl = args.deliveryId
+    ? `https://delivery.grabbit-express.com/track/${args.deliveryId}${args.accessCode ? `/${args.accessCode}` : ""}`
+    : "";
+
   if (event.includes("cancelled") || status.includes("cancel")) {
-    return "Update: your Grabbit delivery was cancelled. Reply here if you want to book again.";
+    return "❌ *Update:* Your Grabbit delivery/trip was cancelled. Reply here anytime if you'd like to book again! 😊";
   }
 
   if (event.includes("completed") || status.includes("completed")) {
-    return "Your delivery is complete. Thanks for choosing Grabbit Express.";
+    return "✅ *Delivered!* Your Grabbit order/trip is now complete. Thank you for choosing Grabbit Express! Enjoy and have a wonderful day! ⚡😊";
   }
 
   if (
@@ -49,7 +53,7 @@ export function statusMessageForCustomer(args: {
     status.includes("arrived") ||
     status.includes("at_dropoff")
   ) {
-    return "Your rider is nearby / has arrived. Please be ready.";
+    return "🚪 *Your rider has arrived!* Please meet your rider at the pickup/drop-off spot. 😊";
   }
 
   if (
@@ -58,7 +62,7 @@ export function statusMessageForCustomer(args: {
     status.includes("in_transit") ||
     status.includes("en_route")
   ) {
-    return "Your order has been picked up and is on the way.";
+    return `🛵 *Order Picked Up!* Your rider has picked up your items and is now en route to you! 💨${trackingUrl ? `\n🔴 *Live Tracking Link:* ${trackingUrl}` : ""}`;
   }
 
   if (args.customerMessageHint?.trim()) {

@@ -9,6 +9,7 @@ import { getSenderPhone } from "./parse";
 import type {
   IncomingUserMessage,
   MessagesReceivedEvent,
+  WasenderIncomingMessage,
   WasenderWebhookEvent,
 } from "./types";
 
@@ -32,6 +33,25 @@ export async function handleWasenderEvent(
     default:
       logInfo("wasender", `ignored event: ${payload.event}`);
   }
+}
+
+function extractMessageBody(message: WasenderIncomingMessage): string {
+  if (message.messageBody && message.messageBody.trim()) {
+    return message.messageBody.trim();
+  }
+  const msg = message.message as Record<string, any> | undefined;
+  if (!msg) return "";
+
+  if (typeof msg.conversation === "string") return msg.conversation.trim();
+  if (typeof msg.extendedTextMessage?.text === "string") return msg.extendedTextMessage.text.trim();
+  if (typeof msg.buttonsResponseMessage?.selectedDisplayText === "string") return msg.buttonsResponseMessage.selectedDisplayText.trim();
+  if (typeof msg.buttonsResponseMessage?.selectedButtonId === "string") return msg.buttonsResponseMessage.selectedButtonId.trim();
+  if (typeof msg.templateButtonReplyMessage?.selectedDisplayText === "string") return msg.templateButtonReplyMessage.selectedDisplayText.trim();
+  if (typeof msg.listResponseMessage?.title === "string") return msg.listResponseMessage.title.trim();
+  if (typeof msg.listResponseMessage?.singleSelectReply?.selectedRowId === "string") return msg.listResponseMessage.singleSelectReply.selectedRowId.trim();
+  if (typeof msg.imageMessage?.caption === "string") return msg.imageMessage.caption.trim();
+
+  return "";
 }
 
 async function handleIncomingMessage(
@@ -65,7 +85,7 @@ async function handleIncomingMessage(
   }
 
   const sender = getSenderPhone(message);
-  const text = message.messageBody?.trim() ?? "";
+  const text = extractMessageBody(message);
 
   logInfo("wasender", "message received", {
     messageId: message.key.id,
