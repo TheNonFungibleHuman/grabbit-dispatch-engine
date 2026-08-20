@@ -883,20 +883,13 @@ export async function getRiderAssignedBookings(args: {
       return false;
     }
     if (args.targetDate && args.targetDate.toLowerCase() !== "all") {
-      const isTodayQuery = args.targetDate.toLowerCase() === "today";
-      if (isTodayQuery) {
-        const now = new Date();
-        const yyyy = now.getFullYear();
-        const mm = String(now.getMonth() + 1).padStart(2, "0");
-        const dd = String(now.getDate()).padStart(2, "0");
-        const todayStr = `${yyyy}-${mm}-${dd}`;
-        return b.scheduledDate === "today" || b.scheduledDate === todayStr || b.slotKey.startsWith(todayStr);
-      } else {
-        return (
-          b.scheduledDate.toLowerCase().includes(args.targetDate.toLowerCase()) ||
-          b.slotKey.includes(args.targetDate)
-        );
-      }
+      const targetIso = resolveIsoDate(args.targetDate);
+      return (
+        b.scheduledDate === targetIso ||
+        b.slotKey.startsWith(targetIso) ||
+        b.scheduledDate.toLowerCase().includes(args.targetDate.toLowerCase()) ||
+        b.slotKey.includes(args.targetDate)
+      );
     }
     return true;
   });
