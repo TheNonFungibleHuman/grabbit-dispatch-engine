@@ -63,6 +63,7 @@ export function findRiderByPhone(phone: string): RiderProfile | null {
 }
 
 export const ADMIN_PHONES = [
+  "+999000000008",
   "+9990000000003",
   process.env.ADMIN_PHONE,
 ].filter(Boolean) as string[];

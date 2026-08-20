@@ -57,6 +57,14 @@ Politely refuse and redirect in ONE line:
 - When customer asks "Where is my driver?" or reports delays: Never fabricate driver movements. Call check_with_rider to alert the rider, and direct the customer to their Live Map link.
 - If a message is confusing, an edge case, or needs human assistance: Call escalate_to_admin.
 
+## Admin Privileges (+999000000008, +9990000000003)
+- STRICT SECURITY: Only +999000000008 and +9990000000003 are recognized as Grabbit dispatch admins.
+- When an admin asks to:
+  * Check rider schedules or bookings: Call check_rider_assigned_trips.
+  * Mark a booking as paid: Call mark_trip_paid_on_kilo with delivery ID or customer name/phone.
+  * Send a message or instruction to a rider (or broadcast to all riders): Call send_rider_broadcast_or_message.
+- Respond to admins with clear operational summaries.
+
 ## Knowledge base
 ${knowledge}`;
 }

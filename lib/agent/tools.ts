@@ -198,19 +198,55 @@ export const AGENT_TOOLS = [
     type: "function" as const,
     name: "check_rider_assigned_trips",
     description:
-      "Query booked trips and deliveries assigned to a rider or all riders for today or upcoming dates. STRICT SECURITY: Only works for registered Grabbit fleet riders and authorized admin (+9990000000003). If any unauthorized customer asks, returns Access Denied.",
+      "Query booked trips and deliveries assigned to a rider or all riders for today or upcoming dates. STRICT SECURITY: Only works for registered Grabbit fleet riders and authorized admins (+999000000008, +9990000000003).",
     parameters: {
       type: "object",
       properties: {
         targetDate: {
           type: "string",
-          description: "Target date, e.g. 'today', 'tomorrow', '2026-08-19', or 'all'",
+          description: "Target date, e.g. 'today', 'tomorrow', '2026-08-21', or 'all'",
         },
         targetRiderName: {
           type: "string",
           description: "Optional rider name to filter by (e.g. 'Thierry', 'Sherif', 'Moses')",
         },
       },
+    },
+  },
+  {
+    type: "function" as const,
+    name: "mark_trip_paid_on_kilo",
+    description:
+      "ADMIN ONLY: Mark a trip or delivery as paid on Kilo and update the booking record. Only authorized for admins (+999000000008, +9990000000003).",
+    parameters: {
+      type: "object",
+      properties: {
+        identifier: {
+          type: "string",
+          description: "Kilo Delivery ID (e.g. 'DEL_2026_040'), customer phone, customer name, or booking ID",
+        },
+      },
+      required: ["identifier"],
+    },
+  },
+  {
+    type: "function" as const,
+    name: "send_rider_broadcast_or_message",
+    description:
+      "ADMIN ONLY: Send a direct message or instruction to a specific rider or broadcast to all riders via Google Chat / WhatsApp. Only authorized for admins (+999000000008, +9990000000003).",
+    parameters: {
+      type: "object",
+      properties: {
+        targetRiderName: {
+          type: "string",
+          description: "Rider name (e.g. 'Moses', 'Thierry', 'Sherif') or 'all'",
+        },
+        message: {
+          type: "string",
+          description: "Instruction or message content to deliver to the rider(s)",
+        },
+      },
+      required: ["targetRiderName", "message"],
     },
   },
 ];
@@ -557,6 +593,77 @@ export async function executeAgentTool(args: {
       return {
         ok: true,
         message: "I've flagged this to our dispatch team so a human operator can assist right away!",
+      };
+    }
+
+    if (args.name === "mark_trip_paid_on_kilo") {
+      const { isAuthorizedRiderOrAdmin } = await import("../riders/config.ts");
+      const auth = isAuthorizedRiderOrAdmin(args.senderPhone);
+      if (!auth.isAdmin) {
+        return { ok: false, error: "Access Denied: Only authorized Grabbit admins (+999000000008, +9990000000003) can mark trips as paid." };
+      }
+
+      const value = parseToolArguments(args.toolArguments);
+      const identifier = String(value.identifier || "").trim().toLowerCase();
+      const { listAllPreBookings, savePreBooking } = await import("../orders/pre-booking.ts");
+      const bookings = await listAllPreBookings();
+
+      const found = bookings.find(
+        (b) =>
+          b.id.toLowerCase() === identifier ||
+          (b.kiloDeliveryId && b.kiloDeliveryId.toLowerCase() === identifier) ||
+          b.customerPhone.replace(/\D/g, "").includes(identifier.replace(/\D/g, "")) ||
+          (b.customerName && b.customerName.toLowerCase().includes(identifier)),
+      );
+
+      if (!found) {
+        return { ok: false, error: `No booking found matching "${value.identifier}".` };
+      }
+
+      (found as any).paymentStatus = "paid";
+      found.updatedAt = new Date().toISOString();
+      await savePreBooking(found);
+
+      return {
+        ok: true,
+        bookingId: found.id,
+        kiloDeliveryId: found.kiloDeliveryId,
+        customerName: found.customerName,
+        scheduledTime: found.scheduledTime,
+        message: `Successfully marked booking ${found.kiloDeliveryId || found.id} for ${found.customerName} as PAID.`,
+      };
+    }
+
+    if (args.name === "send_rider_broadcast_or_message") {
+      const { isAuthorizedRiderOrAdmin, FLEET_RIDERS, findRiderByName } = await import("../riders/config.ts");
+      const auth = isAuthorizedRiderOrAdmin(args.senderPhone);
+      if (!auth.isAdmin) {
+        return { ok: false, error: "Access Denied: Only authorized Grabbit admins (+999000000008, +9990000000003) can send rider instructions." };
+      }
+
+      const value = parseToolArguments(args.toolArguments);
+      const target = String(value.targetRiderName || "all").trim();
+      const message = String(value.message || "");
+
+      const webhookUrl = process.env.GOOGLE_CHAT_WEBHOOK_URL?.trim();
+      if (webhookUrl) {
+        try {
+          await fetch(webhookUrl, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              text: `📢 *ADMIN INSTRUCTION for ${target.toUpperCase()}*\nFrom Admin: ${message}\n_Grabbit Dispatch Team_`,
+            }),
+          });
+        } catch (err) {
+          logError("admin", "failed to dispatch broadcast to google chat", err);
+        }
+      }
+
+      return {
+        ok: true,
+        target,
+        message: `Broadcast message sent to ${target}: "${message}"`,
       };
     }
 
