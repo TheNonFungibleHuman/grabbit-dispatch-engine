@@ -249,6 +249,26 @@ export const AGENT_TOOLS = [
       required: ["targetRiderName", "message"],
     },
   },
+  {
+    type: "function" as const,
+    name: "admin_reply_to_customer",
+    description:
+      "ADMIN ONLY: Send a direct WhatsApp message or price quote back to a customer thread. Only authorized for admins (+999000000008, +9990000000003).",
+    parameters: {
+      type: "object",
+      properties: {
+        customerIdentifier: {
+          type: "string",
+          description: "Customer phone number (e.g. '+23054805634') or customer name (e.g. 'Winter')",
+        },
+        message: {
+          type: "string",
+          description: "The message to send to the customer on WhatsApp",
+        },
+      },
+      required: ["customerIdentifier", "message"],
+    },
+  },
 ];
 
 export const DEEPSEEK_AGENT_TOOLS = AGENT_TOOLS.map((tool) => ({
@@ -664,6 +684,61 @@ export async function executeAgentTool(args: {
         ok: true,
         target,
         message: `Broadcast message sent to ${target}: "${message}"`,
+      };
+    }
+
+    if (args.name === "admin_reply_to_customer") {
+      const { isAuthorizedRiderOrAdmin } = await import("../riders/config.ts");
+      const auth = isAuthorizedRiderOrAdmin(args.senderPhone);
+      if (!auth.isAdmin) {
+        return { ok: false, error: "Access Denied: Only authorized Grabbit admins (+999000000008, +9990000000003) can relay customer messages." };
+      }
+
+      const value = parseToolArguments(args.toolArguments);
+      const identifier = String(value.customerIdentifier || "").trim();
+      const message = String(value.message || "").trim();
+
+      const { getOpsDashboard } = await import("../ops/store.ts");
+      const { loadTranscript, appendTranscriptEntry } = await import("./transcript.ts");
+      const { sendCustomerText } = await import("../wasender/send-tracked.ts");
+
+      let targetPhone = identifier.replace(/\D/g, "");
+
+      // If name was provided, search recent threads to resolve phone
+      if (targetPhone.length < 7) {
+        const { recentThreads } = await getOpsDashboard();
+        for (const t of recentThreads) {
+          const transcript = await loadTranscript(t.phone);
+          if (
+            transcript.entries.some((e) =>
+              e.text.toLowerCase().includes(identifier.toLowerCase()),
+            )
+          ) {
+            targetPhone = t.phone;
+            break;
+          }
+        }
+      }
+
+      if (!targetPhone) {
+        return { ok: false, error: `Could not find a phone number for customer "${identifier}".` };
+      }
+
+      await sendCustomerText({
+        to: targetPhone,
+        text: message,
+        messageId: `admin_relay_${Date.now()}`,
+      });
+
+      await appendTranscriptEntry(targetPhone, {
+        role: "agent",
+        text: message,
+      });
+
+      return {
+        ok: true,
+        targetPhone,
+        message: `Message dispatched to customer (+${targetPhone}): "${message}"`,
       };
     }
 

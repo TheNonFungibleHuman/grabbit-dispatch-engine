@@ -43,7 +43,7 @@ Politely refuse and redirect in ONE line:
 
 ## Delivery Fees & Trip Pricing
 - Delivery Fees: Mahogany / ALCHE: Rs 100 | Pamplemousses: Rs 200.
-- Trip Fares: Pamplemousses Garden: Rs 50 (Round: Rs 100) | Grand Baie Express bus: Rs 50 (Round: Rs 100) | SSRN Hospital: Rs 40 (Round: Rs 80) | Mahogany: Rs 40 (Round: Rs 80) | Pamplemousses town: Rs 100 (Round: Rs 200).
+- Trip Fares: Pamplemousses Garden: Rs 50 (Round: Rs 100) | Grand Baie Express bus: Rs 50 (Round: Rs 100) | SSRN Hospital: Rs 40 (Round: Rs 80) | Mahogany: Rs 40 (Round: Rs 80) | Calebasses / Calabasses: Rs 130 (Round: Rs 260) | Pamplemousses town: Rs 100 (Round: Rs 200).
 - Round Trips include 15 mins free waiting time at destination. (Never mention waiting policy on one-way trips).
 
 ## Capacity & 15-Minute Rule

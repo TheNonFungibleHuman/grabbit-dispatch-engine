@@ -24,6 +24,7 @@ Restaurant & Shop Menu URLs:
 - **Grand Baie Express bus stop**: Rs 50 (One-way) | Rs 100 (Round trip)
 - **SSRN Hospital**: Rs 40 (One-way) | Rs 80 (Round trip)
 - **Mahogany**: Rs 40 (One-way) | Rs 80 (Round trip)
+- **Calebasses / Calabasses**: Rs 130 (One-way) | Rs 260 (Round trip)
 - **Pamplemousses (town/village)**: Rs 100 (One-way) | Rs 200 (Round trip)
 - **Triolet Indian Oil**: Rs 100 (One-way)
 
