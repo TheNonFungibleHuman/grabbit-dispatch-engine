@@ -6,7 +6,9 @@ import {
 } from "@/lib/orders/pre-booking";
 
 export async function GET() {
-  const bookings = await listAllPreBookings();
+  const { syncBookingToKiloIfMissing } = await import("@/lib/orders/pre-booking");
+  const raw = await listAllPreBookings();
+  const bookings = await Promise.all(raw.map((b) => syncBookingToKiloIfMissing(b)));
   return NextResponse.json({
     ok: true,
     total: bookings.length,

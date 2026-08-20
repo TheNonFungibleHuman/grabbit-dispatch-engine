@@ -289,21 +289,7 @@ export async function notifyAdminEscalation(args: {
     logWarn("riders", "failed to record pending escalation", formatError(escErr));
   }
 
-  // 1. Google Chat
-  const webhookUrl = process.env.GOOGLE_CHAT_WEBHOOK_URL?.trim();
-  if (webhookUrl) {
-    try {
-      await fetch(webhookUrl, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: messageText }),
-      });
-    } catch (err) {
-      logError("riders", "failed to send escalation to google chat", err);
-    }
-  }
-
-  // 2. WhatsApp to Admin
+  // WhatsApp escalation directly to Sherif (+999000000008)
   try {
     await sendCustomerText({
       to: adminPhone,

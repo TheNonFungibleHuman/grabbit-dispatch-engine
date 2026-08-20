@@ -60,6 +60,78 @@ export async function savePreBooking(booking: PreBooking): Promise<void> {
   }
 }
 
+/**
+ * Ensures an active booking is synced and live on Kilo with rider assigned.
+ */
+export async function syncBookingToKiloIfMissing(booking: PreBooking): Promise<PreBooking> {
+  if (booking.status === "cancelled" || booking.status === "declined") {
+    return booking;
+  }
+
+  // If kiloDeliveryId is present, verify it on Kilo
+  if (booking.kiloDeliveryId) {
+    try {
+      const { getDelivery } = await import("../kilo/client.ts");
+      const kilo = await getDelivery(booking.kiloDeliveryId);
+      if (kilo?.id) {
+        return booking;
+      }
+    } catch {
+      logWarn("prebooking", "kilo delivery missing or invalid, recreating on Kilo", {
+        bookingId: booking.id,
+        kiloDeliveryId: booking.kiloDeliveryId,
+      });
+    }
+  }
+
+  // Create on Kilo
+  try {
+    const { createDelivery, assignDeliveryRider } = await import("../kilo/client.ts");
+    const { getCustomTrackingUrl, findRiderByName } = await import("../riders/config.ts");
+    const actualRider = findRiderByName(booking.assignedRider);
+
+    const kiloRes = await createDelivery({
+      serviceKind: "errand",
+      errandMode: "at_place",
+      deliveryMode: "pickup",
+      senderName: sanitizeKiloName(booking.customerName),
+      senderPhone: booking.customerPhone,
+      receiverName: sanitizeKiloName(booking.customerName),
+      receiverPhone: booking.customerPhone,
+      pickupAddress: booking.pickupAddress || "ALCHE gate",
+      pickupCoords: booking.pickupCoords || { lat: -20.1024, lng: 57.5621 },
+      deliveryAddress: booking.deliveryAddress || "Mahogany",
+      deliveryCoords: booking.deliveryCoords || { lat: -20.1026, lng: 57.5620 },
+      packageDescription: booking.packageDescription || `${booking.serviceKind.toUpperCase()} booking for ${booking.scheduledTime}`,
+      packageSize: booking.packageSize || "small",
+      packageImages: booking.packageImages || [],
+      customerCollectionMethod: booking.serviceKind === "trip" ? "cash_on_delivery" : "online_checkout",
+      idempotencyKey: `kilo_${booking.id}_sync`,
+    });
+
+    if (actualRider?.kiloRiderId) {
+      try {
+        await assignDeliveryRider(kiloRes.delivery.id, actualRider.kiloRiderId);
+      } catch (assignErr) {
+        logWarn("prebooking", "sync assign rider warning", formatError(assignErr));
+      }
+    }
+
+    booking.kiloDeliveryId = kiloRes.delivery.id;
+    booking.trackingUrl = getCustomTrackingUrl(kiloRes.delivery.id, kiloRes.delivery.access_code);
+    booking.updatedAt = new Date().toISOString();
+    await savePreBooking(booking);
+    logInfo("prebooking", "synced booking to Kilo successfully", {
+      bookingId: booking.id,
+      kiloDeliveryId: booking.kiloDeliveryId,
+    });
+  } catch (err) {
+    logError("prebooking", "failed to sync booking to Kilo", err);
+  }
+
+  return booking;
+}
+
 export function parseTimeToMinutes(timeStr: string): number | null {
   if (!timeStr) return null;
   const clean = timeStr.toLowerCase().trim();
