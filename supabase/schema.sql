@@ -13,20 +13,22 @@ create table if not exists public.grabbit_documents (
 -- Index for fast lookup by update time
 create index if not exists idx_grabbit_documents_updated on public.grabbit_documents(updated_at desc);
 
--- Grant permissions to standard Supabase roles
-grant all on table public.grabbit_documents to anon, authenticated, service_role;
+-- Grant permissions only to service_role (backend agent). Revoke from anon & authenticated.
+revoke all on table public.grabbit_documents from anon, authenticated;
+grant all on table public.grabbit_documents to service_role;
 
 -- Enable RLS
 alter table public.grabbit_documents enable row level security;
 
--- Drop existing policy if present so this script is idempotent
+-- Drop existing policies if present
 drop policy if exists "Allow full access to service role" on public.grabbit_documents;
+drop policy if exists "Allow full access to service role only" on public.grabbit_documents;
 drop policy if exists "Allow read access to public" on public.grabbit_documents;
 
--- Policy: Allow full access
-create policy "Allow full access to service role"
+-- Policy: Restrict full access strictly to service_role
+create policy "Allow full access to service role only"
   on public.grabbit_documents
-  for all
+  to service_role
   using (true)
   with check (true);
 
