@@ -40,16 +40,13 @@ on conflict (id) do update set public = true;
 -- Drop existing storage policies if present
 drop policy if exists "Public Access to Package Images" on storage.objects;
 drop policy if exists "Service Role can Upload Package Images" on storage.objects;
+drop policy if exists "Service Role Full Access to Package Images" on storage.objects;
 
--- Policy: Anyone can view package images via public URL
-create policy "Public Access to Package Images"
-  on storage.objects
-  for select
-  using (bucket_id = 'package-images');
-
--- Policy: Service role can upload and manage images
-create policy "Service Role can Upload Package Images"
+-- Policy: Restrict upload and management strictly to backend service_role
+-- (Public CDN URL downloads work automatically because the bucket is marked public: true)
+create policy "Service Role Full Access to Package Images"
   on storage.objects
   for all
+  to service_role
   using (bucket_id = 'package-images')
   with check (bucket_id = 'package-images');
