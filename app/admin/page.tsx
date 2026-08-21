@@ -11,12 +11,16 @@ export default async function AdminIndexPage() {
     redirect("/admin/login");
   }
 
-  const [bookings, schedule, agentSwitch, ops] = await Promise.all([
+  const [rawBookings, schedule, agentSwitch, ops] = await Promise.all([
     listAllPreBookings(),
     getAvailabilitySnapshot(),
     getAgentSwitchState({ bypassMemory: true }),
     getOpsDashboard(),
   ]);
+
+  const bookings = rawBookings.filter(
+    (b) => b.status !== "cancelled" && b.status !== "declined",
+  );
 
   return (
     <OverviewDashboard

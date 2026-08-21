@@ -8,7 +8,8 @@ import {
 export async function GET() {
   const { syncBookingToKiloIfMissing } = await import("@/lib/orders/pre-booking");
   const raw = await listAllPreBookings();
-  const bookings = await Promise.all(raw.map((b) => syncBookingToKiloIfMissing(b)));
+  const valid = raw.filter((b) => b.status !== "cancelled" && b.status !== "declined");
+  const bookings = await Promise.all(valid.map((b) => syncBookingToKiloIfMissing(b)));
   return NextResponse.json({
     ok: true,
     total: bookings.length,

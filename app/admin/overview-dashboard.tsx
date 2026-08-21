@@ -49,8 +49,8 @@ export function OverviewDashboard(props: {
             </span>
           </div>
           <div className="mt-5 pt-4 border-t border-[#E8E5DC] dark:border-[#1D2620] flex items-center justify-between text-xs">
-            <span className="text-[#6C746E] dark:text-[#8E9690]">Total all-time records</span>
-            <span className="font-semibold text-[#101412] dark:text-[#F6F3EC]">{props.bookings.length}</span>
+            <span className="text-[#6C746E] dark:text-[#8E9690]">Confirmed & In Queue</span>
+            <span className="font-semibold text-[#101412] dark:text-[#F6F3EC]">{activeBookings.length}</span>
           </div>
         </div>
 

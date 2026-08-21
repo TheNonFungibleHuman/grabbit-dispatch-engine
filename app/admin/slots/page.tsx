@@ -13,11 +13,15 @@ export default async function AdminSlotsPage() {
     redirect("/admin/login");
   }
 
-  const [bookings, agentSwitch, schedule] = await Promise.all([
+  const [rawBookings, agentSwitch, schedule] = await Promise.all([
     listAllPreBookings(),
     getAgentSwitchState({ bypassMemory: true }),
     getAvailabilitySnapshot(),
   ]);
+
+  const bookings = rawBookings.filter(
+    (b) => b.status !== "cancelled" && b.status !== "declined",
+  );
 
   return (
     <SlotsDashboard

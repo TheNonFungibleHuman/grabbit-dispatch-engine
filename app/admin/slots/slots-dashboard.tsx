@@ -53,15 +53,43 @@ export function SlotsDashboard(props: {
   const [message, setMessage] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
 
-  const todayMauritius = useMemo(() => {
+  function getMauritiusIsoDate(offsetDays: number = 0): string {
     try {
-      return new Intl.DateTimeFormat("en-CA", {
-        timeZone: "Indian/Mauritius",
-      }).format(new Date());
+      const formatter = new Intl.DateTimeFormat("en-CA", { timeZone: "Indian/Mauritius" });
+      const parts = formatter.format(new Date()).split("-");
+      const d = new Date(Date.UTC(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10)));
+      d.setUTCDate(d.getUTCDate() + offsetDays);
+      return d.toISOString().split("T")[0];
     } catch {
-      return new Date().toISOString().split("T")[0];
+      const now = new Date();
+      now.setDate(now.getDate() + offsetDays);
+      return now.toISOString().split("T")[0];
     }
-  }, []);
+  }
+
+  function getRelativeDateLabel(dateStr: string, todayIso: string): string {
+    if (!dateStr) return "Unknown";
+    try {
+      const tTarget = new Date(dateStr + "T00:00:00Z").getTime();
+      const tToday = new Date(todayIso + "T00:00:00Z").getTime();
+      if (isNaN(tTarget) || isNaN(tToday)) return dateStr;
+      const diffDays = Math.round((tTarget - tToday) / (1000 * 60 * 60 * 24));
+      if (diffDays === 0) return "Today";
+      if (diffDays === 1) return "Tomorrow";
+      if (diffDays === -1) return "Yesterday";
+      if (diffDays > 1 && diffDays < 7) {
+        return new Intl.DateTimeFormat("en-US", { weekday: "short", timeZone: "UTC" }).format(
+          new Date(dateStr + "T00:00:00Z"),
+        );
+      }
+      return dateStr;
+    } catch {
+      return dateStr;
+    }
+  }
+
+  const todayMauritius = useMemo(() => getMauritiusIsoDate(0), []);
+  const tomorrowMauritius = useMemo(() => getMauritiusIsoDate(1), []);
 
   const [selectedDate, setSelectedDate] = useState<string>("ALL");
 
@@ -75,6 +103,11 @@ export function SlotsDashboard(props: {
     { label: "Moses & Sherif", value: "MOSES, SHERIF" },
     { label: "All 3 (Thierry, Sherif, Moses)", value: "SHERIF, MOSES, THIERRY(Delivery)" },
   ];
+
+  // Completely filter out cancelled or declined bookings from all views & metrics
+  const activeBookingsList = useMemo(() => {
+    return bookings.filter((b) => b.status !== "cancelled" && b.status !== "declined");
+  }, [bookings]);
 
   async function refreshBookings() {
     setLoading(true);
@@ -174,7 +207,7 @@ export function SlotsDashboard(props: {
       });
       const data = await res.json();
       if (data.ok) {
-        setMessage(`Slot unlocked for booking ${id}`);
+        setMessage(`Slot unlocked and booking ${id} removed.`);
         await refreshBookings();
       }
     } catch (err) {
@@ -203,14 +236,18 @@ export function SlotsDashboard(props: {
     }
   }
 
-  const activeCount = bookings.filter(
+  const activeCount = activeBookingsList.filter(
     (b) => b.status === "pending_rider" || b.status === "confirmed" || b.status === "dispatched",
   ).length;
 
   const uniqueDates = useMemo(() => {
-    const dates = new Set([todayMauritius, ...bookings.map((b) => b.scheduledDate).filter(Boolean)]);
+    const dates = new Set([
+      todayMauritius,
+      tomorrowMauritius,
+      ...activeBookingsList.map((b) => b.scheduledDate).filter(Boolean),
+    ]);
     return Array.from(dates).sort().reverse();
-  }, [todayMauritius, bookings]);
+  }, [todayMauritius, tomorrowMauritius, activeBookingsList]);
 
   function parseTimeToMinutesHelper(timeStr: string): number {
     const match = timeStr.match(/^(\d{1,2}):(\d{2})\s*(am|pm)?$/i);
@@ -224,12 +261,12 @@ export function SlotsDashboard(props: {
   }
 
   const sortedBookings = useMemo(() => {
-    return [...bookings].sort((a, b) => {
+    return [...activeBookingsList].sort((a, b) => {
       const dateCmp = (b.scheduledDate || "").localeCompare(a.scheduledDate || "");
       if (dateCmp !== 0) return dateCmp;
       return parseTimeToMinutesHelper(a.scheduledTime || "") - parseTimeToMinutesHelper(b.scheduledTime || "");
     });
-  }, [bookings]);
+  }, [activeBookingsList]);
 
   const filteredBookings = sortedBookings.filter((b) => {
     if (selectedDate !== "ALL" && b.scheduledDate !== selectedDate) return false;
@@ -510,7 +547,7 @@ export function SlotsDashboard(props: {
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
         <div className="rounded-[20px] bg-[var(--bg-card)] border border-[#E8E5DC] dark:border-[#1D2620] p-4 shadow-sm">
           <span className="text-[11px] font-semibold text-[#6C746E] dark:text-[#8E9690] uppercase tracking-wider">Total Bookings</span>
-          <div className="font-display text-2xl font-bold text-[#101412] dark:text-[#F6F3EC] mt-1">{bookings.length}</div>
+          <div className="font-display text-2xl font-bold text-[#101412] dark:text-[#F6F3EC] mt-1">{activeBookingsList.length}</div>
         </div>
         <div className="rounded-[20px] bg-[var(--bg-card)] border border-[#E8E5DC] dark:border-[#1D2620] p-4 shadow-sm">
           <span className="text-[11px] font-semibold text-[#6C746E] dark:text-[#8E9690] uppercase tracking-wider">Active / Locked</span>
@@ -519,13 +556,13 @@ export function SlotsDashboard(props: {
         <div className="rounded-[20px] bg-[var(--bg-card)] border border-[#E8E5DC] dark:border-[#1D2620] p-4 shadow-sm">
           <span className="text-[11px] font-semibold text-[#6C746E] dark:text-[#8E9690] uppercase tracking-wider">Confirmed</span>
           <div className="font-display text-2xl font-bold text-[#7ed957] mt-1">
-            {bookings.filter((b) => b.status === "confirmed").length}
+            {activeBookingsList.filter((b) => b.status === "confirmed").length}
           </div>
         </div>
         <div className="rounded-[20px] bg-[var(--bg-card)] border border-[#E8E5DC] dark:border-[#1D2620] p-4 shadow-sm">
-          <span className="text-[11px] font-semibold text-[#6C746E] dark:text-[#8E9690] uppercase tracking-wider">Cancelled / Free</span>
+          <span className="text-[11px] font-semibold text-[#6C746E] dark:text-[#8E9690] uppercase tracking-wider">Pending Rider</span>
           <div className="font-display text-2xl font-bold text-[#6C746E] dark:text-[#8E9690] mt-1">
-            {bookings.filter((b) => b.status === "declined" || b.status === "cancelled").length}
+            {activeBookingsList.filter((b) => b.status === "pending_rider").length}
           </div>
         </div>
       </div>
@@ -534,8 +571,8 @@ export function SlotsDashboard(props: {
       <div className="rounded-[24px] bg-[var(--bg-card)] border border-[#E8E5DC] dark:border-[#1D2620] overflow-hidden shadow-sm">
         <div className="p-5 border-b border-[#E8E5DC] dark:border-[#1D2620] flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div>
-            <h2 className="font-display text-base font-bold text-[#101412] dark:text-[#F6F3EC]">All Booked Time Slots</h2>
-            <p className="text-xs text-[#6C746E] dark:text-[#8E9690]">Max 3 deliveries / 1 trip per slot</p>
+            <h2 className="font-display text-base font-bold text-[#101412] dark:text-[#F6F3EC]">Active Booked Time Slots</h2>
+            <p className="text-xs text-[#6C746E] dark:text-[#8E9690]">Max 3 deliveries / 1 trip per slot · Cancelled bookings are automatically purged</p>
           </div>
 
           {/* Date Filter & Search bar */}
@@ -547,16 +584,14 @@ export function SlotsDashboard(props: {
                 onChange={(e) => setSelectedDate(e.target.value)}
                 className="bg-transparent text-[#101412] dark:text-[#F6F3EC] font-bold text-xs focus:outline-none cursor-pointer pr-1"
               >
-                <option value="ALL">All Dates ({bookings.length})</option>
+                <option value="ALL">All Dates ({activeBookingsList.length})</option>
                 {uniqueDates.map((d) => {
-                  const count = bookings.filter((b) => b.scheduledDate === d).length;
-                  const isToday = d === todayMauritius;
-                  const isTomorrow = d === "2026-08-21";
-                  const isYesterday = d === "2026-08-19";
-                  const prefix = isToday ? "Today" : isTomorrow ? "Tomorrow" : isYesterday ? "Yesterday" : d;
+                  const count = activeBookingsList.filter((b) => b.scheduledDate === d).length;
+                  const label = getRelativeDateLabel(d, todayMauritius);
+                  const displayLabel = label === d ? d : `${label} (${d})`;
                   return (
                     <option key={d} value={d}>
-                      {prefix} ({d}) — {count} {count === 1 ? "booking" : "bookings"}
+                      {displayLabel} — {count} {count === 1 ? "booking" : "bookings"}
                     </option>
                   );
                 })}
@@ -585,14 +620,11 @@ export function SlotsDashboard(props: {
                 : "bg-[var(--bg-card)] text-[#6C746E] dark:text-[#8E9690] hover:text-[#101412] dark:hover:text-[#F6F3EC] border border-[#E8E5DC] dark:border-[#1D2620]"
             }`}
           >
-            All Bookings ({bookings.length})
+            All Bookings ({activeBookingsList.length})
           </button>
           {uniqueDates.map((d) => {
-            const count = bookings.filter((b) => b.scheduledDate === d).length;
-            const isToday = d === todayMauritius;
-            const isTomorrow = d === "2026-08-21";
-            const isYesterday = d === "2026-08-19";
-            const label = isTomorrow ? "Tomorrow" : isToday ? "Today" : isYesterday ? "Yesterday" : d;
+            const count = activeBookingsList.filter((b) => b.scheduledDate === d).length;
+            const label = getRelativeDateLabel(d, todayMauritius);
             return (
               <button
                 key={d}
@@ -616,7 +648,7 @@ export function SlotsDashboard(props: {
 
         {filteredBookings.length === 0 ? (
           <div className="p-12 text-center text-[#6C746E] dark:text-[#8E9690] text-xs">
-            {searchQuery ? "No bookings matched your search query." : "No bookings or locked slots found. All slots are open."}
+            {searchQuery ? "No bookings matched your search query." : "No active bookings or locked slots found. All slots are open."}
           </div>
         ) : (
           <div className="overflow-x-auto">
@@ -636,11 +668,14 @@ export function SlotsDashboard(props: {
                 {filteredBookings.map((b) => {
                   const isActive =
                     b.status === "pending_rider" || b.status === "confirmed" || b.status === "dispatched";
+                  const dateLabel = getRelativeDateLabel(b.scheduledDate, todayMauritius);
                   return (
                     <tr key={b.id} className="hover:bg-[#F6F3EC]/50 dark:hover:bg-[#0B0F0C]/50 transition-colors">
                       <td className="p-3.5 font-semibold text-[#101412] dark:text-[#F6F3EC]">
                         <div>{b.scheduledTime}</div>
-                        <div className="text-[11px] text-[#6C746E] dark:text-[#8E9690] font-normal">{b.scheduledDate} ({b.slotKey})</div>
+                        <div className="text-[11px] text-[#6C746E] dark:text-[#8E9690] font-normal">
+                          <span className="font-semibold text-[#101412] dark:text-[#F6F3EC]">{dateLabel}</span> ({b.scheduledDate}) · {b.slotKey}
+                        </div>
                       </td>
                       <td className="p-3.5 text-[#101412] dark:text-[#F6F3EC]">
                         <div className="font-semibold">{b.customerName}</div>
