@@ -604,8 +604,8 @@ export async function createPreBookingRequest(args: {
 
   // Clear customer's active order draft
   try {
-    const { resetOrderDraft } = await import("./store.ts");
-    await resetOrderDraft(args.customerPhone);
+    const { clearOrderDraft } = await import("./store.ts");
+    await clearOrderDraft(args.customerPhone);
   } catch (draftErr) {
     logWarn("prebooking", "draft reset failed after booking", formatError(draftErr));
   }
