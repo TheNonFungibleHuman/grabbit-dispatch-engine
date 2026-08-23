@@ -380,4 +380,36 @@ describe("pre-booking & anti-double-booking guard", () => {
     assert.equal(typeof res.processed, "number");
     assert.equal(Array.isArray(res.reminded), true);
   });
+
+  it("generates daily trips & revenue rundown with fares calculation", async () => {
+    const { generateDailyTripsRundown, estimateBookingFare } = await import("../schedule/daily-rundown.ts");
+
+    const tripBooking = {
+      id: "pb_test_1",
+      customerPhone: "+99900000022",
+      customerName: "TestUser",
+      serviceKind: "trip",
+      tripType: "round_trip" as const,
+      pickupAddress: "ALCHE",
+      deliveryAddress: "Mahogany",
+      packageDescription: "Passenger round trip",
+      scheduledDate: "2026-09-09",
+      scheduledTime: "10:00 am",
+      slotKey: "2026-09-09_10:00-11:00",
+      assignedRider: "Moses",
+      declinedRiders: [],
+      status: "confirmed" as const,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+
+    const fare = estimateBookingFare(tripBooking);
+    assert.equal(fare, 80); // Rs 80 for round trip to Mahogany
+
+    const rundown = await generateDailyTripsRundown("2026-09-09");
+    assert.equal(typeof rundown.totalBookings, "number");
+    assert.equal(typeof rundown.totalRevenue, "number");
+    assert.match(rundown.summaryText, /Grabbit Daily Operations & Fares Rundown/i);
+    assert.match(rundown.googleChatText, /GRABBIT DAILY OPERATIONS & REVENUE RUNDOWN/i);
+  });
 });

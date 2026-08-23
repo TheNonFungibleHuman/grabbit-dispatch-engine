@@ -233,13 +233,13 @@ export const AGENT_TOOLS = [
     type: "function" as const,
     name: "send_rider_broadcast_or_message",
     description:
-      "ADMIN ONLY: Send a direct message or instruction to a specific rider or broadcast to all riders via Google Chat / WhatsApp. Only authorized for admins (+999000000008, +9990000000003).",
+      "ADMIN ONLY: Send a direct message or instruction to a specific rider (WhatsApp for Sherif/Thierry, Google Chat for Moses) or broadcast to all riders via Google Chat. Only authorized for admins (+999000000008, +9990000000003).",
     parameters: {
       type: "object",
       properties: {
         targetRiderName: {
           type: "string",
-          description: "Rider name (e.g. 'Moses', 'Thierry', 'Sherif') or 'all'",
+          description: "Rider name (e.g. 'Moses', 'Thierry', 'Sherif') or 'all' / 'google_chat'",
         },
         message: {
           type: "string",
@@ -247,6 +247,21 @@ export const AGENT_TOOLS = [
         },
       },
       required: ["targetRiderName", "message"],
+    },
+  },
+  {
+    type: "function" as const,
+    name: "post_summary_to_google_chat",
+    description:
+      "ADMIN ONLY: Post the daily trips & revenue summary to the fleet Google Chat space once approved by admin (Sherif/Moses). Only authorized for admins.",
+    parameters: {
+      type: "object",
+      properties: {
+        customMessage: {
+          type: "string",
+          description: "Optional modified or custom summary text to post to Google Chat",
+        },
+      },
     },
   },
   {
@@ -755,26 +770,64 @@ export async function executeAgentTool(args: {
       const target = String(value.targetRiderName || "all").trim();
       const message = String(value.message || "");
 
-      const webhookUrl = process.env.GOOGLE_CHAT_WEBHOOK_URL?.trim();
-      if (webhookUrl) {
-        try {
-          await fetch(webhookUrl, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              text: `📢 *ADMIN INSTRUCTION for ${target.toUpperCase()}*\nFrom Admin: ${message}\n_Grabbit Dispatch Team_`,
-            }),
-          });
-        } catch (err) {
-          logError("admin", "failed to dispatch broadcast to google chat", err);
+      const rider = findRiderByName(target);
+      let channelUsed = "google_chat";
+
+      // If target is a specific WhatsApp rider (Sherif, Thierry)
+      if (rider && rider.channel === "whatsapp" && rider.phone) {
+        const { sendCustomerText } = await import("../wasender/send-tracked.ts");
+        const { appendTranscriptEntry } = await import("./transcript.ts");
+
+        await sendCustomerText({
+          to: rider.phone,
+          text: `📢 *Admin Instruction*:\n${message}`,
+          messageId: `admin_rider_${Date.now()}`,
+        });
+
+        await appendTranscriptEntry(rider.phone, {
+          role: "agent",
+          text: `📢 *Admin Instruction*:\n${message}`,
+        });
+        channelUsed = `whatsapp (${rider.name} at ${rider.phone})`;
+      } else {
+        // Send to Google Chat (Moses, Google Chat space, or broadcast to all)
+        const webhookUrl = process.env.GOOGLE_CHAT_WEBHOOK_URL?.trim();
+        if (webhookUrl) {
+          try {
+            await fetch(webhookUrl, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                text: `📢 *ADMIN INSTRUCTION for ${target.toUpperCase()}*\nFrom Admin: ${message}\n_Grabbit Dispatch Team_`,
+              }),
+            });
+          } catch (err) {
+            logError("admin", "failed to dispatch broadcast to google chat", err);
+          }
         }
+        channelUsed = "google_chat";
       }
 
       return {
         ok: true,
         target,
-        message: `Broadcast message sent to ${target}: "${message}"`,
+        channel: channelUsed,
+        message: `Message sent to ${target} via ${channelUsed}: "${message}"`,
       };
+    }
+
+    if (args.name === "post_summary_to_google_chat") {
+      const { isAuthorizedRiderOrAdmin } = await import("../riders/config.ts");
+      const auth = isAuthorizedRiderOrAdmin(args.senderPhone);
+      if (!auth.isAdmin && !auth.rider) {
+        return { ok: false, error: "Access Denied: Only authorized admins or fleet riders can post to Google Chat." };
+      }
+
+      const value = parseToolArguments(args.toolArguments);
+      const customMessage = value.customMessage ? String(value.customMessage) : undefined;
+      const { postDailySummaryToGoogleChat } = await import("../schedule/daily-rundown.ts");
+      const result = await postDailySummaryToGoogleChat(customMessage);
+      return result;
     }
 
     if (args.name === "admin_reply_to_customer") {

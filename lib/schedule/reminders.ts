@@ -63,6 +63,14 @@ export async function processUpcomingBookingReminders(): Promise<{
     }
   }
 
+  // Check 8:30 PM Mauritius daily rundown for Sherif
+  try {
+    const { processDailyRundownCron } = await import("./daily-rundown.ts");
+    await processDailyRundownCron();
+  } catch (rundownErr) {
+    logWarn("reminders", "daily rundown check error", formatError(rundownErr));
+  }
+
   return {
     processed: active.length,
     reminded,
