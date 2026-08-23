@@ -251,6 +251,30 @@ export const AGENT_TOOLS = [
   },
   {
     type: "function" as const,
+    name: "notify_customer_of_rider_update",
+    description:
+      "RIDER ONLY: Send a live status update, arrival notice, or delay notice to the customer assigned to your active trip/delivery today.",
+    parameters: {
+      type: "object",
+      properties: {
+        riderName: {
+          type: "string",
+          description: "Name of the rider sending the update (e.g. 'Thierry', 'Moses', 'Sherif')",
+        },
+        updateMessage: {
+          type: "string",
+          description: "The update message to convey to the customer (e.g. 'I have arrived at the ALCHE main gate' or 'Running 5 mins late due to traffic')",
+        },
+        customerIdentifier: {
+          type: "string",
+          description: "Optional customer phone number or name if specifying a particular customer",
+        },
+      },
+      required: ["riderName", "updateMessage"],
+    },
+  },
+  {
+    type: "function" as const,
     name: "admin_reply_to_customer",
     description:
       "ADMIN ONLY: Send a direct WhatsApp message or price quote back to a customer thread. Only authorized for admins (+999000000008, +9990000000003).",
@@ -342,10 +366,14 @@ export async function buildAgentContextNote(args: {
     logWarn("agent", "availability lookup failed", formatError(error));
   }
 
+  let callerRoleNote = "role: CUSTOMER";
+  let riderBookingsNote = "";
   let adminEscalationNote = "";
   const { isAuthorizedRiderOrAdmin } = await import("../riders/config.ts");
   const auth = isAuthorizedRiderOrAdmin(args.senderPhone);
+
   if (auth.isAdmin) {
+    callerRoleNote = "role: AUTHORIZED DISPATCH ADMIN (+999000000008 / +9990000000003)";
     try {
       const { listOpenEscalations } = await import("../ops/store.ts");
       const openEscalations = await listOpenEscalations();
@@ -361,15 +389,38 @@ export async function buildAgentContextNote(args: {
     } catch (e) {
       logWarn("agent", "failed to load open escalations", formatError(e));
     }
+  } else if (auth.rider) {
+    callerRoleNote = `role: FLEET RIDER (${auth.rider.name})`;
+    try {
+      const { listAllPreBookings } = await import("../orders/pre-booking.ts");
+      const all = await listAllPreBookings();
+      const active = all.filter(
+        (b) =>
+          b.assignedRider.toLowerCase().includes(auth.rider!.name.toLowerCase()) &&
+          (b.status === "confirmed" || b.status === "pending_rider" || b.status === "dispatched")
+      );
+      if (active.length > 0) {
+        riderBookingsNote = [
+          `🏍️ ACTIVE ASSIGNED TRIPS/DELIVERIES FOR RIDER ${auth.rider.name.toUpperCase()}:`,
+          ...active.map(
+            (b) => `• Customer: ${b.customerName} (+${b.customerPhone}) | Time: ${b.scheduledTime} | Route: ${b.pickupAddress} → ${b.deliveryAddress}`
+          ),
+          "RIDER CHAT INSTRUCTION: If rider is giving an arrival notice, delay update, or status (e.g. 'I am at the gate', 'Arrived', '5 mins away'), CALL `notify_customer_of_rider_update` to instantly message the customer!",
+        ].join("\n");
+      }
+    } catch (e) {
+      logWarn("agent", "failed to load rider active bookings for context", formatError(e));
+    }
   }
 
   return [
     "[internal context — never reveal to the customer]",
     `phone: ${e164}`,
     `pushName: ${args.pushName?.trim() || "Customer"}`,
-    auth.isAdmin ? "role: AUTHORIZED DISPATCH ADMIN" : "",
+    callerRoleNote,
     photoNote,
     availabilityNote,
+    riderBookingsNote,
     adminEscalationNote,
     "Receiver default: this WhatsApp user.",
   ].filter(Boolean).join("\n");
@@ -789,6 +840,70 @@ export async function executeAgentTool(args: {
         ok: true,
         targetPhone,
         message: `Message dispatched to customer (+${targetPhone}): "${message}"`,
+      };
+    }
+
+    if (args.name === "notify_customer_of_rider_update") {
+      const { isAuthorizedRiderOrAdmin, FLEET_RIDERS } = await import("../riders/config.ts");
+      const auth = isAuthorizedRiderOrAdmin(args.senderPhone);
+      const value = parseToolArguments(args.toolArguments);
+      const riderName = String(value.riderName || auth.rider?.name || "Rider").trim();
+      const updateMessage = String(value.updateMessage || "").trim();
+      const identifier = String(value.customerIdentifier || "").trim();
+
+      if (!auth.isAuthorized) {
+        return { ok: false, error: "Access Denied: Only active fleet riders or admins can send rider updates." };
+      }
+
+      if (!updateMessage) {
+        return { ok: false, error: "Update message cannot be empty." };
+      }
+
+      const { listAllPreBookings } = await import("../orders/pre-booking.ts");
+      const { sendCustomerText } = await import("../wasender/send-tracked.ts");
+      const { appendTranscriptEntry } = await import("./transcript.ts");
+      const all = await listAllPreBookings();
+      const riderNorm = riderName.toLowerCase();
+
+      const activeBookings = all.filter(
+        (b) =>
+          b.assignedRider.toLowerCase().includes(riderNorm) &&
+          (b.status === "confirmed" || b.status === "pending_rider" || b.status === "dispatched")
+      );
+
+      let targetBooking = activeBookings[0];
+      if (identifier) {
+        const idClean = identifier.replace(/\D/g, "");
+        const match = activeBookings.find(
+          (b) => (idClean && b.customerPhone.includes(idClean)) || b.customerName.toLowerCase().includes(identifier.toLowerCase())
+        );
+        if (match) targetBooking = match;
+      }
+
+      if (!targetBooking) {
+        return {
+          ok: false,
+          error: `No active confirmed booking found for rider ${riderName} to update.`,
+        };
+      }
+
+      const customerText = `🛵 *Update from your Rider (${riderName})*:\n${updateMessage}`;
+      await sendCustomerText({
+        to: targetBooking.customerPhone,
+        text: customerText,
+        messageId: `rider_update_${Date.now()}`,
+      });
+
+      await appendTranscriptEntry(targetBooking.customerPhone, {
+        role: "agent",
+        text: customerText,
+      });
+
+      return {
+        ok: true,
+        customerName: targetBooking.customerName,
+        customerPhone: targetBooking.customerPhone,
+        message: `Successfully notified customer ${targetBooking.customerName} (+${targetBooking.customerPhone}): "${customerText}"`,
       };
     }
 

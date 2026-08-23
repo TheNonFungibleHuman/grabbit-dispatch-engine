@@ -163,6 +163,8 @@ export function formatMinutesToTime(minutes: number): string {
   return `${h12}:${mStr} ${meridian}`;
 }
 
+export const MIN_BOOKING_GAP_MINUTES_ONE_WAY = 15;
+export const MIN_BOOKING_GAP_MINUTES_ROUND_TRIP = 30;
 export const MIN_BOOKING_GAP_MINUTES = 15;
 export const MAX_DELIVERIES_PER_HOUR = 3;
 export const MAX_TRIPS_PER_HOUR_DEFAULT = 1;
@@ -177,18 +179,19 @@ export interface CheckSlotResult {
 }
 
 /**
- * Checks if a rider's hour window has available capacity & enforces the strict 15-minute buffer.
+ * Checks if a rider's hour window has available capacity & enforces trip buffers.
  * Capacity rule per hour:
  * - Up to 3 deliveries and 1 trip per hour.
  * - If there are zero deliveries in that hour, up to 3 passenger trips can be booked.
  * - Maximum total bookings per hour = 3.
- * - Minimum gap between bookings for the same rider = 15 minutes.
+ * - Minimum gap between bookings for the same rider = 15 minutes (one-way / deliveries), 30 minutes (round-trips).
  */
 export async function checkSlotAvailability(args: {
   slotKey: string;
   assignedRider: string;
   customerPhone?: string;
   serviceKind?: string;
+  tripType?: "one_way" | "round_trip";
   scheduledTime?: string;
   scheduledDate?: string;
 }): Promise<CheckSlotResult> {
@@ -205,16 +208,22 @@ export async function checkSlotAvailability(args: {
   const targetMin = args.scheduledTime ? parseTimeToMinutes(args.scheduledTime) : null;
   const targetDate = args.scheduledDate || "";
 
-  // 1. Strict 15-minute gap buffer per rider on the same date/slot
+  // 1. Strict gap buffer per rider on the same date/slot (30 mins if round-trip, 15 mins for one-way)
   if (targetMin !== null) {
+    const isNewRoundTrip = args.tripType === "round_trip";
     for (const b of allRiderActiveBookings) {
       const isSameDay = !targetDate || !b.scheduledDate || b.scheduledDate === targetDate || b.slotKey === args.slotKey;
       if (isSameDay) {
         const existingMin = parseTimeToMinutes(b.scheduledTime);
         if (existingMin !== null) {
+          const isExistingRoundTrip = b.tripType === "round_trip";
+          const requiredGap = isNewRoundTrip || isExistingRoundTrip
+            ? MIN_BOOKING_GAP_MINUTES_ROUND_TRIP
+            : MIN_BOOKING_GAP_MINUTES_ONE_WAY;
+
           const diff = Math.abs(targetMin - existingMin);
-          if (diff < MIN_BOOKING_GAP_MINUTES) {
-            const nextAvailableMin = existingMin + MIN_BOOKING_GAP_MINUTES;
+          if (diff < requiredGap) {
+            const nextAvailableMin = existingMin + (isExistingRoundTrip ? MIN_BOOKING_GAP_MINUTES_ROUND_TRIP : (isNewRoundTrip ? MIN_BOOKING_GAP_MINUTES_ROUND_TRIP : MIN_BOOKING_GAP_MINUTES_ONE_WAY));
             const suggestedTime = formatMinutesToTime(nextAvailableMin);
             return {
               available: false,
@@ -454,12 +463,39 @@ export async function createPreBookingRequest(args: {
 }> {
   const targetIsoDate = resolveIsoDate(args.scheduledDate);
 
-  // 1. Anti-Double-Booking & 15-Minute Gap Check
+  // 0. Idempotency Check: prevent duplicate bookings for same customer within 2 minutes
+  const allExisting = await listAllPreBookings();
+  const recentDuplicate = allExisting.find((b) => {
+    if (b.customerPhone !== args.customerPhone || b.status === "cancelled" || b.status === "declined") {
+      return false;
+    }
+    const isSameDate = b.scheduledDate === targetIsoDate;
+    const timeDiffMs = Date.now() - new Date(b.createdAt).getTime();
+    return isSameDate && timeDiffMs < 120_000 && (b.status === "confirmed" || b.status === "pending_rider");
+  });
+
+  if (recentDuplicate) {
+    logInfo("prebooking", "prevented duplicate booking via recent idempotency lock", {
+      customerPhone: args.customerPhone,
+      existingBookingId: recentDuplicate.id,
+      scheduledTime: recentDuplicate.scheduledTime,
+    });
+    return {
+      ok: true,
+      booking: recentDuplicate,
+      trackingUrl: recentDuplicate.trackingUrl,
+      kiloDeliveryId: recentDuplicate.kiloDeliveryId,
+      assignedRider: recentDuplicate.assignedRider,
+    };
+  }
+
+  // 1. Anti-Double-Booking & Gap Check
   const availability = await checkSlotAvailability({
     slotKey: args.slotKey,
     assignedRider: args.assignedRider,
     customerPhone: args.customerPhone,
     serviceKind: args.serviceKind,
+    tripType: args.tripType,
     scheduledTime: args.scheduledTime,
     scheduledDate: targetIsoDate,
   });
@@ -467,7 +503,8 @@ export async function createPreBookingRequest(args: {
   if (!availability.available) {
     let errorMsg = `Rider ${args.assignedRider} is not available for ${args.scheduledTime}.`;
     if (availability.reason === "gap_violation" && availability.conflictingBooking) {
-      errorMsg = `Rider ${args.assignedRider} already has a booking at ${availability.conflictingBooking.scheduledTime}. Grabbit requires at least a 15-minute gap between bookings. Please offer ${availability.suggestedTime} or another open time slot.`;
+      const requiredGap = (args.tripType === "round_trip" || availability.conflictingBooking.tripType === "round_trip") ? "30-minute" : "15-minute";
+      errorMsg = `Rider ${args.assignedRider} already has a booking at ${availability.conflictingBooking.scheduledTime}. Grabbit requires at least a ${requiredGap} gap for this booking. Please offer ${availability.suggestedTime} or another open time slot.`;
     } else if (availability.reason === "trip_limit") {
       errorMsg = `Rider ${args.assignedRider} already has a passenger trip in this slot. Only 1 trip per slot is permitted. Please choose another time slot.`;
     } else if (availability.reason === "slot_capacity") {
@@ -564,6 +601,14 @@ export async function createPreBookingRequest(args: {
   };
 
   await savePreBooking(booking);
+
+  // Clear customer's active order draft
+  try {
+    const { resetOrderDraft } = await import("./store.ts");
+    await resetOrderDraft(args.customerPhone);
+  } catch (draftErr) {
+    logWarn("prebooking", "draft reset failed after booking", formatError(draftErr));
+  }
 
   logInfo("prebooking", "created & confirmed pre-booking record", {
     bookingId,

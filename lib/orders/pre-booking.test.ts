@@ -265,6 +265,95 @@ describe("pre-booking & anti-double-booking guard", () => {
     assert.equal(rescheduled.booking?.assignedRider, rider);
   });
 
+  it("enforces strict 30-minute buffer for round-trip bookings for the same rider", async () => {
+    const slotKey = "2026-09-07_11:00-13:00";
+    const rider = "Moses";
+
+    // 1. Book round-trip at 11:30 am
+    const roundTrip = await createPreBookingRequest({
+      customerPhone: "+99900000045",
+      customerName: "Winter",
+      serviceKind: "trip",
+      tripType: "round_trip",
+      pickupAddress: "ALCHE campus",
+      deliveryAddress: "Mahogany",
+      scheduledDate: "2026-09-07",
+      scheduledTime: "11:30 am",
+      slotKey,
+      assignedRider: rider,
+    });
+    assert.equal(roundTrip.ok, true);
+
+    // 2. Booking at 11:45 am (15 mins later) -> Must be REJECTED because round-trip needs 30 min buffer
+    const clashTrip = await createPreBookingRequest({
+      customerPhone: "+99900000048",
+      customerName: "Customer C",
+      serviceKind: "trip",
+      tripType: "round_trip",
+      pickupAddress: "ALCHE campus",
+      deliveryAddress: "Mahogany",
+      scheduledDate: "2026-09-07",
+      scheduledTime: "11:45 am",
+      slotKey,
+      assignedRider: rider,
+    });
+    assert.equal(clashTrip.ok, false);
+    assert.equal(clashTrip.doubleBooked, true);
+    assert.match(clashTrip.error || "", /30-minute gap/i);
+
+    // 3. Booking at 12:00 pm (30 mins later) -> SUCCESS
+    const validTrip = await createPreBookingRequest({
+      customerPhone: "+99900000049",
+      customerName: "Charlie",
+      serviceKind: "trip",
+      tripType: "one_way",
+      pickupAddress: "ALCHE campus",
+      deliveryAddress: "Mahogany",
+      scheduledDate: "2026-09-07",
+      scheduledTime: "12:00 pm",
+      slotKey,
+      assignedRider: rider,
+    });
+    assert.equal(validTrip.ok, true);
+  });
+
+  it("prevents duplicate bookings for same customer within 2-minute cooldown", async () => {
+    const slotKey = "2026-09-08_14:00-15:00";
+    const rider = "Sherif";
+
+    // 1. First booking
+    const first = await createPreBookingRequest({
+      customerPhone: "+99900000033",
+      customerName: "RapidCustomer",
+      serviceKind: "trip",
+      tripType: "one_way",
+      pickupAddress: "ALCHE",
+      deliveryAddress: "Mahogany",
+      scheduledDate: "2026-09-08",
+      scheduledTime: "2:00 pm",
+      slotKey,
+      assignedRider: rider,
+    });
+    assert.equal(first.ok, true);
+
+    // 2. Immediate follow-up booking call (e.g. from an emoji webhook 5s later)
+    const duplicate = await createPreBookingRequest({
+      customerPhone: "+99900000033",
+      customerName: "RapidCustomer",
+      serviceKind: "trip",
+      tripType: "one_way",
+      pickupAddress: "ALCHE",
+      deliveryAddress: "Mahogany",
+      scheduledDate: "2026-09-08",
+      scheduledTime: "2:00 pm",
+      slotKey,
+      assignedRider: rider,
+    });
+    assert.equal(duplicate.ok, true);
+    // Must return the exact same booking ID rather than creating a new one
+    assert.equal(duplicate.booking?.id, first.booking?.id);
+  });
+
   it("handles live rider status check and admin escalation", async () => {
     const { notifyRiderCustomerInquiry, notifyAdminEscalation } = await import("../riders/notify-rider.ts");
     

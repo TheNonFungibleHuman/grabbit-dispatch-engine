@@ -103,13 +103,83 @@ async function handleIncomingMessage(
     ),
   });
 
-  await onUserMessage({
+  queueDebouncedUserMessage({
     messageId: message.key.id,
     sender,
     remoteJid: message.key.remoteJid,
     text,
     pushName: message.pushName,
     raw: message,
+  });
+}
+
+interface PendingUserBatch {
+  timer: NodeJS.Timeout;
+  firstReceivedAt: number;
+  messages: IncomingUserMessage[];
+}
+
+const PENDING_BATCHES = new Map<string, PendingUserBatch>();
+const DEBOUNCE_WAIT_MS = 1500;
+const MAX_BATCH_WAIT_MS = 4000;
+
+function queueDebouncedUserMessage(msg: IncomingUserMessage): void {
+  const existing = PENDING_BATCHES.get(msg.sender);
+  if (existing) {
+    existing.messages.push(msg);
+    const age = Date.now() - existing.firstReceivedAt;
+    clearTimeout(existing.timer);
+
+    if (age >= MAX_BATCH_WAIT_MS) {
+      PENDING_BATCHES.delete(msg.sender);
+      flushBatch(msg.sender, existing.messages);
+    } else {
+      existing.timer = setTimeout(() => {
+        PENDING_BATCHES.delete(msg.sender);
+        flushBatch(msg.sender, existing.messages);
+      }, DEBOUNCE_WAIT_MS);
+    }
+  } else {
+    const messages = [msg];
+    const timer = setTimeout(() => {
+      PENDING_BATCHES.delete(msg.sender);
+      flushBatch(msg.sender, messages);
+    }, DEBOUNCE_WAIT_MS);
+
+    PENDING_BATCHES.set(msg.sender, {
+      timer,
+      firstReceivedAt: Date.now(),
+      messages,
+    });
+  }
+}
+
+async function flushBatch(sender: string, messages: IncomingUserMessage[]): Promise<void> {
+  if (messages.length === 0) return;
+  if (messages.length === 1) {
+    await onUserMessage(messages[0]);
+    return;
+  }
+
+  const latest = messages[messages.length - 1];
+  const combinedText = messages
+    .map((m) => m.text.trim())
+    .filter(Boolean)
+    .join("\n");
+
+  logInfo("wasender", "flushed debounced batch", {
+    sender,
+    count: messages.length,
+    combinedPreview: combinedText.slice(0, 120),
+  });
+
+  await onUserMessage({
+    messageId: latest.messageId,
+    sender,
+    remoteJid: latest.remoteJid,
+    text: combinedText,
+    pushName: latest.pushName,
+    raw: latest.raw,
   });
 }
 
