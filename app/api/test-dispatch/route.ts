@@ -1,13 +1,32 @@
 import { NextResponse } from "next/server";
 import { processIncomingUserMessage } from "@/lib/agent";
+import { isAdminAuthed } from "@/lib/admin/auth";
 import { handleRiderReply, listAllPreBookings } from "@/lib/orders/pre-booking";
 
-export async function GET(request: Request) {
+export async function POST(request: Request) {
+  if (process.env.NODE_ENV === "production") {
+    return NextResponse.json({ error: "Not found" }, { status: 404 });
+  }
+
+  if (!(await isAdminAuthed())) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
   const { searchParams } = new URL(request.url);
-  const action = searchParams.get("action") || "customer_request";
-  const customerPhone = searchParams.get("phone") || "+99900000037";
+  const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
+  const getInput = (name: string): string | undefined => {
+    const fromBody = body[name];
+    if (typeof fromBody === "string" && fromBody.trim()) {
+      return fromBody.trim();
+    }
+    const fromQuery = searchParams.get(name);
+    return fromQuery?.trim() || undefined;
+  };
+
+  const action = getInput("action") || "customer_request";
+  const customerPhone = getInput("phone") || "+99900000037";
   const text =
-    searchParams.get("text") ||
+    getInput("text") ||
     "Hi, I want to book a trip from ALCHE main gate to Mahogany Promenade tomorrow at 12:00 PM.";
 
   if (action === "test_moses") {
@@ -35,7 +54,7 @@ export async function GET(request: Request) {
 
   if (action === "rider_confirm") {
     const riderPhone = process.env.TEST_RIDER_PHONE || "+99900000027";
-    const replyText = searchParams.get("reply") || "YES";
+    const replyText = getInput("reply") || "YES";
     const result = await handleRiderReply({
       senderPhone: riderPhone,
       text: replyText,
@@ -80,7 +99,7 @@ export async function GET(request: Request) {
     latestBooking,
     instructions: [
       "1. Check your test rider phone (+99900000027) for the incoming WhatsApp prompt.",
-      "2. Reply YES via WhatsApp (or visit /api/test-dispatch?action=rider_confirm) to confirm and create the Kilo delivery with tracking link!",
+      "2. Reply YES via WhatsApp (or send POST /api/test-dispatch with {\"action\":\"rider_confirm\"}) to confirm and create the Kilo delivery with tracking link!",
     ],
   });
 }
