@@ -373,19 +373,25 @@ export async function buildAgentContextNote(args: {
       ? "photos: 0 stored."
       : `photos: ${photoCount} stored and ready (max 6)`;
 
-  let availabilityNote = "";
-  try {
-    const availability = await getAvailabilitySnapshot();
-    availabilityNote = availability.summaryForAgent;
-  } catch (error) {
-    logWarn("agent", "availability lookup failed", formatError(error));
-  }
-
   let callerRoleNote = "role: CUSTOMER";
   let riderBookingsNote = "";
   let adminEscalationNote = "";
   const { isAuthorizedRiderOrAdmin } = await import("../riders/config.ts");
   const auth = isAuthorizedRiderOrAdmin(args.senderPhone);
+
+  let availabilityNote = "";
+  try {
+    const availability = await getAvailabilitySnapshot();
+    if (auth.isAdmin) {
+      availabilityNote = `[Fleet schedule overview for Admin dispatch only — do not pitch booking slots to admin]:\n${availability.summaryForAgent}`;
+    } else if (auth.rider) {
+      availabilityNote = `[Fleet schedule overview for Rider shift]:\n${availability.summaryForAgent}`;
+    } else {
+      availabilityNote = availability.summaryForAgent;
+    }
+  } catch (error) {
+    logWarn("agent", "availability lookup failed", formatError(error));
+  }
 
   if (auth.isAdmin) {
     callerRoleNote = "role: AUTHORIZED DISPATCH ADMIN (+999000000008 / +9990000000003)";
