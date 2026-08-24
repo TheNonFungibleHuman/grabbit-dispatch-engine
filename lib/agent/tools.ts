@@ -471,7 +471,7 @@ export async function buildAgentContextNote(args: {
       const { getCustomerProfile } = await import("../orders/store.ts");
       const prof = await getCustomerProfile(args.senderPhone);
       if (prof.lastDeliveryAddress || prof.lastPickupAddress) {
-        customerProfileNote = `customer_profile: Frequent/Last pickup=${prof.lastPickupAddress || "ALCHE"}, Last dropoff=${prof.lastDeliveryAddress || "Mahogany"}, PrefPay=${prof.preferredPaymentMethod || "cash"}`;
+        customerProfileNote = `customer_profile: Frequent/Last pickup=${prof.lastPickupAddress || "ALCHE"}, Last dropoff=${prof.lastDeliveryAddress || "Mahogany"}, PrefPay=${prof.preferredPaymentMethod || "cash"}${prof.tripCount ? `, History=${prof.tripCount} booking(s)` : ""}${prof.lastBookingAt ? `, LastBooked=${prof.lastBookingAt.slice(0, 10)}` : ""}`;
       }
     } catch (e) {
       logWarn("agent", "failed to load customer profile", formatError(e));
@@ -618,11 +618,17 @@ export async function executeAgentTool(args: {
       });
 
       if (!prebookResult.ok) {
+        const { recordMetric } = await import("../metrics/recorder.ts");
+        void recordMetric("booking_rejected");
         return {
           ok: false,
           doubleBooked: prebookResult.doubleBooked ?? false,
           error: prebookResult.error,
         };
+      }
+      {
+        const { recordMetric } = await import("../metrics/recorder.ts");
+        void recordMetric("booking_created");
       }
 
       try {
@@ -638,6 +644,25 @@ export async function executeAgentTool(args: {
       const riderPhoneStr = riderProf?.phone ? ` (${riderProf.phone})` : "";
       const trackingUrl = prebookResult.trackingUrl || "https://delivery.grabbit-express.com";
 
+      const { quoteTripFare, quoteDeliveryFee } = await import("../pricing/fares.ts");
+      let priceLine = "";
+      let fareRs: number | undefined;
+      let deliveryFeeRs: number | undefined;
+      let pricePending = false;
+      if (serviceKind === "trip") {
+        const quote = quoteTripFare(deliveryAddress, tripType);
+        if (quote) {
+          fareRs = quote.amountRs;
+          priceLine = ` Fare: Rs ${quote.amountRs}.${quote.roundTrip ? " Your round trip includes 15 mins of free waiting time." : ""}`;
+        } else {
+          pricePending = true;
+          priceLine = " Fare: dispatch will confirm the exact fare shortly.";
+        }
+      } else {
+        deliveryFeeRs = quoteDeliveryFee(pickupAddress, deliveryAddress);
+        priceLine = ` Delivery fee: Rs ${deliveryFeeRs}.`;
+      }
+
       return {
         ok: true,
         serviceKind,
@@ -648,7 +673,10 @@ export async function executeAgentTool(args: {
         kiloDeliveryId: prebookResult.kiloDeliveryId,
         trackingUrl,
         status: "confirmed",
-        message: `Your ${serviceKind} request for ${scheduledDate} at ${scheduledTime} is confirmed and assigned to rider ${riderName}${riderPhoneStr}! Live Tracking Link: ${trackingUrl}`,
+        fareRs,
+        deliveryFeeRs,
+        pricePending,
+        message: `Your ${serviceKind} request for ${scheduledDate} at ${scheduledTime} is confirmed and assigned to rider ${riderName}${riderPhoneStr}! Live Tracking Link: ${trackingUrl}${priceLine}`,
       };
     }
 
@@ -801,7 +829,7 @@ export async function executeAgentTool(args: {
         return { ok: false, error: `No booking found matching "${value.identifier}".` };
       }
 
-      (found as any).paymentStatus = "paid";
+      found.paymentStatus = "paid";
       found.updatedAt = new Date().toISOString();
       await savePreBooking(found);
 

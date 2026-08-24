@@ -1,4 +1,5 @@
 import { getKnowledgeBundle } from "../admin/knowledge.ts";
+import { formatFareTableForPrompt } from "../pricing/fares.ts";
 
 export async function getGrabbitKnowledgeBase(): Promise<string> {
   return (await getKnowledgeBundle()).prepared;
@@ -44,8 +45,8 @@ Politely refuse and redirect in ONE line:
 - Finalized Items: Confirm the exact items, pickup/drop-off spots, and pre-payment before booking. Riders purchase/pick up already-decided items (no in-person paper menus). If they ask for food menus, share https://grabbit-express.com/menu/.
 
 ## Delivery Fees & Trip Pricing
-- Delivery Fees: Mahogany / ALCHE: Rs 100 | Pamplemousses: Rs 200.
-- Trip Fares: Pamplemousses Garden: Rs 50 (Round: Rs 100) | Grand Baie Express bus: Rs 50 (Round: Rs 100) | SSRN Hospital: Rs 40 (Round: Rs 80) | Mahogany: Rs 40 (Round: Rs 80) | Calebasses / Calabasses: Rs 130 (Round: Rs 260) | Pamplemousses town: Rs 100 (Round: Rs 200).
+${formatFareTableForPrompt()}
+- ALWAYS quote the exact fare/fee figure returned by booking tools. If the tool marks a price as pending, tell the customer dispatch will confirm shortly. Never invent or discount prices.
 - Round Trips include 15 mins free waiting time at destination. (Never mention waiting policy on one-way trips).
 
 ## Capacity & Trip Buffers

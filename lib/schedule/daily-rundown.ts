@@ -1,8 +1,10 @@
 import { listAllPreBookings, type PreBooking } from "../orders/pre-booking.ts";
+import { estimateBookingFare as computeFare } from "../pricing/fares.ts";
 import { sendCustomerText } from "../wasender/send-tracked.ts";
 import { appendTranscriptEntry } from "../agent/transcript.ts";
 import { readJson, writeJson } from "../blob/json-store.ts";
 import { formatError, logError, logInfo, logWarn } from "../log.ts";
+import { mauritiusDateIso, mauritiusMinutesOfDay } from "../time.ts";
 
 export const SHERIF_PHONE = "+999000000008";
 export const DAILY_RUNDOWN_PATH = "grabbit/ops/daily-rundown.json";
@@ -14,30 +16,7 @@ export interface DailyRundownState {
 }
 
 export function estimateBookingFare(booking: PreBooking): number {
-  const desc = (booking.packageDescription || "").toLowerCase();
-  const route = `${booking.pickupAddress || ""} ${booking.deliveryAddress || ""}`.toLowerCase();
-  const isTrip = booking.serviceKind === "trip" || desc.includes("passenger") || desc.includes("trip") || desc.includes("ride");
-  const isRound = booking.tripType === "round_trip" || desc.includes("round");
-
-  if (isTrip) {
-    if (route.includes("calebasses") || route.includes("calabasses")) {
-      return isRound ? 260 : 130;
-    }
-    if (route.includes("pamplemousses garden") || route.includes("grand baie")) {
-      return isRound ? 100 : 50;
-    }
-    if (route.includes("pamplemousses")) {
-      return isRound ? 200 : 100;
-    }
-    // Default Mahogany / ALCHE / SSRN Hospital
-    return isRound ? 80 : 40;
-  }
-
-  // Deliveries / Errands
-  if (route.includes("pamplemousses")) {
-    return 200;
-  }
-  return 100; // Default Mahogany / ALCHE delivery
+  return computeFare(booking);
 }
 
 export async function generateDailyTripsRundown(targetDateIso?: string): Promise<{
@@ -50,7 +29,7 @@ export async function generateDailyTripsRundown(targetDateIso?: string): Promise
 }> {
   const now = new Date();
   // Mauritius is UTC+4
-  const mauritiusIso = targetDateIso || new Date(now.getTime() + 4 * 3600 * 1000).toISOString().slice(0, 10);
+  const mauritiusIso = targetDateIso || mauritiusDateIso(now);
   const all = await listAllPreBookings();
 
   // Filter bookings for target date, excluding cancelled/declined
@@ -202,10 +181,10 @@ export async function postDailySummaryToGoogleChat(customMessage?: string): Prom
  */
 export async function processDailyRundownCron(): Promise<{ triggered: boolean; reason?: string }> {
   const now = new Date();
-  // Mauritius is UTC+4
-  const mauritiusHours = (now.getUTCHours() + 4) % 24;
-  const mauritiusMinutes = now.getUTCMinutes();
-  const todayIso = new Date(now.getTime() + 4 * 3600 * 1000).toISOString().slice(0, 10);
+  const minutesOfDay = mauritiusMinutesOfDay(now);
+  const mauritiusHours = Math.floor(minutesOfDay / 60);
+  const mauritiusMinutes = minutesOfDay % 60;
+  const todayIso = mauritiusDateIso(now);
 
   // Check if current time is between 8:30 PM (20:30) and 8:50 PM (20:50)
   const isAround830PM = mauritiusHours === 20 && mauritiusMinutes >= 30 && mauritiusMinutes <= 50;
