@@ -7,15 +7,18 @@ export function ThemeToggle() {
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
-    setMounted(true);
     const stored = localStorage.getItem("grabbit-theme");
     const shouldBeDark = stored === "dark";
-    setIsDark(shouldBeDark);
     if (shouldBeDark) {
       document.documentElement.classList.add("dark");
     } else {
       document.documentElement.classList.remove("dark");
     }
+    const frame = requestAnimationFrame(() => {
+      setIsDark(shouldBeDark);
+      setMounted(true);
+    });
+    return () => cancelAnimationFrame(frame);
   }, []);
 
   function toggleTheme() {
