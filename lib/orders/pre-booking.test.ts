@@ -449,6 +449,10 @@ describe("pre-booking & anti-double-booking guard", () => {
     const raw2 = "I don't have access to the Thursday and Friday schedules. Let me clarify with the customer.\n\nHello Customer A! 😊 Thanks for reaching out.";
     const cleaned2 = sanitizeWhatsAppText(raw2);
     assert.equal(cleaned2, "Hello Customer A! 😊 Thanks for reaching out.");
+
+    const raw3 = "[Today 4:14 PM] Support: Got it, G! 😊 Your ride is confirmed.";
+    const cleaned3 = sanitizeWhatsAppText(raw3);
+    assert.equal(cleaned3, "Got it, G! 😊 Your ride is confirmed.");
   });
 
   it("stores and retrieves customer profile memory for quick re-orders", async () => {

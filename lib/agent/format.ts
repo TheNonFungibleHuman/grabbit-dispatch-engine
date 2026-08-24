@@ -6,6 +6,10 @@
 export function sanitizeWhatsAppText(raw: string): string {
   let text = raw.trim();
 
+  // Strip leaked role/time tags like "[Today 4:14 PM] Support:" or "Support:"
+  text = text.replace(/^\[(?:Today|\d{4}-\d{2}-\d{2})[^\]]*\]\s*(?:Support|Customer|Agent|Grabbit|Grabbit Express)?:\s*/i, "");
+  text = text.replace(/^(?:Support|Agent|Grabbit Express|Grabbit):\s*/i, "");
+
   // Strip leaked internal reasoning / chain-of-thought prefixes
   text = text.replace(/^(?:(?:Thinking|Thought|Reasoning|Internal Note|Plan):\s*[\s\S]*?\n+)/i, "");
   text = text.replace(/^(?:Let me (?:clarify|check|confirm|ask|look|see|tell|verify|proceed).*?\n+)/i, "");

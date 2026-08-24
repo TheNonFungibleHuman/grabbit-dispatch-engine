@@ -179,9 +179,14 @@ export function formatTranscriptMessagesForModel(
         content: `${timeTag} Customer: ${entry.text}`,
       });
     } else if (entry.role === "agent") {
+      // Strip any legacy Support: prefixes and pass clean assistant text so model never mimics it
+      const cleanAgentText = entry.text
+        .replace(/^\[(?:Today|\d{4}-\d{2}-\d{2})[^\]]*\]\s*(?:Support|Customer|Agent|Grabbit)?:\s*/i, "")
+        .replace(/^(?:Support|Agent|Grabbit Express|Grabbit):\s*/i, "")
+        .trim();
       result.push({
         role: "assistant",
-        content: `${timeTag} Support: ${entry.text}`,
+        content: cleanAgentText,
       });
     }
   }
