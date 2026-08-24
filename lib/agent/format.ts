@@ -7,7 +7,7 @@ export function sanitizeWhatsAppText(raw: string): string {
   let text = raw.trim();
 
   // Strip leaked internal reasoning / chain-of-thought prefixes
-  text = text.replace(/^(?:(?:Thinking|Thought|Reasoning|Internal Note|Plan):\s*.*?\n+)/is, "");
+  text = text.replace(/^(?:(?:Thinking|Thought|Reasoning|Internal Note|Plan):\s*[\s\S]*?\n+)/i, "");
   text = text.replace(/^(?:Let me (?:clarify|check|confirm|ask|look|see|tell|verify|proceed).*?\n+)/i, "");
   text = text.replace(/^(?:I (?:don't|do not|need to|should|will|must|have to) (?:have access|clarify|check|confirm|ask|look|see|verify).*?\n+)/i, "");
 
