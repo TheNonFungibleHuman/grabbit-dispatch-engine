@@ -180,6 +180,17 @@ export function looksLikeFalseBookingSuccess(text: string): boolean {
   );
 }
 
+export function fabricatedTrackingLinks(text: string, modelContext: string): string[] {
+  const links = [
+    ...text.matchAll(/https:\/\/delivery\.grabbit-express\.com\/track\/[A-Za-z0-9._~/-]+/g),
+  ].map((m) => m[0]);
+  return links.filter((link) => !modelContext.includes(link));
+}
+
+export function fabricatedTrackingReply(): string {
+  return "Small correction: that trip isn't confirmed yet on our side, and no live tracking link exists for it. Once your details and payment are settled, dispatch will send the official tracking link right here.";
+}
+
 /** Closed-hours overclaim: sounds like something was queued without a real create. */
 export function looksLikeFalseDeferredOrderPromise(text: string): boolean {
   const lower = text.toLowerCase();

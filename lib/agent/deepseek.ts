@@ -338,6 +338,19 @@ export async function generateAgentReply(
 
   let text = sanitizeWhatsAppText(finalAssistantText);
 
+  if (!bookingSucceeded && text.includes("delivery.grabbit-express.com/track/")) {
+    const { fabricatedTrackingLinks, fabricatedTrackingReply } = await import("./booking-guard.ts");
+    const forged = fabricatedTrackingLinks(text, JSON.stringify(messages));
+    if (forged.length > 0) {
+      logWarn("agent", "overriding reply with fabricated tracking link", {
+        messageId: input.messageId,
+        forgedLinks: forged,
+        modelReplyPreview: text.slice(0, 160),
+      });
+      text = fabricatedTrackingReply();
+    }
+  }
+
   // If a booking succeeded but the assistant omitted the live tracking URL, append it!
   if (bookingSucceeded && lastSuccessfulTrackingUrl && !text.includes(lastSuccessfulTrackingUrl) && !text.includes("delivery.grabbit-express.com")) {
     text = `${text}\n\n🔴 *Live Tracking Link:*\n${lastSuccessfulTrackingUrl}`;
