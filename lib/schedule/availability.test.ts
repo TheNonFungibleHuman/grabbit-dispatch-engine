@@ -68,4 +68,21 @@ describe("rider schedule parsing", () => {
       /tomorrow \(TUES\)[^\n]*8:00 am to 9:00 am/,
     );
   });
+
+  it("evaluates all 7 days of the week including Thursday and Friday", () => {
+    const now = new Date("2026-08-10T04:30:00.000Z"); // Monday
+    const snap = evaluateAvailability(parseRiderScheduleCsv(sampleCsv), now);
+    assert.equal(snap.upcomingDays.length, 7);
+    
+    const thursday = snap.upcomingDays.find((d) => d.weekday === "THURS");
+    assert.ok(thursday);
+    assert.equal(thursday?.openSlots.some((s) => s.label === "8:00 am to 9:00 am"), true);
+
+    const friday = snap.upcomingDays.find((d) => d.weekday === "FRI");
+    assert.ok(friday);
+    assert.equal(friday?.openSlots.some((s) => s.label === "8:00 am to 9:00 am"), true);
+
+    assert.match(snap.summaryForAgent, /in 3 days \(THURS\)/i);
+    assert.match(snap.summaryForAgent, /in 4 days \(FRI\)/i);
+  });
 });

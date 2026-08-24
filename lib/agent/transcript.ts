@@ -62,7 +62,7 @@ export async function appendTranscriptEntry(
   transcript.entries.push({
     at: entry.at ?? new Date().toISOString(),
     role: entry.role,
-    text: entry.text.slice(0, 400),
+    text: entry.text.slice(0, 2000),
     whileAgentDisabled: entry.whileAgentDisabled,
     messageId: entry.messageId,
   });

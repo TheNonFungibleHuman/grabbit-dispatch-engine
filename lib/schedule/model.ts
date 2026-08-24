@@ -271,7 +271,7 @@ export function evaluateAvailability(
 
   const todayOpen = openSlotsForDay(slots, weekday);
   const upcomingDays: DayOpenSlots[] = [];
-  for (let daysAhead = 0; daysAhead <= 2; daysAhead += 1) {
+  for (let daysAhead = 0; daysAhead <= 6; daysAhead += 1) {
     const dayKey = weekdayAhead(weekday, daysAhead);
     upcomingDays.push({
       weekday: dayKey,
@@ -281,7 +281,6 @@ export function evaluateAvailability(
     });
   }
 
-  const tomorrow = upcomingDays.find((day) => day.daysAhead === 1);
   const formatDayBlock = (day: DayOpenSlots): string => {
     if (day.openSlots.length < 1) {
       return `${day.label}: NO open rider slots`;
@@ -308,17 +307,11 @@ export function evaluateAvailability(
           .map((row) => `• ${row.label} — ${row.riders.join(", ")}`)
           .join("\n")}`
       : "next options later today: none left",
-    formatDayBlock(upcomingDays[0]),
-    tomorrow ? formatDayBlock(tomorrow) : "",
-    upcomingDays[2] ? formatDayBlock(upcomingDays[2]) : "",
-    "Hard rules for availability answers:",
-    "- Do NOT invent riders, days, or times.",
-    "- If asked about tomorrow / another day, answer ONLY from that day's open slots above and always include the exact time slots.",
-    "- A day can have riders at some times and none at others (example: tomorrow morning may be closed while midday/evening is open).",
-    "- Never say a day is generally available without listing the open time slots.",
-    "- When status is CLOSED: HARD STOP delivery intake. Answer menus/coverage/hours only. Tell them to come back in an open Mauritius slot to place the order.",
-    "- When CLOSED: never say the order is logged, queued, saved for the team, or will be processed later. Nothing is real until a delivery is created while OPEN.",
-    "- Do NOT accept/book on-demand delivery while status is CLOSED. Do not create future-slot deliveries.",
+    ...upcomingDays.map((d) => formatDayBlock(d)),
+    "Rules for availability & scheduling:",
+    "- Customers CAN pre-book any open slot across the entire week (Today, Tomorrow, or any upcoming weekday listed above).",
+    "- Do NOT invent riders, days, or times. Offer and schedule ONLY from the exact open slots listed above.",
+    "- If asked about a future day (e.g. Tuesday, Thursday, Friday), confirm the open slots from that day's schedule above.",
   ].filter(Boolean);
 
   return {

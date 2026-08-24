@@ -6,6 +6,11 @@
 export function sanitizeWhatsAppText(raw: string): string {
   let text = raw.trim();
 
+  // Strip leaked internal reasoning / chain-of-thought prefixes
+  text = text.replace(/^(?:(?:Thinking|Thought|Reasoning|Internal Note|Plan):\s*.*?\n+)/is, "");
+  text = text.replace(/^(?:Let me (?:clarify|check|confirm|ask|look|see|tell|verify|proceed).*?\n+)/i, "");
+  text = text.replace(/^(?:I (?:don't|do not|need to|should|will|must|have to) (?:have access|clarify|check|confirm|ask|look|see|verify).*?\n+)/i, "");
+
   // Convert Markdown bold/italic to WhatsApp markers.
   text = text.replace(/\*\*(.+?)\*\*/g, "*$1*");
   text = text.replace(/__(.+?)__/g, "_$1_");

@@ -438,4 +438,16 @@ describe("pre-booking & anti-double-booking guard", () => {
     assert.match(formatted[0].content, /Past Date/i);
     assert.match(formatted[formatted.length - 1].content, /Today/i);
   });
+
+  it("strips internal thought leaks from model replies in sanitizeWhatsAppText", async () => {
+    const { sanitizeWhatsAppText } = await import("../agent/format.ts");
+
+    const raw1 = 'Let me clarify the destination with the customer, as "lexpress bus stop" isn\'t a standard fare destination I have on file. Let me confirm the details.\n\nHello Customer A! 😊 Thanks for booking with Grabbit Express.';
+    const cleaned1 = sanitizeWhatsAppText(raw1);
+    assert.equal(cleaned1, "Hello Customer A! 😊 Thanks for booking with Grabbit Express.");
+
+    const raw2 = "I don't have access to the Thursday and Friday schedules. Let me clarify with the customer.\n\nHello Customer A! 😊 Thanks for reaching out.";
+    const cleaned2 = sanitizeWhatsAppText(raw2);
+    assert.equal(cleaned2, "Hello Customer A! 😊 Thanks for reaching out.");
+  });
 });
