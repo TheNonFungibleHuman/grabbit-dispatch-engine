@@ -453,6 +453,10 @@ describe("pre-booking & anti-double-booking guard", () => {
     const raw3 = "[Today 4:14 PM] Support: Got it, G! 😊 Your ride is confirmed.";
     const cleaned3 = sanitizeWhatsAppText(raw3);
     assert.equal(cleaned3, "Got it, G! 😊 Your ride is confirmed.");
+
+    const raw4 = `I'll help Oliver book this ride. Let me check the details.\n\nThe customer wants a trip from campus to the Grand Baie Express bus stop at 5:25pm. That's within the 5:00-6:00pm slot (SHERIF). This is a passenger trip, so I need to confirm the payment method.\n\nLet me confirm the fare and payment preference before booking.\n\n*Hello Oliver! 👋*\n\nThanks for choosing Grabbit Express! 🛵\n\nYour trip to the *Grand Baie Express bus stop* at *5:25pm* is available, fare is *Rs 50* (one-way).`;
+    const cleaned4 = sanitizeWhatsAppText(raw4);
+    assert.equal(cleaned4.startsWith("*Hello Oliver! 👋*"), true);
   });
 
   it("stores and retrieves customer profile memory for quick re-orders", async () => {
