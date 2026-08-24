@@ -91,6 +91,24 @@ export interface MapDraftToCreateInputArgs {
   deliveryCoords: GeoCoords;
 }
 
+export function resolveDefaultCollectionMethod(
+  serviceKind?: string,
+): KiloCollectionMethod {
+  return serviceKind === "trip" ? "cash_on_delivery" : "online_checkout";
+}
+
+export type PreBookingKiloStatus = "confirmed" | "dispatched" | "completed" | "cancelled";
+
+export function mapKiloEventToPreBookingStatus(status?: string | null): PreBookingKiloStatus | null {
+  const normalized = (status || "").toLowerCase();
+  if (!normalized) return null;
+  if (/delivered|completed|done|closed/.test(normalized)) return "completed";
+  if (/cancel/.test(normalized)) return "cancelled";
+  if (/picked_up|in_progress|on_route|en_route|started|dispatch/.test(normalized)) return "dispatched";
+  if (/assigned|accepted|confirmed/.test(normalized)) return "confirmed";
+  return null;
+}
+
 function normalizePhone(phone: string): string {
   const digits = phone.replace(/\D/g, "");
   if (!digits) {

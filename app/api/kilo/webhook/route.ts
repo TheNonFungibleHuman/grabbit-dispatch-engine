@@ -87,6 +87,16 @@ export async function POST(request: Request) {
           extracted.status ?? event,
         )) ?? (await getDeliveryRecord(extracted.deliveryId));
 
+      try {
+        const { applyKiloDeliveryStatus } = await import("@/lib/orders/pre-booking");
+        await applyKiloDeliveryStatus(extracted.deliveryId, extracted.status ?? event);
+      } catch (syncError) {
+        console.warn("[kilo] pre-booking status sync skipped", {
+          deliveryId: extracted.deliveryId,
+          error: syncError,
+        });
+      }
+
       const deliveryObject = payload.data?.object ?? payload.delivery;
       const notifyPhone = resolveWebhookNotifyPhone({
         otpReceiverPhone: extracted.otp?.receiverPhone,
