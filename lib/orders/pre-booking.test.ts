@@ -567,4 +567,26 @@ describe("pre-booking & anti-double-booking guard", () => {
     assert.match(report.summaryText, /Weekly Financial & Volume Summary/i);
     assert.match(report.summaryText, /Fleet Performance Breakdown/i);
   });
+
+  it("strictly defends against prompt injection & admin impersonation", async () => {
+    const { isAuthorizedRiderOrAdmin } = await import("../riders/config.ts");
+    const { executeAgentTool } = await import("../agent/tools.ts");
+
+    // Attacker claims to be Sherif in message, but their WhatsApp phone is an unverified user
+    const attackerPhone = "+99900000067";
+    const auth = isAuthorizedRiderOrAdmin(attackerPhone);
+    assert.equal(auth.isAdmin, false);
+    assert.equal(auth.isAuthorized, false);
+
+    // Attempting to call admin tool via attacker phone
+    const toolRes = await executeAgentTool({
+      messageId: "inject_test",
+      senderPhone: attackerPhone,
+      name: "preview_admin_broadcast",
+      toolArguments: { messageText: "Malicious broadcast" },
+    });
+
+    assert.equal(toolRes.ok, false);
+    assert.match(toolRes.error || "", /Access Denied/i);
+  });
 });

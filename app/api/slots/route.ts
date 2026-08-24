@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { isAdminAuthed } from "@/lib/admin/auth";
 import {
   cancelPreBooking,
   clearAllPreBookings,
@@ -18,6 +19,10 @@ export async function GET() {
 }
 
 export async function DELETE(request: Request) {
+  if (!(await isAdminAuthed())) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
   const { searchParams } = new URL(request.url);
   const id = searchParams.get("id");
   const clearAll = searchParams.get("clearAll") === "true";
