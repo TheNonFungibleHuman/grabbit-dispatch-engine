@@ -1,5 +1,6 @@
 import { ADMIN_PHONES, FLEET_RIDERS, isAuthorizedRiderOrAdmin } from "../riders/config.ts";
-import { listAllPreBookings } from "../orders/pre-booking.ts";
+import { listArchivedSummaries, querySummaries } from "../orders/booking-store.ts";
+import { isCustomerSuppressed, listSuppressedPhones } from "../compliance/opt-out.ts";
 import { sendCustomerText } from "../wasender/send-tracked.ts";
 import { readJson, writeJson } from "../blob/json-store.ts";
 import { formatError, logInfo, logWarn } from "../log.ts";
@@ -35,19 +36,16 @@ export async function getAllUniqueCustomerPhones(): Promise<string[]> {
     if (rider.phone) excluded.add(rider.phone.replace(/\D/g, ""));
   }
 
-  // 1. From pre-bookings
-  try {
-    const allBookings = await listAllPreBookings();
-    for (const b of allBookings) {
-      if (b.customerPhone) {
-        const clean = b.customerPhone.replace(/\D/g, "");
-        if (clean.length >= 7 && !excluded.has(clean)) {
-          customerSet.add(clean);
-        }
-      }
+  const summaries = [
+    ...(await querySummaries(() => true)),
+    ...(await listArchivedSummaries()),
+  ];
+  const suppressed = new Set(await listSuppressedPhones());
+  for (const s of summaries) {
+    const clean = (s.customerPhone || "").replace(/\D/g, "");
+    if (clean.length >= 7 && !excluded.has(clean) && !suppressed.has(clean)) {
+      customerSet.add(clean);
     }
-  } catch (err) {
-    logWarn("broadcast", "failed to scan bookings for broadcast recipients", formatError(err));
   }
 
   return Array.from(customerSet);
@@ -167,6 +165,10 @@ export async function executeCustomerBroadcast(args: {
 
   for (const phone of record.recipients) {
     try {
+      if (await isCustomerSuppressed(phone)) {
+        logInfo("broadcast", "skipped suppressed recipient", { phone });
+        continue;
+      }
       const e164 = phone.startsWith("+") ? phone : `+${phone}`;
       await sendCustomerText({
         to: e164,
