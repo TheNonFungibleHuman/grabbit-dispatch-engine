@@ -48,14 +48,21 @@ export function findRiderByName(name: string): RiderProfile | null {
   return null;
 }
 
-export function findRiderByPhone(phone: string): RiderProfile | null {
-  const cleanPhone = phone.replace(/\D/g, "");
+export function findRiderByPhone(identifier: string): RiderProfile | null {
+  const clean = identifier.trim().toLowerCase();
+  const cleanPhone = identifier.replace(/\D/g, "");
   const testPhone = process.env.TEST_RIDER_PHONE?.replace(/\D/g, "");
   if (testPhone && cleanPhone === testPhone) {
     return FLEET_RIDERS[0]; // Thierry as default test rider profile
   }
   for (const rider of FLEET_RIDERS) {
-    if (rider.phone && rider.phone.replace(/\D/g, "") === cleanPhone) {
+    if (rider.phone && cleanPhone.length > 5 && rider.phone.replace(/\D/g, "") === cleanPhone) {
+      return rider;
+    }
+    if (rider.email && rider.email.toLowerCase() === clean) {
+      return rider;
+    }
+    if (rider.id.toLowerCase() === clean || rider.name.toLowerCase() === clean) {
       return rider;
     }
   }
@@ -68,21 +75,21 @@ export const ADMIN_PHONES = [
   process.env.ADMIN_PHONE,
 ].filter(Boolean) as string[];
 
-export function isAuthorizedRiderOrAdmin(phone?: string): {
+export function isAuthorizedRiderOrAdmin(identifier?: string): {
   isAuthorized: boolean;
   isAdmin: boolean;
   rider: RiderProfile | null;
 } {
-  if (!phone) {
+  if (!identifier) {
     return {
       isAuthorized: false,
       isAdmin: false,
       rider: null,
     };
   }
-  const cleanPhone = phone.replace(/\D/g, "");
-  const isAdmin = ADMIN_PHONES.some((p) => p.replace(/\D/g, "") === cleanPhone);
-  const rider = findRiderByPhone(phone);
+  const cleanPhone = identifier.replace(/\D/g, "");
+  const isAdmin = ADMIN_PHONES.some((p) => p.replace(/\D/g, "") === cleanPhone && cleanPhone.length > 5);
+  const rider = findRiderByPhone(identifier);
   return {
     isAuthorized: Boolean(isAdmin || rider),
     isAdmin,
