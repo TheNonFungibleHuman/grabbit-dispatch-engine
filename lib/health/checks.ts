@@ -18,7 +18,7 @@ export interface HealthChecks {
   agentConfigured: boolean;
 }
 
-async function withTimeout<T>(fn: (signal: AbortSignal) => Promise<T>, ms = 3000): Promise<T> {
+async function withTimeout<T>(fn: (signal: AbortSignal) => Promise<T>, ms = 8000): Promise<T> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), ms);
   try {
