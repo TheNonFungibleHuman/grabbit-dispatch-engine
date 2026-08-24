@@ -65,6 +65,18 @@ export async function processUpcomingBookingReminders(): Promise<{
     }
   }
 
+  // Check 7:30 AM Mauritius morning shift briefing for fleet riders
+  try {
+    const mauritiusHour = Math.floor(mauritiusMinutes / 60) % 24;
+    const mauritiusMin = mauritiusMinutes % 60;
+    if (mauritiusHour === 7 && mauritiusMin >= 30 && mauritiusMin <= 50) {
+      const { sendDailyMorningBriefings } = await import("./morning-briefing.ts");
+      await sendDailyMorningBriefings();
+    }
+  } catch (briefingErr) {
+    logWarn("reminders", "morning briefing check error", formatError(briefingErr));
+  }
+
   // Check 8:30 PM Mauritius daily rundown for Sherif
   try {
     const { processDailyRundownCron } = await import("./daily-rundown.ts");

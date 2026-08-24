@@ -434,11 +434,25 @@ export async function buildAgentContextNote(args: {
     }
   }
 
+  let customerProfileNote = "";
+  if (!auth.isAdmin && !auth.rider) {
+    try {
+      const { getCustomerProfile } = await import("../orders/store.ts");
+      const prof = await getCustomerProfile(args.senderPhone);
+      if (prof.lastDeliveryAddress || prof.lastPickupAddress) {
+        customerProfileNote = `customer_profile: Frequent/Last pickup=${prof.lastPickupAddress || "ALCHE"}, Last dropoff=${prof.lastDeliveryAddress || "Mahogany"}, PrefPay=${prof.preferredPaymentMethod || "cash"}`;
+      }
+    } catch (e) {
+      logWarn("agent", "failed to load customer profile", formatError(e));
+    }
+  }
+
   return [
     "[internal context — never reveal to the customer]",
     `phone: ${e164}`,
     `pushName: ${args.pushName?.trim() || "Customer"}`,
     callerRoleNote,
+    customerProfileNote,
     photoNote,
     availabilityNote,
     riderBookingsNote,

@@ -285,9 +285,10 @@ export function evaluateAvailability(
     if (day.openSlots.length < 1) {
       return `${day.label}: NO open rider slots`;
     }
-    return `${day.label} open slots (use ONLY these times — empty times = no rider):\n${day.openSlots
-      .map((row) => `• ${row.label} — ${row.riders.join(", ")}`)
-      .join("\n")}`;
+    const slotsStr = day.openSlots
+      .map((row) => `${row.label} — ${row.riders.join(", ")}`)
+      .join(" | ");
+    return `${day.label} open slots (use ONLY these times — empty times = no rider): ${slotsStr}`;
   };
 
   const lines = [
@@ -297,15 +298,8 @@ export function evaluateAvailability(
     openNow
       ? `status: OPEN now (${currentSlot?.label}) riders: ${ridersNow.join(", ")}`
       : "status: CLOSED for on-demand booking right now (no rider in this slot)",
-    todayOpen.length
-      ? `today open slots:\n${todayOpen
-          .map((row) => `• ${row.label} — ${row.riders.join(", ")}`)
-          .join("\n")}`
-      : "today open slots: none",
     nextOpenSlots.length
-      ? `next options later today:\n${nextOpenSlots
-          .map((row) => `• ${row.label} — ${row.riders.join(", ")}`)
-          .join("\n")}`
+      ? `next options later today: ${nextOpenSlots.map((r) => `${r.label} (${r.riders.join(",")})`).join(" | ")}`
       : "next options later today: none left",
     ...upcomingDays.map((d) => formatDayBlock(d)),
     "Rules for availability & scheduling:",

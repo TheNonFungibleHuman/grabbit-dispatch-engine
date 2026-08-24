@@ -90,4 +90,45 @@ export async function updateDeliveryRecordStatus(
   return next;
 }
 
+export interface CustomerProfile {
+  senderPhone: string;
+  name?: string;
+  lastPickupAddress?: string;
+  lastDeliveryAddress?: string;
+  preferredPaymentMethod?: "cash" | "juice" | "transfer";
+  tripCount: number;
+  updatedAt: string;
+}
+
+function profilePath(phone: string): string {
+  return `grabbit/customers/${digits(phone)}/profile.json`;
+}
+
+export async function getCustomerProfile(senderPhone: string): Promise<CustomerProfile> {
+  const path = profilePath(senderPhone);
+  const existing = await readJson<CustomerProfile>(path);
+  if (existing) return existing;
+
+  return {
+    senderPhone: digits(senderPhone),
+    tripCount: 0,
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+export async function updateCustomerProfile(
+  senderPhone: string,
+  patch: Partial<Omit<CustomerProfile, "senderPhone" | "updatedAt">>,
+): Promise<CustomerProfile> {
+  const profile = await getCustomerProfile(senderPhone);
+  const updated: CustomerProfile = {
+    ...profile,
+    ...patch,
+    tripCount: (profile.tripCount || 0) + (patch.tripCount !== undefined ? patch.tripCount : 0),
+    updatedAt: new Date().toISOString(),
+  };
+  await writeJson(profilePath(senderPhone), updated);
+  return updated;
+}
+
 export type { KiloPackageSize };

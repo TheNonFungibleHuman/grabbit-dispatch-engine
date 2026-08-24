@@ -259,6 +259,7 @@ export async function checkSlotAvailability(args: {
         available: false,
         conflictingBooking: bookingsInHour[0],
         reason: "slot_capacity",
+        suggestedTime: formatMinutesToTime(hourEnd),
       };
     }
 
@@ -269,6 +270,7 @@ export async function checkSlotAvailability(args: {
           available: false,
           conflictingBooking: tripsInHour[0] || deliveriesInHour[0],
           reason: "trip_limit",
+          suggestedTime: formatMinutesToTime(hourEnd),
         };
       }
       // If 0 deliveries in this hour, max trips is up to 3
@@ -277,6 +279,7 @@ export async function checkSlotAvailability(args: {
           available: false,
           conflictingBooking: tripsInHour[0],
           reason: "trip_limit",
+          suggestedTime: formatMinutesToTime(hourEnd),
         };
       }
     } else {
@@ -286,6 +289,7 @@ export async function checkSlotAvailability(args: {
           available: false,
           conflictingBooking: deliveriesInHour[0],
           reason: "slot_capacity",
+          suggestedTime: formatMinutesToTime(hourEnd),
         };
       }
     }
@@ -602,12 +606,19 @@ export async function createPreBookingRequest(args: {
 
   await savePreBooking(booking);
 
-  // Clear customer's active order draft
+  // Clear customer's active order draft & update customer profile memory
   try {
-    const { clearOrderDraft } = await import("./store.ts");
+    const { clearOrderDraft, updateCustomerProfile } = await import("./store.ts");
     await clearOrderDraft(args.customerPhone);
+    await updateCustomerProfile(args.customerPhone, {
+      name: args.customerName,
+      lastPickupAddress: args.pickupAddress,
+      lastDeliveryAddress: args.deliveryAddress,
+      preferredPaymentMethod: args.serviceKind === "trip" ? "cash" : "juice",
+      tripCount: 1,
+    });
   } catch (draftErr) {
-    logWarn("prebooking", "draft reset failed after booking", formatError(draftErr));
+    logWarn("prebooking", "draft reset or profile update failed after booking", formatError(draftErr));
   }
 
   logInfo("prebooking", "created & confirmed pre-booking record", {

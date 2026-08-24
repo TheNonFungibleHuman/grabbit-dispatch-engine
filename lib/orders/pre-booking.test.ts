@@ -450,4 +450,36 @@ describe("pre-booking & anti-double-booking guard", () => {
     const cleaned2 = sanitizeWhatsAppText(raw2);
     assert.equal(cleaned2, "Hello Customer A! 😊 Thanks for reaching out.");
   });
+
+  it("stores and retrieves customer profile memory for quick re-orders", async () => {
+    const { getCustomerProfile, updateCustomerProfile } = await import("./store.ts");
+
+    const testPhone = "99900000046";
+    await updateCustomerProfile(testPhone, {
+      name: "Tariq",
+      lastPickupAddress: "ALCHE Room 204",
+      lastDeliveryAddress: "Mahogany",
+      preferredPaymentMethod: "juice",
+      tripCount: 1,
+    });
+
+    const prof = await getCustomerProfile(testPhone);
+    assert.equal(prof.name, "Tariq");
+    assert.equal(prof.lastPickupAddress, "ALCHE Room 204");
+    assert.equal(prof.lastDeliveryAddress, "Mahogany");
+    assert.equal(prof.preferredPaymentMethod, "juice");
+    assert.equal(prof.tripCount >= 1, true);
+  });
+
+  it("generates zero-token personalized morning shift briefings for fleet riders", async () => {
+    const { generateMorningRiderBriefing } = await import("../schedule/morning-briefing.ts");
+
+    // 2026-08-10 is a Monday (Moses and Sherif are on duty in sample schedule)
+    const now = new Date("2026-08-10T03:30:00.000Z"); // 07:30 Mauritius
+    const briefing = await generateMorningRiderBriefing("Moses", now);
+    assert.ok(briefing);
+    assert.equal(briefing?.riderName, "Moses");
+    assert.match(briefing?.briefingText || "", /Your On-Duty Shift Slots/i);
+    assert.match(briefing?.briefingText || "", /Pre-Booked Runs Today/i);
+  });
 });
