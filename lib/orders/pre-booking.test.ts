@@ -412,4 +412,30 @@ describe("pre-booking & anti-double-booking guard", () => {
     assert.match(rundown.summaryText, /Grabbit Daily Operations & Fares Rundown/i);
     assert.match(rundown.googleChatText, /GRABBIT DAILY OPERATIONS & REVENUE RUNDOWN/i);
   });
+
+  it("formats transcript with date tags and demarcates multi-day history", async () => {
+    const { formatTranscriptMessagesForModel } = await import("../agent/transcript.ts");
+
+    const formatted = formatTranscriptMessagesForModel([
+      {
+        at: "2026-08-19T05:10:08.011Z",
+        role: "customer",
+        text: "Hello. I’d like to book a trip for today at 11:45",
+      },
+      {
+        at: "2026-08-19T05:11:25.167Z",
+        role: "agent",
+        text: "Your trip is confirmed for 12:45 pm today",
+      },
+      {
+        at: new Date().toISOString(),
+        role: "customer",
+        text: "Thank you for the reminder!",
+      },
+    ]);
+
+    assert.equal(formatted.length >= 3, true);
+    assert.match(formatted[0].content, /Past Date/i);
+    assert.match(formatted[formatted.length - 1].content, /Today/i);
+  });
 });

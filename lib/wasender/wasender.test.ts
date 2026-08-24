@@ -57,3 +57,13 @@ describe("getSenderPhone", () => {
     assert.equal(getSenderPhone(message), "99900000028");
   });
 });
+
+describe("outbound AI message tracking", () => {
+  it("tracks AI outbound IDs to differentiate from manual human takeover", async () => {
+    const { isOutboundAiMessage, registerOutboundAiMessage } = await import("./send-tracked.ts");
+    assert.equal(isOutboundAiMessage("manual_msg_123"), false);
+    registerOutboundAiMessage("ai_msg_456");
+    assert.equal(isOutboundAiMessage("ai_msg_456"), true);
+    assert.equal(isOutboundAiMessage("manual_msg_123"), false);
+  });
+});

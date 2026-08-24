@@ -76,11 +76,40 @@ async function handleIncomingMessage(
     if (oldest) PROCESSED_MESSAGE_IDS.delete(oldest);
   }
 
-  // Ignore echoes of our own outbound messages.
+  // Capture manual human messages sent from phone / WhatsApp Web
   if (message.key.fromMe) {
-    logInfo("wasender", "ignored fromMe echo", {
-      messageId: message.key.id,
-    });
+    const { isOutboundAiMessage } = await import("./send-tracked.ts");
+    if (isOutboundAiMessage(message.key.id)) {
+      logInfo("wasender", "ignored automated agent fromMe echo", {
+        messageId: message.key.id,
+      });
+      return;
+    }
+
+    const targetPhone = getSenderPhone(message);
+    const text = extractMessageBody(message);
+
+    if (text && targetPhone) {
+      logInfo("wasender", "captured manual human takeover message from phone", {
+        targetPhone,
+        messageId: message.key.id,
+        textPreview: text.slice(0, 120),
+      });
+
+      await appendTranscriptEntry(targetPhone, {
+        role: "agent",
+        text,
+        at: new Date().toISOString(),
+        messageId: message.key.id,
+      });
+
+      await recordOpsEvent({
+        phone: targetPhone,
+        type: "outbound_sent",
+        messageId: message.key.id,
+        preview: `[Human]: ${text}`,
+      });
+    }
     return;
   }
 

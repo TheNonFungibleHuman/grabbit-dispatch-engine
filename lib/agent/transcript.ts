@@ -138,3 +138,53 @@ export function formatTranscriptForAgent(
 
   return lines.join("\n");
 }
+
+export function formatTranscriptMessagesForModel(
+  entries: TranscriptEntry[],
+): Array<{ role: "user" | "assistant"; content: string }> {
+  const now = new Date();
+  const todayMauritiusIso = new Date(now.getTime() + 4 * 3600 * 1000).toISOString().slice(0, 10);
+  const result: Array<{ role: "user" | "assistant"; content: string }> = [];
+
+  let lastDateIso = "";
+
+  for (const entry of entries) {
+    if (!entry.text || !entry.text.trim()) continue;
+
+    const entryDate = entry.at ? new Date(entry.at) : now;
+    const entryMauritiusIso = new Date(entryDate.getTime() + 4 * 3600 * 1000).toISOString().slice(0, 10);
+    const timeStr = new Date(entryDate.getTime() + 4 * 3600 * 1000).toLocaleTimeString("en-US", {
+      hour: "numeric",
+      minute: "2-digit",
+      hour12: true,
+    });
+
+    const isToday = entryMauritiusIso === todayMauritiusIso;
+    const timeTag = isToday ? `[Today ${timeStr}]` : `[${entryMauritiusIso} ${timeStr} - Past Date]`;
+
+    // If day changed between messages, note the transition
+    if (lastDateIso && lastDateIso !== entryMauritiusIso) {
+      if (isToday) {
+        result.push({
+          role: "assistant",
+          content: `[--- End of previous conversation from ${lastDateIso} --- New conversation today (${todayMauritiusIso}) ---]`,
+        });
+      }
+    }
+    lastDateIso = entryMauritiusIso;
+
+    if (entry.role === "customer") {
+      result.push({
+        role: "user",
+        content: `${timeTag} Customer: ${entry.text}`,
+      });
+    } else if (entry.role === "agent") {
+      result.push({
+        role: "assistant",
+        content: `${timeTag} Support: ${entry.text}`,
+      });
+    }
+  }
+
+  return result;
+}

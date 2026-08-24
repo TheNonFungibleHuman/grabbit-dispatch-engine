@@ -176,15 +176,11 @@ export async function generateAgentReply(
   ];
 
   try {
+    const { loadTranscript, formatTranscriptMessagesForModel } = await import("./transcript.ts");
     const transcript = await loadTranscript(input.sender);
     const recentEntries = transcript.entries.slice(-12);
-    for (const entry of recentEntries) {
-      if (entry.role === "customer" && entry.text) {
-        messages.push({ role: "user", content: entry.text });
-      } else if (entry.role === "agent" && entry.text) {
-        messages.push({ role: "assistant", content: entry.text });
-      }
-    }
+    const formattedHistory = formatTranscriptMessagesForModel(recentEntries);
+    messages.push(...formattedHistory);
   } catch (error) {
     logWarn("agent", "failed to load transcript for history", formatError(error));
   }

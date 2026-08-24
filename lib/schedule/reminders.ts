@@ -9,15 +9,17 @@ export async function processUpcomingBookingReminders(): Promise<{
   processed: number;
   reminded: string[];
 }> {
-  const all = await listAllPreBookings();
-  const active = all.filter(
-    (b) =>
-      (b.status === "pending_rider" || b.status === "confirmed") &&
-      !(b as any).reminderSent,
-  );
-
   const now = new Date();
+  const todayMauritiusIso = new Date(now.getTime() + 4 * 3600 * 1000).toISOString().slice(0, 10);
   const mauritiusMinutes = now.getUTCHours() * 60 + now.getUTCMinutes() + 240; // UTC+4
+
+  const all = await listAllPreBookings();
+  const active = all.filter((b) => {
+    if (b.status !== "pending_rider" && b.status !== "confirmed") return false;
+    if ((b as any).reminderSent) return false;
+    const bDate = b.scheduledDate || b.createdAt.slice(0, 10);
+    return bDate === todayMauritiusIso;
+  });
 
   const reminded: string[] = [];
 
