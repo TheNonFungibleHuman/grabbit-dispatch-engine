@@ -70,7 +70,7 @@ describe("ops model", () => {
       event({
         phone: "99900000012",
         type: "agent_failed",
-        error: "gemini timeout",
+        error: "deepseek timeout",
       }),
     );
     assert.equal(state.stats.agentFailed, 1);

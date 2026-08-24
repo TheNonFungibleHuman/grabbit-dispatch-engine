@@ -90,7 +90,7 @@ export async function POST(request: Request) {
     ackMs: Date.now() - startedAt,
   });
 
-  // Ack Wasender immediately; Gemini/DeepSeek + outbound send continue in the background.
+  // Ack Wasender immediately; LLM dispatch + outbound send continue in the background.
   after(async () => {
     const bgStartedAt = Date.now();
     try {

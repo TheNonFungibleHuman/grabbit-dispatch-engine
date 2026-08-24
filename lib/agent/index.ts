@@ -48,7 +48,7 @@ async function sendAndRecord(args: {
 }
 
 /**
- * Run the Grabbit Gemini agent and reply on WhatsApp.
+ * Run the Grabbit dispatch agent and reply on WhatsApp.
  */
 export async function processIncomingUserMessage(
   message: IncomingUserMessage,

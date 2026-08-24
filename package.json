@@ -11,7 +11,6 @@
     "sim": "node --env-file=.env.local scripts/simulate-chat.mjs"
   },
   "dependencies": {
-    "@google/genai": "^2.16.0",
     "@supabase/supabase-js": "^2.112.3",
     "@vercel/blob": "^2.7.0",
     "next": "16.2.4",
