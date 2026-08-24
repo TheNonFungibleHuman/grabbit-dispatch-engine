@@ -1,15 +1,13 @@
 import { NextResponse } from "next/server";
 import { isAdminAuthed } from "@/lib/admin/auth";
 import { getMetricsSnapshot } from "@/lib/metrics/recorder";
+import { isCronAuthorized } from "@/lib/cron/auth";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 export async function GET(req: Request) {
-  const cronSecret = process.env.CRON_SECRET?.trim();
-  const authHeader = req.headers.get("authorization");
-  const viaCron = Boolean(cronSecret) && authHeader === `Bearer ${cronSecret}`;
-  if (!viaCron && !(await isAdminAuthed())) {
+  if (!isCronAuthorized(req) && !(await isAdminAuthed())) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
