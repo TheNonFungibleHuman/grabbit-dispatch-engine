@@ -222,6 +222,11 @@ export async function generateAgentReply(
     }
 
     responseId = completion.id;
+    if (completion.usage) {
+      const { addAgentTokenUsage, recordMetric } = await import("../metrics/recorder.ts");
+      void addAgentTokenUsage(completion.usage.prompt_tokens ?? 0, completion.usage.completion_tokens ?? 0);
+      void recordMetric("agent_calls");
+    }
     const choice = completion.choices?.[0];
     if (!choice) {
       logWarn("agent", "deepseek empty choices", { messageId: input.messageId });
@@ -314,8 +319,11 @@ export async function generateAgentReply(
         ok
       ) {
         bookingSucceeded = true;
-        if (result && typeof result === "object" && "trackingUrl" in result && (result as any).trackingUrl) {
-          lastSuccessfulTrackingUrl = String((result as any).trackingUrl);
+        if (result && typeof result === "object" && "trackingUrl" in result) {
+          const maybeTrackingUrl = (result as { trackingUrl?: unknown }).trackingUrl;
+          if (typeof maybeTrackingUrl === "string" && maybeTrackingUrl) {
+            lastSuccessfulTrackingUrl = maybeTrackingUrl;
+          }
         }
       }
 

@@ -1,5 +1,8 @@
 import { NextResponse } from "next/server";
-import { getSupabaseClient } from "@/lib/supabase/client";
+import { runHealthChecks } from "@/lib/health/checks";
+
+export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
 
 export async function GET() {
   const envCheck = {
@@ -12,23 +15,14 @@ export async function GET() {
     testRiderPhone: process.env.TEST_RIDER_PHONE || "none",
   };
 
-  let supabaseConnected = false;
-  let supabaseError: string | null = null;
+  let checks;
   try {
-    const supabase = getSupabaseClient();
-    if (supabase) {
-      const { error } = await supabase
-        .from("grabbit_documents")
-        .select("pathname")
-        .limit(1);
-      if (!error) {
-        supabaseConnected = true;
-      } else {
-        supabaseError = error.message;
-      }
-    }
-  } catch (err) {
-    supabaseError = err instanceof Error ? err.message : String(err);
+    checks = await runHealthChecks();
+  } catch {
+    return NextResponse.json(
+      { status: "error", allConfigured: false, environment: envCheck },
+      { status: 500 },
+    );
   }
 
   const allReady =
@@ -38,11 +32,15 @@ export async function GET() {
     envCheck.supabaseUrl &&
     envCheck.supabaseServiceRoleKey;
 
+  const degraded =
+    !checks.storage.supabaseConnected ||
+    checks.kilo === "unreachable" ||
+    checks.whatsapp.healthy === false;
+
   return NextResponse.json({
-    status: allReady ? "healthy" : "missing_configuration",
+    status: !allReady ? "missing_configuration" : degraded ? "degraded" : "healthy",
     allConfigured: allReady,
-    supabaseConnected,
-    supabaseError,
+    checks,
     environment: envCheck,
   });
 }
