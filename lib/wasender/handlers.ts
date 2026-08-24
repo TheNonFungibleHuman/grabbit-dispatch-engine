@@ -151,6 +151,44 @@ async function onUserMessage(message: IncomingUserMessage): Promise<void> {
     preview: message.text,
   });
 
+  // 1. Check if incoming message is a 1-word command from a Fleet Rider (0 LLM tokens)
+  try {
+    const { isAuthorizedRiderOrAdmin } = await import("../riders/config.ts");
+    const auth = isAuthorizedRiderOrAdmin(message.sender);
+    if (auth.rider) {
+      const { handleRiderCommand } = await import("../riders/commands.ts");
+      const cmdResult = await handleRiderCommand({
+        senderPhone: message.sender,
+        messageText: message.text,
+        rider: auth.rider,
+      });
+
+      if (cmdResult.handled && cmdResult.replyText) {
+        await sendCustomerText({
+          to: message.sender,
+          text: cmdResult.replyText,
+        });
+        await appendTranscriptEntry(message.sender, {
+          role: "customer",
+          text: message.text,
+          messageId: message.messageId,
+        });
+        await appendTranscriptEntry(message.sender, {
+          role: "agent",
+          text: cmdResult.replyText,
+          messageId: message.messageId,
+        });
+        logInfo("wasender", "handled rider command with zero LLM tokens", {
+          rider: auth.rider.name,
+          action: cmdResult.action,
+        });
+        return;
+      }
+    }
+  } catch (cmdErr) {
+    logWarn("wasender", "rider command check failed", formatError(cmdErr));
+  }
+
   const agentOn = await isAgentEnabled();
   if (!agentOn) {
     await appendTranscriptEntry(message.sender, {

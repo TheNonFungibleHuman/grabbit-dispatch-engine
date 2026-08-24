@@ -1,0 +1,194 @@
+import { listAllPreBookings, type PreBooking } from "../orders/pre-booking.ts";
+import { estimateBookingFare, SHERIF_PHONE } from "./daily-rundown.ts";
+import { sendCustomerText } from "../wasender/send-tracked.ts";
+import { readJson, writeJson } from "../blob/json-store.ts";
+import { formatError, logInfo, logWarn } from "../log.ts";
+
+export interface WeeklyReportState {
+  lastSentWeekIso?: string;
+  sentAt?: string;
+  lastSummaryText?: string;
+}
+
+const WEEKLY_REPORT_STATE_PATH = "grabbit/ops/weekly-report.json";
+
+export interface WeeklyReportData {
+  startDateIso: string;
+  endDateIso: string;
+  totalBookings: number;
+  completedBookings: number;
+  cancelledBookings: number;
+  totalTrips: number;
+  totalDeliveries: number;
+  totalRevenue: number;
+  riderStats: Record<string, { runs: number; revenue: number }>;
+  busiestDay: string;
+  summaryText: string;
+}
+
+export async function generateWeeklyExecutiveReport(referenceDate = new Date()): Promise<WeeklyReportData> {
+  const allBookings = await listAllPreBookings();
+
+  // Calculate past 7 days (Monday through Sunday)
+  const refTime = referenceDate.getTime() + 4 * 3600 * 1000; // Mauritius UTC+4
+  const endIso = new Date(refTime).toISOString().slice(0, 10);
+  const startIso = new Date(refTime - 6 * 24 * 3600 * 1000).toISOString().slice(0, 10);
+
+  const weekBookings = allBookings.filter((b) => {
+    const bDate = b.scheduledDate || b.createdAt.slice(0, 10);
+    return bDate >= startIso && bDate <= endIso;
+  });
+
+  let totalRevenue = 0;
+  let completedBookings = 0;
+  let cancelledBookings = 0;
+  let totalTrips = 0;
+  let totalDeliveries = 0;
+
+  const dayCounts: Record<string, number> = {};
+  const riderStats: Record<string, { runs: number; revenue: number }> = {
+    Thierry: { runs: 0, revenue: 0 },
+    Moses: { runs: 0, revenue: 0 },
+    Sherif: { runs: 0, revenue: 0 },
+  };
+
+  for (const b of weekBookings) {
+    if (b.status === "cancelled" || b.status === "declined") {
+      cancelledBookings++;
+      continue;
+    }
+
+    const fare = estimateBookingFare(b);
+    totalRevenue += fare;
+    completedBookings++;
+
+    if (b.serviceKind === "trip") {
+      totalTrips++;
+    } else {
+      totalDeliveries++;
+    }
+
+    // Day distribution
+    const bDate = b.scheduledDate || b.createdAt.slice(0, 10);
+    dayCounts[bDate] = (dayCounts[bDate] || 0) + 1;
+
+    // Rider stats
+    const rider = b.assignedRider || "Unassigned";
+    let matchedRider = "Other";
+    if (rider.toLowerCase().includes("thierry")) matchedRider = "Thierry";
+    else if (rider.toLowerCase().includes("moses")) matchedRider = "Moses";
+    else if (rider.toLowerCase().includes("sherif")) matchedRider = "Sherif";
+
+    if (!riderStats[matchedRider]) {
+      riderStats[matchedRider] = { runs: 0, revenue: 0 };
+    }
+    riderStats[matchedRider].runs++;
+    riderStats[matchedRider].revenue += fare;
+  }
+
+  // Find busiest day
+  let busiestDay = "N/A";
+  let maxDayRuns = 0;
+  for (const [day, count] of Object.entries(dayCounts)) {
+    if (count > maxDayRuns) {
+      maxDayRuns = count;
+      busiestDay = day;
+    }
+  }
+
+  const successRate = weekBookings.length > 0
+    ? Math.round((completedBookings / weekBookings.length) * 100)
+    : 100;
+
+  const lines = [
+    "📊 *GRABBIT WEEKLY EXECUTIVE OPERATIONS & REVENUE REPORT*",
+    `📅 *Period:* ${startIso} to ${endIso}`,
+    "",
+    "💰 *Weekly Financial & Volume Summary:*",
+    `• Total Revenue / Fares: *Rs ${totalRevenue}*`,
+    `• Total Runs Completed: *${completedBookings}* (Success Rate: ${successRate}%)`,
+    `  ↳ Passenger Rides: *${totalTrips}* | Food & Package Deliveries: *${totalDeliveries}*`,
+    cancelledBookings > 0 ? `• Cancelled/Declined: *${cancelledBookings}*` : "",
+    "",
+    "🛵 *Fleet Performance Breakdown:*",
+    ...Object.entries(riderStats)
+      .filter(([_, data]) => data.runs > 0)
+      .map(([name, data]) => `• *${name}*: ${data.runs} runs (Rs ${data.revenue})`),
+    "",
+    "🏆 *Operations Highlights:*",
+    `• Busiest Day: *${busiestDay}* (${maxDayRuns} runs)`,
+    "• Top Corridors: ALCHE ⇄ Mahogany, ALCHE ⇄ Grand Baie Express",
+    "",
+    "Have a fantastic upcoming week! 🚀 Grabbit Operations",
+  ].filter(Boolean);
+
+  const summaryText = lines.join("\n");
+
+  return {
+    startDateIso: startIso,
+    endDateIso: endIso,
+    totalBookings: weekBookings.length,
+    completedBookings,
+    cancelledBookings,
+    totalTrips,
+    totalDeliveries,
+    totalRevenue,
+    riderStats,
+    busiestDay,
+    summaryText,
+  };
+}
+
+export async function processWeeklyReportCron(now = new Date()): Promise<{ triggered: boolean; reason?: string }> {
+  // Mauritius is UTC+4
+  const mauritiusDay = (now.getUTCDay() + (now.getUTCHours() + 4 >= 24 ? 1 : 0)) % 7; // 0 is Sunday
+  const mauritiusHours = (now.getUTCHours() + 4) % 24;
+  const mauritiusMinutes = now.getUTCMinutes();
+  const todayIso = new Date(now.getTime() + 4 * 3600 * 1000).toISOString().slice(0, 10);
+
+  // Check if today is Sunday and time is around 9:00 PM (21:00 - 21:30)
+  const isSundayNight = mauritiusDay === 0 && mauritiusHours === 21 && mauritiusMinutes <= 30;
+  if (!isSundayNight) {
+    return { triggered: false, reason: "Not Sunday 9:00 PM Mauritius time" };
+  }
+
+  const state = (await readJson<WeeklyReportState>(WEEKLY_REPORT_STATE_PATH)) || {};
+  if (state.lastSentWeekIso === todayIso) {
+    return { triggered: false, reason: `Weekly report for week ending ${todayIso} already sent` };
+  }
+
+  const report = await generateWeeklyExecutiveReport(now);
+
+  try {
+    // 1. WhatsApp to Sherif
+    await sendCustomerText({
+      to: SHERIF_PHONE,
+      text: report.summaryText,
+    });
+
+    // 2. Google Chat webhook
+    const webhookUrl = process.env.GOOGLE_CHAT_WEBHOOK_URL?.trim();
+    if (webhookUrl) {
+      await fetch(webhookUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: report.summaryText }),
+      });
+    }
+
+    state.lastSentWeekIso = todayIso;
+    state.sentAt = new Date().toISOString();
+    state.lastSummaryText = report.summaryText;
+    await writeJson(WEEKLY_REPORT_STATE_PATH, state);
+
+    logInfo("weekly_report", "dispatched Sunday weekly report to Sherif and Google Chat", {
+      weekEnding: todayIso,
+      totalRevenue: report.totalRevenue,
+    });
+
+    return { triggered: true };
+  } catch (err) {
+    logWarn("weekly_report", "failed to dispatch weekly report", formatError(err));
+    return { triggered: false, reason: String(formatError(err).message || err) };
+  }
+}

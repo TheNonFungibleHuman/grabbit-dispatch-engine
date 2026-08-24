@@ -324,6 +324,37 @@ export const AGENT_TOOLS = [
       required: ["customerIdentifier"],
     },
   },
+  {
+    type: "function" as const,
+    name: "preview_admin_broadcast",
+    description:
+      "ADMIN ONLY: Prepare and preview a promotional broadcast to all active Grabbit customers. Returns audience count and formatted preview. Only authorized for admins.",
+    parameters: {
+      type: "object",
+      properties: {
+        messageText: {
+          type: "string",
+          description: "The promotional message or announcement text to broadcast to customers.",
+        },
+      },
+      required: ["messageText"],
+    },
+  },
+  {
+    type: "function" as const,
+    name: "execute_admin_broadcast",
+    description:
+      "ADMIN ONLY: Execute and send the prepared broadcast to all active customers after the admin explicitly confirms (e.g. 'YES', 'SEND', 'CONFIRM').",
+    parameters: {
+      type: "object",
+      properties: {
+        broadcastId: {
+          type: "string",
+          description: "Optional broadcast ID to execute. Defaults to latest pending draft.",
+        },
+      },
+    },
+  },
 ];
 
 export const DEEPSEEK_AGENT_TOOLS = AGENT_TOOLS.map((tool) => ({
@@ -1034,6 +1065,24 @@ export async function executeAgentTool(args: {
       });
 
       return result;
+    }
+
+    if (args.name === "preview_admin_broadcast") {
+      const value = parseToolArguments(args.toolArguments);
+      const { previewCustomerBroadcast } = await import("../admin/broadcast.ts");
+      return await previewCustomerBroadcast({
+        adminPhone: args.senderPhone,
+        messageText: String(value.messageText || ""),
+      });
+    }
+
+    if (args.name === "execute_admin_broadcast") {
+      const value = parseToolArguments(args.toolArguments);
+      const { executeCustomerBroadcast } = await import("../admin/broadcast.ts");
+      return await executeCustomerBroadcast({
+        adminPhone: args.senderPhone,
+        broadcastId: value.broadcastId ? String(value.broadcastId) : undefined,
+      });
     }
 
     return { ok: false, error: `Unknown tool: ${args.name}` };

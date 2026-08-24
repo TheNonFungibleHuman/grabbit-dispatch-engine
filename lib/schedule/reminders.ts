@@ -85,6 +85,14 @@ export async function processUpcomingBookingReminders(): Promise<{
     logWarn("reminders", "daily rundown check error", formatError(rundownErr));
   }
 
+  // Check 9:00 PM Sunday Mauritius weekly executive report
+  try {
+    const { processWeeklyReportCron } = await import("./weekly-report.ts");
+    await processWeeklyReportCron();
+  } catch (weeklyErr) {
+    logWarn("reminders", "weekly report check error", formatError(weeklyErr));
+  }
+
   return {
     processed: active.length,
     reminded,

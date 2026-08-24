@@ -25,7 +25,7 @@ export interface PreBooking {
   slotKey: string;       // e.g. "2026-08-19_12:00-13:00"
   assignedRider: string; // e.g. "Thierry"
   declinedRiders?: string[]; // Rider names who declined
-  status: "pending_rider" | "confirmed" | "dispatched" | "declined" | "cancelled";
+  status: "pending_rider" | "confirmed" | "dispatched" | "declined" | "cancelled" | "completed";
   kiloDeliveryId?: string;
   trackingUrl?: string;
   createdAt: string;
@@ -178,13 +178,48 @@ export interface CheckSlotResult {
   suggestedTime?: string;
 }
 
+export function isCompatibleRouteBatch(
+  b1: { serviceKind?: string; tripType?: string; pickupAddress?: string; deliveryAddress?: string },
+  b2: { serviceKind?: string; tripType?: string; pickupAddress?: string; deliveryAddress?: string },
+): boolean {
+  // Round trips can NEVER be batched due to waiting time and round-trip passenger exclusivity
+  if (b1.tripType === "round_trip" || b2.tripType === "round_trip") {
+    return false;
+  }
+
+  const p1 = (b1.pickupAddress || "").toLowerCase();
+  const d1 = (b1.deliveryAddress || "").toLowerCase();
+  const p2 = (b2.pickupAddress || "").toLowerCase();
+  const d2 = (b2.deliveryAddress || "").toLowerCase();
+
+  // If both are package/food deliveries/errands, batch if pickup or dropoff zones match
+  const bothDeliveries = b1.serviceKind !== "trip" && b2.serviceKind !== "trip";
+  if (bothDeliveries) {
+    const samePickup = (p1.includes("alche") && p2.includes("alche")) || (p1.includes("mahogany") && p2.includes("mahogany"));
+    const sameDrop = (d1.includes("alche") && d2.includes("alche")) || (d1.includes("mahogany") && d2.includes("mahogany"));
+    return Boolean(samePickup || sameDrop);
+  }
+
+  // If one is a one-way passenger trip and one is a delivery in the exact same corridor
+  const isAlcheToMahogany1 = p1.includes("alche") && (d1.includes("mahogany") || d1.includes("grand baie"));
+  const isAlcheToMahogany2 = p2.includes("alche") && (d2.includes("mahogany") || d2.includes("grand baie"));
+  if (isAlcheToMahogany1 && isAlcheToMahogany2) return true;
+
+  const isMahoganyToAlche1 = p1.includes("mahogany") && d1.includes("alche");
+  const isMahoganyToAlche2 = p2.includes("mahogany") && d2.includes("alche");
+  if (isMahoganyToAlche1 && isMahoganyToAlche2) return true;
+
+  return false;
+}
+
 /**
  * Checks if a rider's hour window has available capacity & enforces trip buffers.
  * Capacity rule per hour:
  * - Up to 3 deliveries and 1 trip per hour.
  * - If there are zero deliveries in that hour, up to 3 passenger trips can be booked.
  * - Maximum total bookings per hour = 3.
- * - Minimum gap between bookings for the same rider = 15 minutes (one-way / deliveries), 30 minutes (round-trips).
+ * - Minimum gap between bookings for the same rider = 15 minutes (one-way / deliveries), 30 minutes (round-trips),
+ *   unless bookings are along the same route corridor (Smart Route Batching).
  */
 export async function checkSlotAvailability(args: {
   slotKey: string;
@@ -192,6 +227,8 @@ export async function checkSlotAvailability(args: {
   customerPhone?: string;
   serviceKind?: string;
   tripType?: "one_way" | "round_trip";
+  pickupAddress?: string;
+  deliveryAddress?: string;
   scheduledTime?: string;
   scheduledDate?: string;
 }): Promise<CheckSlotResult> {
@@ -223,14 +260,17 @@ export async function checkSlotAvailability(args: {
 
           const diff = Math.abs(targetMin - existingMin);
           if (diff < requiredGap) {
-            const nextAvailableMin = existingMin + (isExistingRoundTrip ? MIN_BOOKING_GAP_MINUTES_ROUND_TRIP : (isNewRoundTrip ? MIN_BOOKING_GAP_MINUTES_ROUND_TRIP : MIN_BOOKING_GAP_MINUTES_ONE_WAY));
-            const suggestedTime = formatMinutesToTime(nextAvailableMin);
-            return {
-              available: false,
-              conflictingBooking: b,
-              reason: "gap_violation",
-              suggestedTime,
-            };
+            const canBatch = isCompatibleRouteBatch(b, args);
+            if (!canBatch) {
+              const nextAvailableMin = existingMin + (isExistingRoundTrip ? MIN_BOOKING_GAP_MINUTES_ROUND_TRIP : (isNewRoundTrip ? MIN_BOOKING_GAP_MINUTES_ROUND_TRIP : MIN_BOOKING_GAP_MINUTES_ONE_WAY));
+              const suggestedTime = formatMinutesToTime(nextAvailableMin);
+              return {
+                available: false,
+                conflictingBooking: b,
+                reason: "gap_violation",
+                suggestedTime,
+              };
+            }
           }
         }
       }

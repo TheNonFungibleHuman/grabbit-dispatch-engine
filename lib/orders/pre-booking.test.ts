@@ -482,4 +482,89 @@ describe("pre-booking & anti-double-booking guard", () => {
     assert.match(briefing?.briefingText || "", /Your On-Duty Shift Slots/i);
     assert.match(briefing?.briefingText || "", /Pre-Booked Runs Today/i);
   });
+
+  it("handles rider 1-word WhatsApp commands (Delivered, Break, Back)", async () => {
+    const { handleRiderCommand } = await import("../riders/commands.ts");
+    const { FLEET_RIDERS } = await import("../riders/config.ts");
+
+    const thierry = FLEET_RIDERS[0]; // Thierry
+
+    // Test Break command
+    const breakRes = await handleRiderCommand({
+      senderPhone: "+999000000009",
+      messageText: "Break 20m",
+      rider: thierry,
+    });
+    assert.equal(breakRes.handled, true);
+    assert.equal(breakRes.action, "started_break");
+    assert.match(breakRes.replyText || "", /Break Logged \(20 mins\)/i);
+
+    // Test Back command
+    const backRes = await handleRiderCommand({
+      senderPhone: "+999000000009",
+      messageText: "Back",
+      rider: thierry,
+    });
+    assert.equal(backRes.handled, true);
+    assert.equal(backRes.action, "ended_break");
+    assert.match(backRes.replyText || "", /Welcome Back/i);
+  });
+
+  it("evaluates smart route batching between ALCHE and Mahogany", async () => {
+    const { isCompatibleRouteBatch } = await import("./pre-booking.ts");
+
+    // 2 delivery runs to ALCHE
+    const batch1 = isCompatibleRouteBatch(
+      { serviceKind: "pickup_delivery", pickupAddress: "Mahogany KFC", deliveryAddress: "ALCHE 204" },
+      { serviceKind: "pickup_delivery", pickupAddress: "Mahogany Pappagallo", deliveryAddress: "ALCHE 101" }
+    );
+    assert.equal(batch1, true);
+
+    // 1 one-way trip and 1 delivery along same corridor
+    const batch2 = isCompatibleRouteBatch(
+      { serviceKind: "trip", tripType: "one_way", pickupAddress: "ALCHE Main Gate", deliveryAddress: "Mahogany" },
+      { serviceKind: "pickup_delivery", pickupAddress: "ALCHE", deliveryAddress: "Mahogany" }
+    );
+    assert.equal(batch2, true);
+
+    // Round-trips can NEVER be batched
+    const batch3 = isCompatibleRouteBatch(
+      { serviceKind: "trip", tripType: "round_trip", pickupAddress: "ALCHE", deliveryAddress: "Mahogany" },
+      { serviceKind: "pickup_delivery", pickupAddress: "ALCHE", deliveryAddress: "Mahogany" }
+    );
+    assert.equal(batch3, false);
+  });
+
+  it("handles admin broadcast previews and safety guards", async () => {
+    const { previewCustomerBroadcast } = await import("../admin/broadcast.ts");
+
+    // Denied for non-admin
+    const nonAdminRes = await previewCustomerBroadcast({
+      adminPhone: "+99900000022",
+      messageText: "Special Promo",
+    });
+    assert.equal(nonAdminRes.ok, false);
+    assert.match(nonAdminRes.error || "", /Access Denied/i);
+
+    // Authorized for admin (+999000000008)
+    const adminRes = await previewCustomerBroadcast({
+      adminPhone: "+999000000008",
+      messageText: "🍕 Special 20% off Pappagallo delivery today!",
+    });
+    assert.equal(adminRes.ok, true);
+    assert.match(adminRes.previewText, /Broadcast Campaign Preview/i);
+    assert.match(adminRes.previewText, /Safety Guard/i);
+  });
+
+  it("generates Sunday weekly executive revenue and operations report", async () => {
+    const { generateWeeklyExecutiveReport } = await import("../schedule/weekly-report.ts");
+
+    const report = await generateWeeklyExecutiveReport(new Date());
+    assert.ok(report);
+    assert.equal(typeof report.totalRevenue, "number");
+    assert.equal(typeof report.completedBookings, "number");
+    assert.match(report.summaryText, /GRABBIT WEEKLY EXECUTIVE OPERATIONS & REVENUE REPORT/i);
+    assert.match(report.summaryText, /Weekly Financial & Volume Summary/i);
+    assert.match(report.summaryText, /Fleet Performance Breakdown/i);
+  });
 });
