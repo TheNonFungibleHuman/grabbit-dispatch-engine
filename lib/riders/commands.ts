@@ -45,7 +45,7 @@ export async function handleRiderCommand(args: {
   const riderName = args.rider.name;
 
   // 1. Check "Delivered" / "Done" / "Completed"
-  if (/^(done|delivered|trip completed|order completed|finished|drop completed)[.!]?$/i.test(text)) {
+  if (/^(done|delivered|trip completed|order completed|finished|drop completed|drop done|dropped|completed|run completed)[.!]?$/i.test(text)) {
     const all = await listAllPreBookings();
     const riderLower = riderName.toLowerCase();
 
@@ -99,9 +99,9 @@ export async function handleRiderCommand(args: {
   }
 
   // 2. Check "Break [Xm]" / "On Break"
-  const breakMatch = text.match(/^(?:break\s*(\d+)?m?|on\s*break|taking\s*a?\s*break)[.!]?$/i);
+  const breakMatch = text.match(/^(?:break\s*(\d+)?m?|on\s*break|taking\s*a?\s*break|pause\s*(\d+)?m?)[.!]?$/i);
   if (breakMatch) {
-    const minutes = Number(breakMatch[1]) || 15; // default 15 mins
+    const minutes = Number(breakMatch[1] || breakMatch[2]) || 15; // default 15 mins
     const now = new Date();
     const until = new Date(now.getTime() + minutes * 60 * 1000);
     const mauritiusUntilTime = new Date(until.getTime() + 4 * 3600 * 1000).toLocaleTimeString("en-US", {
@@ -129,7 +129,7 @@ export async function handleRiderCommand(args: {
   }
 
   // 3. Check "Back" / "Available" / "Ready"
-  if (/^(back|available|active|ready|i am back|im back)[.!]?$/i.test(text)) {
+  if (/^(back|available|active|ready|am ready|i am ready|i'm ready|im ready|ready now|online|resumed)[.!]?$/i.test(text)) {
     const state = (await readJson<RiderStatusState>(RIDER_STATUS_PATH)) || { breaks: {} };
     state.breaks[riderName.toLowerCase()] = {
       onBreak: false,
