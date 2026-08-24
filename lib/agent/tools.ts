@@ -876,6 +876,13 @@ export async function executeAgentTool(args: {
 
       const value = parseToolArguments(args.toolArguments);
       const customMessage = value.customMessage ? String(value.customMessage) : undefined;
+      const reportType = value.reportType ? String(value.reportType) : "daily";
+
+      if (reportType === "weekly") {
+        const { postWeeklySummaryToGoogleChat } = await import("../schedule/weekly-report.ts");
+        return await postWeeklySummaryToGoogleChat(customMessage);
+      }
+
       const { postDailySummaryToGoogleChat } = await import("../schedule/daily-rundown.ts");
       const result = await postDailySummaryToGoogleChat(customMessage);
       return result;

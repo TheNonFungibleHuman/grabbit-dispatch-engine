@@ -2,7 +2,7 @@ import { listAllPreBookings, type PreBooking } from "../orders/pre-booking.ts";
 import { estimateBookingFare, SHERIF_PHONE } from "./daily-rundown.ts";
 import { sendCustomerText } from "../wasender/send-tracked.ts";
 import { readJson, writeJson } from "../blob/json-store.ts";
-import { formatError, logInfo, logWarn } from "../log.ts";
+import { formatError, logError, logInfo, logWarn } from "../log.ts";
 
 export interface WeeklyReportState {
   lastSentWeekIso?: string;
@@ -120,6 +120,8 @@ export async function generateWeeklyExecutiveReport(referenceDate = new Date()):
     "• Top Corridors: ALCHE ⇄ Mahogany, ALCHE ⇄ Grand Baie Express",
     "",
     "Have a fantastic upcoming week! 🚀 Grabbit Operations",
+    "",
+    "💬 *Would you like me to send this weekly summary to Google Chat?* Reply *YES* (or tell me what to modify/send specifically).",
   ].filter(Boolean);
 
   const summaryText = lines.join("\n");
@@ -137,6 +139,33 @@ export async function generateWeeklyExecutiveReport(referenceDate = new Date()):
     busiestDay,
     summaryText,
   };
+}
+
+export async function postWeeklySummaryToGoogleChat(customMessage?: string): Promise<{ ok: boolean; message: string }> {
+  const webhookUrl = process.env.GOOGLE_CHAT_WEBHOOK_URL?.trim();
+  if (!webhookUrl) {
+    return { ok: false, message: "Google Chat webhook URL is not configured." };
+  }
+
+  const state = (await readJson<WeeklyReportState>(WEEKLY_REPORT_STATE_PATH)) || {};
+  const messageToSend = customMessage?.trim() || state.lastSummaryText || "Weekly report not found.";
+
+  try {
+    const res = await fetch(webhookUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text: messageToSend }),
+    });
+
+    if (res.ok) {
+      logInfo("weekly_report", "posted weekly summary to Google Chat upon Sherif approval");
+      return { ok: true, message: "Successfully posted weekly operations report to Google Chat! 🚀" };
+    }
+    return { ok: false, message: `Google Chat returned status ${res.status}: ${res.statusText}` };
+  } catch (err) {
+    logError("weekly_report", "failed to post weekly summary to Google Chat", err);
+    return { ok: false, message: String(formatError(err).message || err) };
+  }
 }
 
 export async function processWeeklyReportCron(now = new Date()): Promise<{ triggered: boolean; reason?: string }> {
@@ -160,28 +189,26 @@ export async function processWeeklyReportCron(now = new Date()): Promise<{ trigg
   const report = await generateWeeklyExecutiveReport(now);
 
   try {
-    // 1. WhatsApp to Sherif
+    // Send exclusively to Sherif on WhatsApp
     await sendCustomerText({
       to: SHERIF_PHONE,
       text: report.summaryText,
     });
 
-    // 2. Google Chat webhook
-    const webhookUrl = process.env.GOOGLE_CHAT_WEBHOOK_URL?.trim();
-    if (webhookUrl) {
-      await fetch(webhookUrl, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: report.summaryText }),
+    try {
+      const { appendTranscriptEntry } = await import("../agent/transcript.ts");
+      await appendTranscriptEntry(SHERIF_PHONE, {
+        role: "agent",
+        text: report.summaryText,
       });
-    }
+    } catch {}
 
     state.lastSentWeekIso = todayIso;
     state.sentAt = new Date().toISOString();
     state.lastSummaryText = report.summaryText;
     await writeJson(WEEKLY_REPORT_STATE_PATH, state);
 
-    logInfo("weekly_report", "dispatched Sunday weekly report to Sherif and Google Chat", {
+    logInfo("weekly_report", "dispatched Sunday weekly report exclusively to Sherif on WhatsApp", {
       weekEnding: todayIso,
       totalRevenue: report.totalRevenue,
     });
