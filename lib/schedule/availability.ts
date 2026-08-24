@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { memoryClear, readJson, writeJson } from "../blob/json-store.ts";
 import { formatError, logInfo, logWarn } from "../log.ts";
+import { resolveRelativeDateWord } from "../time.ts";
 import {
   evaluateAvailability,
   parseRiderScheduleCsv,
@@ -290,6 +291,7 @@ export function summarizeAvailabilityForAdmin(
 export async function getRiderForTargetSlot(args: {
   targetDate: string; // YYYY-MM-DD or 'today' / 'tomorrow'
   targetTime: string; // e.g. "12:00 pm", "14:30"
+  now?: Date;
 }): Promise<{
   available: boolean;
   weekday: WeekdayKey;
@@ -300,14 +302,9 @@ export async function getRiderForTargetSlot(args: {
   const { slots } = await loadScheduleSlots();
   
   // Resolve target date to WeekdayKey
-  let resolvedDate = args.targetDate.trim();
-  const now = new Date();
-  if (resolvedDate.toLowerCase() === "today") {
-    resolvedDate = now.toISOString().slice(0, 10);
-  } else if (resolvedDate.toLowerCase() === "tomorrow") {
-    const tomorrow = new Date(now.getTime() + 24 * 60 * 60 * 1000);
-    resolvedDate = tomorrow.toISOString().slice(0, 10);
-  }
+  const now = args.now || new Date();
+  const relativeIso = resolveRelativeDateWord(args.targetDate, now);
+  const resolvedDate = relativeIso || args.targetDate.trim();
 
   const dateObj = new Date(resolvedDate + "T12:00:00Z");
   const weekdayKeys: WeekdayKey[] = ["SUN", "MON", "TUES", "WED", "THURS", "FRI", "SAT"];

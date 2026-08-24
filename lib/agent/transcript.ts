@@ -1,5 +1,6 @@
 import { readJson, writeJson } from "../blob/json-store.ts";
 import { normalizeSender } from "./sessions.ts";
+import { mauritiusClockLabel, mauritiusDateIso } from "../time.ts";
 
 export type TranscriptRole = "customer" | "agent" | "note";
 
@@ -21,7 +22,7 @@ export interface ChatTranscript {
   entries: TranscriptEntry[];
 }
 
-const MAX_ENTRIES = 12;
+const MAX_ENTRIES = 40;
 
 function transcriptPath(sender: string): string {
   return `grabbit/sessions/${normalizeSender(sender)}/transcript.json`;
@@ -143,7 +144,7 @@ export function formatTranscriptMessagesForModel(
   entries: TranscriptEntry[],
 ): Array<{ role: "user" | "assistant"; content: string }> {
   const now = new Date();
-  const todayMauritiusIso = new Date(now.getTime() + 4 * 3600 * 1000).toISOString().slice(0, 10);
+  const todayMauritiusIso = mauritiusDateIso(now);
   const result: Array<{ role: "user" | "assistant"; content: string }> = [];
 
   let lastDateIso = "";
@@ -152,12 +153,8 @@ export function formatTranscriptMessagesForModel(
     if (!entry.text || !entry.text.trim()) continue;
 
     const entryDate = entry.at ? new Date(entry.at) : now;
-    const entryMauritiusIso = new Date(entryDate.getTime() + 4 * 3600 * 1000).toISOString().slice(0, 10);
-    const timeStr = new Date(entryDate.getTime() + 4 * 3600 * 1000).toLocaleTimeString("en-US", {
-      hour: "numeric",
-      minute: "2-digit",
-      hour12: true,
-    });
+    const entryMauritiusIso = mauritiusDateIso(entryDate);
+    const timeStr = mauritiusClockLabel(entryDate);
 
     const isToday = entryMauritiusIso === todayMauritiusIso;
     const timeTag = isToday ? `[Today ${timeStr}]` : `[${entryMauritiusIso} ${timeStr} - Past Date]`;

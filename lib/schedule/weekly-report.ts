@@ -2,6 +2,7 @@ import { listAllPreBookings, type PreBooking } from "../orders/pre-booking.ts";
 import { estimateBookingFare, SHERIF_PHONE } from "./daily-rundown.ts";
 import { sendCustomerText } from "../wasender/send-tracked.ts";
 import { readJson, writeJson } from "../blob/json-store.ts";
+import { addDaysIso, mauritiusDateIso, mauritiusMinutesOfDay, mauritiusWeekday } from "../time.ts";
 import { formatError, logError, logInfo, logWarn } from "../log.ts";
 
 export interface WeeklyReportState {
@@ -30,9 +31,8 @@ export async function generateWeeklyExecutiveReport(referenceDate = new Date()):
   const allBookings = await listAllPreBookings();
 
   // Calculate past 7 days (Monday through Sunday)
-  const refTime = referenceDate.getTime() + 4 * 3600 * 1000; // Mauritius UTC+4
-  const endIso = new Date(refTime).toISOString().slice(0, 10);
-  const startIso = new Date(refTime - 6 * 24 * 3600 * 1000).toISOString().slice(0, 10);
+  const endIso = mauritiusDateIso(referenceDate);
+  const startIso = addDaysIso(endIso, -6);
 
   const weekBookings = allBookings.filter((b) => {
     const bDate = b.scheduledDate || b.createdAt.slice(0, 10);
@@ -170,10 +170,11 @@ export async function postWeeklySummaryToGoogleChat(customMessage?: string): Pro
 
 export async function processWeeklyReportCron(now = new Date()): Promise<{ triggered: boolean; reason?: string }> {
   // Mauritius is UTC+4
-  const mauritiusDay = (now.getUTCDay() + (now.getUTCHours() + 4 >= 24 ? 1 : 0)) % 7; // 0 is Sunday
-  const mauritiusHours = (now.getUTCHours() + 4) % 24;
-  const mauritiusMinutes = now.getUTCMinutes();
-  const todayIso = new Date(now.getTime() + 4 * 3600 * 1000).toISOString().slice(0, 10);
+  const mauritiusDay = mauritiusWeekday(now); // 0 is Sunday
+  const minutesOfDay = mauritiusMinutesOfDay(now);
+  const mauritiusHours = Math.floor(minutesOfDay / 60);
+  const mauritiusMinutes = minutesOfDay % 60;
+  const todayIso = mauritiusDateIso(now);
 
   // Check if today is Sunday and time is around 9:00 PM (21:00 - 21:30)
   const isSundayNight = mauritiusDay === 0 && mauritiusHours === 21 && mauritiusMinutes <= 30;
