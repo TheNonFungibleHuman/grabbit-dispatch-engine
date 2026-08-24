@@ -112,7 +112,7 @@ export const AGENT_TOOLS = [
     type: "function" as const,
     name: "schedule_trip_or_delivery",
     description:
-      "Pre-book or schedule a future delivery or passenger trip for any date/time (even outside current hours). Checks on-duty rider from schedule and prevents double-booking. Notifies the assigned rider to confirm before final dispatch.",
+      "Pre-book or schedule a future delivery or passenger trip for any date/time (even outside current hours). Requires the customer's explicit paymentMethod — ask cash vs transfer FIRST and never in the same breath as a confirmation link. Checks on-duty rider from schedule and prevents double-booking.",
     parameters: {
       type: "object",
       properties: {
@@ -138,8 +138,13 @@ export const AGENT_TOOLS = [
           enum: ["one_way", "round_trip"],
           description: "For passenger trips: one_way (direct trip) or round_trip (includes return + 15 min free wait after dropoff)",
         },
+        paymentMethod: {
+          type: "string",
+          enum: ["cash", "transfer"],
+          description: "Customer's chosen payment method. MUST be collected from the customer BEFORE calling this tool — never assume or default it.",
+        },
       },
-      required: ["serviceKind", "scheduledDate", "scheduledTime", "pickupAddress", "deliveryAddress"],
+      required: ["serviceKind", "scheduledDate", "scheduledTime", "pickupAddress", "deliveryAddress", "paymentMethod"],
     },
   },
   {
@@ -584,6 +589,19 @@ export async function executeAgentTool(args: {
       const customerName = String(value.customerName || args.pushName || "Customer");
       const packageDescription = value.packageDescription ? String(value.packageDescription) : undefined;
       const tripType = value.tripType as ("one_way" | "round_trip" | undefined);
+      const rawPayment = typeof value.paymentMethod === "string" ? value.paymentMethod.toLowerCase().trim() : "";
+      const paymentMethod: "cash" | "transfer" | null =
+        rawPayment === "cash" || rawPayment === "bank transfer" || rawPayment === "transfer"
+          ? (rawPayment === "cash" ? "cash" : "transfer")
+          : null;
+
+      if (!paymentMethod) {
+        return {
+          ok: false,
+          error:
+            "PAYMENT_METHOD_REQUIRED: Ask the customer how they would like to pay — cash or bank transfer — and only call this tool again with their explicit choice. Never book without a confirmed payment method.",
+        };
+      }
 
       // 1. Resolve on-duty rider for this target date & time
       const { getRiderForTargetSlot } = await import("../schedule/availability.ts");
@@ -653,7 +671,10 @@ export async function executeAgentTool(args: {
         const quote = quoteTripFare(deliveryAddress, tripType);
         if (quote) {
           fareRs = quote.amountRs;
-          priceLine = ` Fare: Rs ${quote.amountRs}.${quote.roundTrip ? " Your round trip includes 15 mins of free waiting time." : ""}`;
+          priceLine =
+            paymentMethod === "cash"
+              ? ` Fare: Rs ${quote.amountRs} — please pay your rider in cash after the trip.`
+              : ` Fare: Rs ${quote.amountRs} — please complete the bank transfer and reply with your receipt to lock this in.`;
         } else {
           pricePending = true;
           priceLine = " Fare: dispatch will confirm the exact fare shortly.";
@@ -662,6 +683,12 @@ export async function executeAgentTool(args: {
         deliveryFeeRs = quoteDeliveryFee(pickupAddress, deliveryAddress);
         priceLine = ` Delivery fee: Rs ${deliveryFeeRs}.`;
       }
+      const paymentNote =
+        serviceKind === "trip"
+          ? ""
+          : paymentMethod === "cash"
+            ? " Pay your rider in cash on delivery."
+            : " Complete the transfer and send the receipt to finalize.";
 
       return {
         ok: true,
@@ -676,7 +703,8 @@ export async function executeAgentTool(args: {
         fareRs,
         deliveryFeeRs,
         pricePending,
-        message: `Your ${serviceKind} request for ${scheduledDate} at ${scheduledTime} is confirmed and assigned to rider ${riderName}${riderPhoneStr}! Live Tracking Link: ${trackingUrl}${priceLine}`,
+        paymentMethod,
+        message: `Your ${serviceKind} request for ${scheduledDate} at ${scheduledTime} is confirmed and assigned to rider ${riderName}${riderPhoneStr}! Live Tracking Link: ${trackingUrl}${priceLine}${paymentNote}`,
       };
     }
 
