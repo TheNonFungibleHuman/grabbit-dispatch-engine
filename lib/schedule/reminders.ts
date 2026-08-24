@@ -1,6 +1,12 @@
-import { listAllPreBookings, savePreBooking, parseTimeToMinutes } from "../orders/pre-booking.ts";
+import { listActiveBookingsOnDate, savePreBooking, parseTimeToMinutes } from "../orders/pre-booking.ts";
 import { notifyRiderRideReminder } from "../riders/notify-rider.ts";
 import { formatError, logInfo, logWarn } from "../log.ts";
+import { mauritiusDateIso, mauritiusMinutesOfDay } from "../time.ts";
+
+export function shouldSendRideReminder(scheduledMin: number, nowMinutes: number): boolean {
+  const diff = scheduledMin - nowMinutes;
+  return diff >= 15 && diff <= 30;
+}
 
 /**
  * Checks all active bookings and triggers reminders to riders ~25 minutes before start.
@@ -10,16 +16,12 @@ export async function processUpcomingBookingReminders(): Promise<{
   reminded: string[];
 }> {
   const now = new Date();
-  const todayMauritiusIso = new Date(now.getTime() + 4 * 3600 * 1000).toISOString().slice(0, 10);
-  const mauritiusMinutes = now.getUTCHours() * 60 + now.getUTCMinutes() + 240; // UTC+4
+  const todayMauritiusIso = mauritiusDateIso(now);
+  const mauritiusMinutes = mauritiusMinutesOfDay(now);
 
-  const all = await listAllPreBookings();
-  const active = all.filter((b) => {
-    if (b.status !== "pending_rider" && b.status !== "confirmed") return false;
-    if ((b as any).reminderSent) return false;
-    const bDate = b.scheduledDate || b.createdAt.slice(0, 10);
-    return bDate === todayMauritiusIso;
-  });
+  const active = (await listActiveBookingsOnDate(todayMauritiusIso)).filter(
+    (b) => !b.reminderSent,
+  );
 
   const reminded: string[] = [];
 
@@ -29,15 +31,12 @@ export async function processUpcomingBookingReminders(): Promise<{
     const scheduledMin = parseTimeToMinutes(booking.scheduledTime);
     if (scheduledMin === null) continue;
 
-    const diff = scheduledMin - mauritiusMinutes;
-
-    // Trigger reminder if run is within 15 to 30 minutes (center ~25 min)
-    if (diff >= 15 && diff <= 30) {
+    if (shouldSendRideReminder(scheduledMin, mauritiusMinutes)) {
       logInfo("reminders", "triggering 25-min reminder for rider", {
         bookingId: booking.id,
         rider: booking.assignedRider,
         time: booking.scheduledTime,
-        diffMinutes: diff,
+        diffMinutes: scheduledMin - mauritiusMinutes,
       });
 
       try {
@@ -52,7 +51,7 @@ export async function processUpcomingBookingReminders(): Promise<{
           trackingUrl: booking.trackingUrl,
         });
 
-        (booking as any).reminderSent = true;
+        booking.reminderSent = true;
         booking.updatedAt = new Date().toISOString();
         await savePreBooking(booking);
         reminded.push(booking.id);
@@ -91,6 +90,14 @@ export async function processUpcomingBookingReminders(): Promise<{
     await processWeeklyReportCron();
   } catch (weeklyErr) {
     logWarn("reminders", "weekly report check error", formatError(weeklyErr));
+  }
+
+  // Daily self-healing sweep for booking files missing from the active index
+  try {
+    const { runDailyOrphanSweep } = await import("../orders/orphan-sweep.ts");
+    await runDailyOrphanSweep(now);
+  } catch (sweepErr) {
+    logWarn("reminders", "orphan sweep check error", formatError(sweepErr));
   }
 
   return {

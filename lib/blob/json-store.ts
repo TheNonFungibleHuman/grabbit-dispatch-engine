@@ -116,3 +116,133 @@ export async function readJson<T>(pathname: string): Promise<T | null> {
 
   return null;
 }
+
+export async function readJsonFresh<T>(pathname: string): Promise<T | null> {
+  memoryClear(pathname);
+  return readJson<T>(pathname);
+}
+
+export async function writeJsonCas<T extends object>(
+  pathname: string,
+  nextValue: T,
+  cas: { field: string; equals: unknown; createIfMissing?: boolean },
+): Promise<boolean> {
+  const supabase = getSupabaseClient();
+  if (supabase) {
+    try {
+      const { data, error } = await supabase
+        .from("grabbit_documents")
+        .update({ data: nextValue, updated_at: new Date().toISOString() })
+        .eq("pathname", pathname)
+        .eq(`data->>${cas.field}`, String(cas.equals))
+        .select("pathname");
+
+      if (!error) {
+        if (Array.isArray(data) && data.length > 0) {
+          memorySet(pathname, nextValue);
+          return true;
+        }
+        if (cas.createIfMissing) {
+          const existing = await supabase
+            .from("grabbit_documents")
+            .select("pathname")
+            .eq("pathname", pathname)
+            .maybeSingle();
+          if (!existing.error && !existing.data) {
+            await writeJson(pathname, nextValue);
+            return true;
+          }
+        }
+        memoryClear(pathname);
+        return false;
+      }
+      logWarn("supabase", "writeJsonCas error", { pathname, error: error.message });
+    } catch (err) {
+      logWarn("supabase", "writeJsonCas exception", {
+        pathname,
+        ...formatError(err),
+      });
+    }
+  }
+
+  const usingExternalStore = Boolean(
+    getSupabaseClient() || process.env.BLOB_READ_WRITE_TOKEN?.trim(),
+  );
+  const current = usingExternalStore
+    ? await readJsonFresh<Record<string, unknown>>(pathname)
+    : memoryGet<Record<string, unknown>>(pathname);
+  if (!current) {
+    if (cas.createIfMissing) {
+      await writeJson(pathname, nextValue);
+      return true;
+    }
+    memoryClear(pathname);
+    return false;
+  }
+  if (current[cas.field] !== cas.equals) {
+    memoryClear(pathname);
+    return false;
+  }
+  await writeJson(pathname, nextValue);
+  return true;
+}
+
+export async function deleteJson(pathname: string): Promise<void> {
+  memoryClear(pathname);
+
+  const supabase = getSupabaseClient();
+  if (supabase) {
+    try {
+      await supabase.from("grabbit_documents").delete().eq("pathname", pathname);
+    } catch (err) {
+      logWarn("supabase", "deleteJson failed", {
+        pathname,
+        ...formatError(err),
+      });
+    }
+  }
+
+  if (process.env.BLOB_READ_WRITE_TOKEN?.trim()) {
+    try {
+      const { del } = await import("@vercel/blob");
+      await del(pathname);
+    } catch (err) {
+      logWarn("blob", "deleteJson failed", {
+        pathname,
+        ...formatError(err),
+      });
+    }
+  }
+}
+
+export async function listJsonPaths(prefix: string): Promise<string[]> {
+  const supabase = getSupabaseClient();
+  if (supabase) {
+    try {
+      const { data, error } = await supabase
+        .from("grabbit_documents")
+        .select("pathname")
+        .like("pathname", `${prefix}%`)
+        .limit(10000);
+      if (!error && Array.isArray(data)) {
+        return data.map((row: { pathname: string }) => row.pathname);
+      }
+      if (error) {
+        logWarn("supabase", "listJsonPaths error", { prefix, error: error.message });
+      }
+    } catch (err) {
+      logWarn("supabase", "listJsonPaths exception", { prefix, ...formatError(err) });
+    }
+  }
+
+  if (process.env.BLOB_READ_WRITE_TOKEN?.trim()) {
+    try {
+      const { blobs } = await list({ prefix, limit: 10000 });
+      return blobs.map((b) => b.pathname);
+    } catch (err) {
+      logWarn("blob", "listJsonPaths failed", { prefix, ...formatError(err) });
+    }
+  }
+
+  return Array.from(memory.keys()).filter((key) => key.startsWith(prefix));
+}

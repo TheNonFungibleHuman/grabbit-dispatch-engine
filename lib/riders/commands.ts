@@ -1,8 +1,9 @@
 import { isAuthorizedRiderOrAdmin, type RiderProfile } from "./config.ts";
-import { listAllPreBookings, savePreBooking, type PreBooking } from "../orders/pre-booking.ts";
+import { findLatestActiveBookingForRider, savePreBooking, type PreBooking } from "../orders/pre-booking.ts";
 import { sendCustomerText } from "../wasender/send-tracked.ts";
 import { readJson, writeJson } from "../blob/json-store.ts";
 import { formatError, logInfo, logWarn } from "../log.ts";
+import { mauritiusClockLabel } from "../time.ts";
 
 export interface RiderStatusState {
   breaks: Record<string, { onBreak: boolean; untilIso?: string; untilTimeStr?: string; startedAt: string }>;
@@ -46,16 +47,7 @@ export async function handleRiderCommand(args: {
 
   // 1. Check "Delivered" / "Done" / "Completed"
   if (/^(done|delivered|trip completed|order completed|finished|drop completed|drop done|dropped|completed|run completed)[.!]?$/i.test(text)) {
-    const all = await listAllPreBookings();
-    const riderLower = riderName.toLowerCase();
-
-    // Find rider's most recent active booking
-    const activeBooking = all
-      .filter((b) => {
-        if (!b.assignedRider.toLowerCase().includes(riderLower)) return false;
-        return b.status === "confirmed" || b.status === "pending_rider" || b.status === "dispatched";
-      })
-      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0];
+    const activeBooking = await findLatestActiveBookingForRider(riderName);
 
     if (!activeBooking) {
       return {
@@ -66,6 +58,8 @@ export async function handleRiderCommand(args: {
 
     // Mark completed
     activeBooking.status = "completed";
+    const { recordMetric } = await import("../metrics/recorder.ts");
+    void recordMetric("booking_completed_rider");
     activeBooking.updatedAt = new Date().toISOString();
     await savePreBooking(activeBooking);
 
@@ -104,11 +98,7 @@ export async function handleRiderCommand(args: {
     const minutes = Number(breakMatch[1] || breakMatch[2]) || 15; // default 15 mins
     const now = new Date();
     const until = new Date(now.getTime() + minutes * 60 * 1000);
-    const mauritiusUntilTime = new Date(until.getTime() + 4 * 3600 * 1000).toLocaleTimeString("en-US", {
-      hour: "numeric",
-      minute: "2-digit",
-      hour12: true,
-    });
+    const mauritiusUntilTime = mauritiusClockLabel(until);
 
     const state = (await readJson<RiderStatusState>(RIDER_STATUS_PATH)) || { breaks: {} };
     state.breaks[riderName.toLowerCase()] = {

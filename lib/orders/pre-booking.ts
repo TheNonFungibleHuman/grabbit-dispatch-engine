@@ -1,11 +1,23 @@
-import { readJson, writeJson } from "../blob/json-store.ts";
+import {
+  commitIndex,
+  getIndex,
+  querySummaries,
+  readBookingFile,
+  upsertSingleSummary,
+  withBookingLock,
+  writeBookingFile,
+  type BookingSummary,
+} from "./booking-store.ts";
 import { formatError, logError, logInfo, logWarn } from "../log.ts";
+import { mauritiusDateIso, resolveRelativeDateWord } from "../time.ts";
 import { FLEET_RIDERS, findRiderByName, findRiderByPhone, getCustomTrackingUrl, isAuthorizedRiderOrAdmin, type RiderProfile } from "../riders/config.ts";
 import { notifyRiderForBooking, notifyRiderOfReschedule } from "../riders/notify-rider.ts";
-import { assignDeliveryRider, createDelivery } from "../kilo/client.ts";
-import { sanitizeKiloName } from "../kilo/map-order.ts";
+import { assignDeliveryRider, createDelivery, getDelivery } from "../kilo/client.ts";
+import { mapKiloEventToPreBookingStatus, resolveDefaultCollectionMethod, sanitizeKiloName } from "../kilo/map-order.ts";
 import { sendCustomerText } from "../wasender/send-tracked.ts";
 import type { CreateKiloDeliveryInput, KiloErrandMode, KiloPackageSize, KiloServiceKind } from "../kilo/types.ts";
+
+export const ACTIVE_BOOKING_STATUSES = ["pending_rider", "confirmed", "dispatched"] as const;
 
 export interface PreBooking {
   id: string;
@@ -28,36 +40,82 @@ export interface PreBooking {
   status: "pending_rider" | "confirmed" | "dispatched" | "declined" | "cancelled" | "completed";
   kiloDeliveryId?: string;
   trackingUrl?: string;
+  paymentStatus?: "unpaid" | "paid";
+  reminderSent?: boolean;
   createdAt: string;
   updatedAt: string;
 }
 
-const INDEX_PATH = "grabbit/prebookings/index.json";
-
-function bookingPath(id: string): string {
-  return `grabbit/prebookings/${id}.json`;
-}
-
 export async function listAllPreBookings(): Promise<PreBooking[]> {
-  const index = await readJson<{ ids: string[] }>(INDEX_PATH);
-  if (!index?.ids || !Array.isArray(index.ids)) return [];
-
+  const { summaries } = await getIndex();
   const bookings: PreBooking[] = [];
-  for (const id of index.ids) {
-    const record = await readJson<PreBooking>(bookingPath(id));
+  for (const summary of summaries) {
+    const record = await readBookingFile<PreBooking>(summary.id);
     if (record) bookings.push(record);
   }
   return bookings;
 }
 
 export async function savePreBooking(booking: PreBooking): Promise<void> {
-  await writeJson(bookingPath(booking.id), booking);
-  const index = await readJson<{ ids: string[] }>(INDEX_PATH);
-  const ids = Array.isArray(index?.ids) ? index!.ids : [];
-  if (!ids.includes(booking.id)) {
-    ids.push(booking.id);
-    await writeJson(INDEX_PATH, { ids });
+  booking.updatedAt = new Date().toISOString();
+  await writeBookingFile(booking);
+  await upsertSingleSummary(toSummary(booking));
+}
+
+function toSummary(b: PreBooking): BookingSummary {
+  return {
+    id: b.id,
+    status: b.status,
+    assignedRider: b.assignedRider,
+    scheduledDate: b.scheduledDate,
+    scheduledTime: b.scheduledTime,
+    slotKey: b.slotKey,
+    customerPhone: b.customerPhone,
+    customerName: b.customerName,
+    serviceKind: b.serviceKind,
+    tripType: b.tripType,
+    pickupAddress: b.pickupAddress,
+    deliveryAddress: b.deliveryAddress,
+    kiloDeliveryId: b.kiloDeliveryId,
+    createdAt: b.createdAt,
+    updatedAt: b.updatedAt,
+  };
+}
+
+export async function riderHasActiveBooking(riderName: string): Promise<boolean> {
+  const riderLower = riderName.trim().toLowerCase();
+  return (
+    await querySummaries(
+      (s) =>
+        s.assignedRider.toLowerCase().includes(riderLower) &&
+        isActiveStatus(s.status),
+    )
+  ).length > 0;
+}
+
+export async function findLatestActiveBookingForRider(riderName: string): Promise<PreBooking | null> {
+  const riderLower = riderName.trim().toLowerCase();
+  const matches = await querySummaries(
+    (s) =>
+      s.assignedRider.toLowerCase().includes(riderLower) &&
+      isActiveStatus(s.status),
+  );
+  if (matches.length === 0) return null;
+  matches.sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
+  return readBookingFile<PreBooking>(matches[0].id);
+}
+
+export async function listActiveBookingsOnDate(dateIso: string): Promise<PreBooking[]> {
+  const summaries = await querySummaries((s) => isActiveStatus(s.status));
+  const matching = summaries.filter(
+    (s) => s.scheduledDate === dateIso || (s.slotKey ?? "").startsWith(dateIso),
+  );
+  const records: PreBooking[] = [];
+  for (const s of matching) {
+    const record = await readBookingFile<PreBooking>(s.id);
+    if (record) records.push(record);
   }
+  return records;
 }
 
 /**
@@ -105,7 +163,7 @@ export async function syncBookingToKiloIfMissing(booking: PreBooking): Promise<P
       packageDescription: booking.packageDescription || `${booking.serviceKind.toUpperCase()} booking for ${booking.scheduledTime}`,
       packageSize: booking.packageSize || "small",
       packageImages: booking.packageImages || [],
-      customerCollectionMethod: booking.serviceKind === "trip" ? "cash_on_delivery" : "online_checkout",
+      customerCollectionMethod: resolveDefaultCollectionMethod(booking.serviceKind),
       idempotencyKey: `kilo_${booking.id}_sync`,
     });
 
@@ -173,82 +231,32 @@ export const MAX_TOTAL_PER_HOUR = 3;
 
 export interface CheckSlotResult {
   available: boolean;
-  conflictingBooking?: PreBooking;
+  conflictingBooking?: PreBooking | BookingSummary | SlotCandidate;
   reason?: "gap_violation" | "trip_limit" | "slot_capacity";
   suggestedTime?: string;
 }
 
-export function isCompatibleRouteBatch(
-  b1: { serviceKind?: string; tripType?: string; pickupAddress?: string; deliveryAddress?: string },
-  b2: { serviceKind?: string; tripType?: string; pickupAddress?: string; deliveryAddress?: string },
-): boolean {
-  // Round trips can NEVER be batched due to waiting time and round-trip passenger exclusivity
-  if (b1.tripType === "round_trip" || b2.tripType === "round_trip") {
-    return false;
-  }
-
-  const p1 = (b1.pickupAddress || "").toLowerCase();
-  const d1 = (b1.deliveryAddress || "").toLowerCase();
-  const p2 = (b2.pickupAddress || "").toLowerCase();
-  const d2 = (b2.deliveryAddress || "").toLowerCase();
-
-  // If both are package/food deliveries/errands, batch if pickup or dropoff zones match
-  const bothDeliveries = b1.serviceKind !== "trip" && b2.serviceKind !== "trip";
-  if (bothDeliveries) {
-    const samePickup = (p1.includes("alche") && p2.includes("alche")) || (p1.includes("mahogany") && p2.includes("mahogany"));
-    const sameDrop = (d1.includes("alche") && d2.includes("alche")) || (d1.includes("mahogany") && d2.includes("mahogany"));
-    return Boolean(samePickup || sameDrop);
-  }
-
-  // If one is a one-way passenger trip and one is a delivery in the exact same corridor
-  const isAlcheToMahogany1 = p1.includes("alche") && (d1.includes("mahogany") || d1.includes("grand baie"));
-  const isAlcheToMahogany2 = p2.includes("alche") && (d2.includes("mahogany") || d2.includes("grand baie"));
-  if (isAlcheToMahogany1 && isAlcheToMahogany2) return true;
-
-  const isMahoganyToAlche1 = p1.includes("mahogany") && d1.includes("alche");
-  const isMahoganyToAlche2 = p2.includes("mahogany") && d2.includes("alche");
-  if (isMahoganyToAlche1 && isMahoganyToAlche2) return true;
-
-  return false;
-}
-
-/**
- * Checks if a rider's hour window has available capacity & enforces trip buffers.
- * Capacity rule per hour:
- * - Up to 3 deliveries and 1 trip per hour.
- * - If there are zero deliveries in that hour, up to 3 passenger trips can be booked.
- * - Maximum total bookings per hour = 3.
- * - Minimum gap between bookings for the same rider = 15 minutes (one-way / deliveries), 30 minutes (round-trips),
- *   unless bookings are along the same route corridor (Smart Route Batching).
- */
-export async function checkSlotAvailability(args: {
-  slotKey: string;
-  assignedRider: string;
-  customerPhone?: string;
-  serviceKind?: string;
-  tripType?: "one_way" | "round_trip";
-  pickupAddress?: string;
-  deliveryAddress?: string;
-  scheduledTime?: string;
-  scheduledDate?: string;
-}): Promise<CheckSlotResult> {
-  const all = await listAllPreBookings();
-  const riderNormalized = args.assignedRider.trim().toLowerCase();
-
-  // Find all active bookings for this rider
-  const allRiderActiveBookings = all.filter(
-    (b) =>
-      b.assignedRider.toLowerCase().includes(riderNormalized) &&
-      (b.status === "pending_rider" || b.status === "confirmed" || b.status === "dispatched"),
-  );
-
+export function evaluateSlotRules(
+  riderActiveCandidates: SlotCandidate[],
+  args: {
+    slotKey: string;
+    assignedRider: string;
+    customerPhone?: string;
+    serviceKind?: string;
+    tripType?: "one_way" | "round_trip";
+    pickupAddress?: string;
+    deliveryAddress?: string;
+    scheduledTime?: string;
+    scheduledDate?: string;
+  },
+): CheckSlotResult {
   const targetMin = args.scheduledTime ? parseTimeToMinutes(args.scheduledTime) : null;
   const targetDate = args.scheduledDate || "";
 
   // 1. Strict gap buffer per rider on the same date/slot (30 mins if round-trip, 15 mins for one-way)
   if (targetMin !== null) {
     const isNewRoundTrip = args.tripType === "round_trip";
-    for (const b of allRiderActiveBookings) {
+    for (const b of riderActiveCandidates) {
       const isSameDay = !targetDate || !b.scheduledDate || b.scheduledDate === targetDate || b.slotKey === args.slotKey;
       if (isSameDay) {
         const existingMin = parseTimeToMinutes(b.scheduledTime);
@@ -282,7 +290,7 @@ export async function checkSlotAvailability(args: {
     const hourStart = Math.floor(targetMin / 60) * 60;
     const hourEnd = hourStart + 60;
 
-    const bookingsInHour = allRiderActiveBookings.filter((b) => {
+    const bookingsInHour = riderActiveCandidates.filter((b) => {
       const isSameDay = !targetDate || !b.scheduledDate || b.scheduledDate === targetDate || b.slotKey === args.slotKey;
       if (!isSameDay) return false;
       const bMin = parseTimeToMinutes(b.scheduledTime);
@@ -338,44 +346,168 @@ export async function checkSlotAvailability(args: {
   return { available: true };
 }
 
+/**
+ * Checks if a rider's hour window has available capacity & enforces trip buffers.
+ * Capacity rule per hour:
+ * - Up to 3 deliveries and 1 trip per hour.
+ * - If there are zero deliveries in that hour, up to 3 passenger trips can be booked.
+ * - Maximum total bookings per hour = 3.
+ * - Minimum gap between bookings for the same rider = 15 minutes (one-way / deliveries), 30 minutes (round-trips),
+ *   unless bookings are along the same route corridor (Smart Route Batching).
+ */
+export async function checkSlotAvailability(args: {
+  slotKey: string;
+  assignedRider: string;
+  customerPhone?: string;
+  serviceKind?: string;
+  tripType?: "one_way" | "round_trip";
+  pickupAddress?: string;
+  deliveryAddress?: string;
+  scheduledTime?: string;
+  scheduledDate?: string;
+}): Promise<CheckSlotResult> {
+  const riderNormalized = args.assignedRider.trim().toLowerCase();
+  const candidates = await querySummaries(
+    (s) =>
+      s.assignedRider.toLowerCase().includes(riderNormalized) &&
+      isActiveStatus(s.status),
+  );
+
+  return evaluateSlotRules(candidates, args);
+}
+
+export interface SlotCandidate {
+  id: string;
+  status: string;
+  assignedRider: string;
+  scheduledDate: string;
+  scheduledTime: string;
+  slotKey?: string;
+  serviceKind: string;
+  tripType?: string;
+  pickupAddress?: string;
+  deliveryAddress?: string;
+}
+
+export function isActiveStatus(status: string): boolean {
+  return (ACTIVE_BOOKING_STATUSES as readonly string[]).includes(status);
+}
+
+export function isCompatibleRouteBatch(
+  b1: { serviceKind?: string; tripType?: string; pickupAddress?: string; deliveryAddress?: string },
+  b2: { serviceKind?: string; tripType?: string; pickupAddress?: string; deliveryAddress?: string },
+): boolean {
+  // Round trips can NEVER be batched due to waiting time and round-trip passenger exclusivity
+  if (b1.tripType === "round_trip" || b2.tripType === "round_trip") {
+    return false;
+  }
+
+  const p1 = (b1.pickupAddress || "").toLowerCase();
+  const d1 = (b1.deliveryAddress || "").toLowerCase();
+  const p2 = (b2.pickupAddress || "").toLowerCase();
+  const d2 = (b2.deliveryAddress || "").toLowerCase();
+
+  // If both are package/food deliveries/errands, batch if pickup or dropoff zones match
+  const bothDeliveries = b1.serviceKind !== "trip" && b2.serviceKind !== "trip";
+  if (bothDeliveries) {
+    const samePickup = (p1.includes("alche") && p2.includes("alche")) || (p1.includes("mahogany") && p2.includes("mahogany"));
+    const sameDrop = (d1.includes("alche") && d2.includes("alche")) || (d1.includes("mahogany") && d2.includes("mahogany"));
+    return Boolean(samePickup || sameDrop);
+  }
+
+  // If one is a one-way passenger trip and one is a delivery in the exact same corridor
+  const isAlcheToMahogany1 = p1.includes("alche") && (d1.includes("mahogany") || d1.includes("grand baie"));
+  const isAlcheToMahogany2 = p2.includes("alche") && (d2.includes("mahogany") || d2.includes("grand baie"));
+  if (isAlcheToMahogany1 && isAlcheToMahogany2) return true;
+
+  const isMahoganyToAlche1 = p1.includes("mahogany") && d1.includes("alche");
+  const isMahoganyToAlche2 = p2.includes("mahogany") && d2.includes("alche");
+  if (isMahoganyToAlche1 && isMahoganyToAlche2) return true;
+
+  return false;
+}
+
+/**
+ * Checks if a rider's hour window has available capacity & enforces trip buffers.
+ * Capacity rule per hour:
+ * - Up to 3 deliveries and 1 trip per hour.
+ * - If there are zero deliveries in that hour, up to 3 passenger trips can be booked.
+ * - Maximum total bookings per hour = 3.
+ * - Minimum gap between bookings for the same rider = 15 minutes (one-way / deliveries), 30 minutes (round-trips),
+ *   unless bookings are along the same route corridor (Smart Route Batching).
+ */
 export async function cancelPreBooking(id: string): Promise<boolean> {
-  const all = await listAllPreBookings();
-  const found = all.find((b) => b.id === id);
+  const found = await readBookingFile<PreBooking>(id);
   if (!found) return false;
   found.status = "cancelled";
   await savePreBooking(found);
   return true;
 }
 
+const STATUS_RANK: Record<PreBooking["status"], number> = {
+  pending_rider: 0,
+  confirmed: 1,
+  dispatched: 2,
+  completed: 3,
+  cancelled: 3,
+  declined: 3,
+};
+
+export async function applyKiloDeliveryStatus(
+  kiloDeliveryId: string,
+  kiloStatus?: string | null,
+): Promise<PreBooking | null> {
+  if (!kiloDeliveryId) return null;
+  const target = mapKiloEventToPreBookingStatus(kiloStatus);
+  if (!target) return null;
+
+  const summary = (
+    await querySummaries((s) => s.kiloDeliveryId === kiloDeliveryId, { bypassCache: true })
+  )[0];
+  if (!summary) return null;
+
+  const booking = await readBookingFile<PreBooking>(summary.id);
+  if (!booking || booking.kiloDeliveryId !== kiloDeliveryId) return null;
+  if (booking.status === "cancelled" || booking.status === "declined") return null;
+
+  if (target === "cancelled") {
+    if (booking.status === "completed") return null;
+  } else if (STATUS_RANK[target] <= STATUS_RANK[booking.status]) {
+    return null;
+  }
+
+  booking.status = target;
+  await savePreBooking(booking);
+  if (target === "completed") {
+    const { recordMetric } = await import("../metrics/recorder.ts");
+    void recordMetric("booking_completed_kilo");
+  }
+  logInfo("prebooking", "synced Kilo delivery status into pre-booking", {
+    bookingId: booking.id,
+    kiloDeliveryId,
+    status: target,
+  });
+  return booking;
+}
+
 export async function clearAllPreBookings(): Promise<void> {
-  await writeJson(INDEX_PATH, { ids: [] });
+  await commitIndex([], (await getIndex()).revision);
 }
 
 export function resolveIsoDate(dateStr?: string): string {
-  if (!dateStr || dateStr.toLowerCase() === "today") {
-    try {
-      return new Intl.DateTimeFormat("en-CA", { timeZone: "Indian/Mauritius" }).format(new Date());
-    } catch {
-      return new Date().toISOString().slice(0, 10);
-    }
-  }
-  if (dateStr.toLowerCase() === "tomorrow") {
-    try {
-      const now = new Date();
-      now.setDate(now.getDate() + 1);
-      return new Intl.DateTimeFormat("en-CA", { timeZone: "Indian/Mauritius" }).format(now);
-    } catch {
-      const now = new Date();
-      now.setDate(now.getDate() + 1);
-      return now.toISOString().slice(0, 10);
-    }
-  }
+  if (!dateStr) return mauritiusDateIso();
+  const relative = resolveRelativeDateWord(dateStr);
+  if (relative) return relative;
   return dateStr;
 }
 
 /**
  * Reschedules an existing active pre-booking for a customer to a new time or date.
  */
+function toKiloServiceKind(value?: string): KiloServiceKind {
+  return value === "pickup_delivery" ? "pickup_delivery" : "errand";
+}
+
 export async function reschedulePreBookingRequest(args: {
   customerPhone: string;
   newScheduledDate?: string;
@@ -389,17 +521,20 @@ export async function reschedulePreBookingRequest(args: {
   error?: string;
   trackingUrl?: string;
 }> {
-  const all = await listAllPreBookings();
   const phoneClean = args.customerPhone.replace(/\D/g, "");
 
-  // Find customer's latest active booking
-  const activeBooking = all
-    .filter(
-      (b) =>
-        b.customerPhone.replace(/\D/g, "") === phoneClean &&
-        (b.status === "pending_rider" || b.status === "confirmed" || b.status === "dispatched"),
-    )
-    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0];
+  const activeSummaries = (
+    await querySummaries((s) => isActiveStatus(s.status) && s.customerPhone.replace(/\D/g, "") === phoneClean)
+  ).sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
+
+  let activeBooking: PreBooking | null = null;
+  for (const s of activeSummaries) {
+    const record = await readBookingFile<PreBooking>(s.id);
+    if (record) {
+      activeBooking = record;
+      break;
+    }
+  }
 
   if (!activeBooking) {
     return {
@@ -508,29 +643,35 @@ export async function createPreBookingRequest(args: {
   const targetIsoDate = resolveIsoDate(args.scheduledDate);
 
   // 0. Idempotency Check: prevent duplicate bookings for same customer within 2 minutes
-  const allExisting = await listAllPreBookings();
-  const recentDuplicate = allExisting.find((b) => {
-    if (b.customerPhone !== args.customerPhone || b.status === "cancelled" || b.status === "declined") {
-      return false;
-    }
-    const isSameDate = b.scheduledDate === targetIsoDate;
-    const timeDiffMs = Date.now() - new Date(b.createdAt).getTime();
-    return isSameDate && timeDiffMs < 120_000 && (b.status === "confirmed" || b.status === "pending_rider");
-  });
+  const activeStatuses = ACTIVE_BOOKING_STATUSES;
+  const recentDuplicateSummary = (
+    await querySummaries(
+      (s) =>
+        s.customerPhone === args.customerPhone &&
+        s.status !== "cancelled" &&
+        s.status !== "declined" &&
+        s.scheduledDate === targetIsoDate &&
+        Date.now() - Date.parse(s.createdAt) < 120_000 &&
+        activeStatuses.includes(s.status as (typeof activeStatuses)[number]),
+    )
+  )[0];
 
-  if (recentDuplicate) {
-    logInfo("prebooking", "prevented duplicate booking via recent idempotency lock", {
-      customerPhone: args.customerPhone,
-      existingBookingId: recentDuplicate.id,
-      scheduledTime: recentDuplicate.scheduledTime,
-    });
-    return {
-      ok: true,
-      booking: recentDuplicate,
-      trackingUrl: recentDuplicate.trackingUrl,
-      kiloDeliveryId: recentDuplicate.kiloDeliveryId,
-      assignedRider: recentDuplicate.assignedRider,
-    };
+  if (recentDuplicateSummary) {
+    const recentDuplicate = await readBookingFile<PreBooking>(recentDuplicateSummary.id);
+    if (recentDuplicate) {
+      logInfo("prebooking", "prevented duplicate booking via recent idempotency lock", {
+        customerPhone: args.customerPhone,
+        existingBookingId: recentDuplicate.id,
+        scheduledTime: recentDuplicate.scheduledTime,
+      });
+      return {
+        ok: true,
+        booking: recentDuplicate,
+        trackingUrl: recentDuplicate.trackingUrl,
+        kiloDeliveryId: recentDuplicate.kiloDeliveryId,
+        assignedRider: recentDuplicate.assignedRider,
+      };
+    }
   }
 
   // 1. Anti-Double-Booking & Gap Check
@@ -573,7 +714,7 @@ export async function createPreBookingRequest(args: {
   const actualRider = findRiderByName(args.assignedRider) || FLEET_RIDERS[0];
   const hasPhotos = Boolean(args.packageImages && args.packageImages.length > 0);
   const isTripOrErrand = args.serviceKind === "trip" || args.serviceKind === "errand" || !hasPhotos;
-  const kiloServiceKind: KiloServiceKind = isTripOrErrand ? "errand" : (args.serviceKind as any);
+  const kiloServiceKind: KiloServiceKind = isTripOrErrand ? "errand" : toKiloServiceKind(args.serviceKind);
   const kiloErrandMode: KiloErrandMode | undefined = kiloServiceKind === "errand" ? "at_place" : undefined;
 
   let kiloDeliveryId: string | undefined;
@@ -595,7 +736,7 @@ export async function createPreBookingRequest(args: {
       packageDescription: args.packageDescription || `${args.serviceKind.toUpperCase()} booking for ${args.scheduledTime}`,
       packageSize: args.packageSize || "small",
       packageImages: hasPhotos ? args.packageImages! : [],
-      customerCollectionMethod: args.serviceKind === "trip" ? "cash_on_delivery" : "online_checkout",
+      customerCollectionMethod: resolveDefaultCollectionMethod(args.serviceKind),
       idempotencyKey: `kilo_${bookingId}`,
     };
 
@@ -644,9 +785,60 @@ export async function createPreBookingRequest(args: {
     updatedAt: new Date().toISOString(),
   };
 
-  await savePreBooking(booking);
+  let persistRejected: string | null = null;
+  const persisted = await withBookingLock("index", async () => {
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const { revision, summaries } = await getIndex({ bypassCache: attempt > 0 });
+      const riderNormalized = booking.assignedRider.trim().toLowerCase();
+      const riderCandidates = summaries.filter(
+        (s) =>
+          s.id !== booking.id &&
+          s.assignedRider.toLowerCase().includes(riderNormalized) &&
+          isActiveStatus(s.status),
+      );
+      const recheck = evaluateSlotRules(riderCandidates, {
+        slotKey: booking.slotKey,
+        assignedRider: booking.assignedRider,
+        serviceKind: booking.serviceKind,
+        tripType: booking.tripType,
+        pickupAddress: booking.pickupAddress,
+        deliveryAddress: booking.deliveryAddress,
+        scheduledTime: booking.scheduledTime,
+        scheduledDate: booking.scheduledDate,
+      });
 
-  // Clear customer's active order draft & update customer profile memory
+      if (!recheck.available) {
+        if (recheck.reason === "gap_violation" && recheck.conflictingBooking) {
+          const requiredGap = (booking.tripType === "round_trip" || recheck.conflictingBooking.tripType === "round_trip") ? "30-minute" : "15-minute";
+          persistRejected = `Rider ${booking.assignedRider} already has a booking at ${recheck.conflictingBooking.scheduledTime}. Grabbit requires at least a ${requiredGap} gap for this booking.`;
+        } else if (recheck.reason === "trip_limit") {
+          persistRejected = `Rider ${booking.assignedRider} already has a passenger trip in this slot. Only 1 trip per slot is permitted.`;
+        } else {
+          persistRejected = `Rider ${booking.assignedRider} just reached maximum capacity for this slot.`;
+        }
+        return false;
+      }
+
+      await writeBookingFile(booking);
+      if (await commitIndex([...summaries, toSummary(booking)], revision)) {
+        return true;
+      }
+    }
+    return false;
+  });
+
+  if (!persisted) {
+    logWarn("prebooking", "persist rejected by concurrent-write guard", {
+      customerPhone: args.customerPhone,
+      slotKey: args.slotKey,
+      reason: persistRejected ?? "revision_conflict",
+    });
+    return {
+      ok: false,
+      doubleBooked: true,
+      error: persistRejected ?? "That slot was just booked by another request. Please pick another time slot.",
+    };
+  }
   try {
     const { clearOrderDraft, updateCustomerProfile } = await import("./store.ts");
     await clearOrderDraft(args.customerPhone);
@@ -656,6 +848,7 @@ export async function createPreBookingRequest(args: {
       lastDeliveryAddress: args.deliveryAddress,
       preferredPaymentMethod: args.serviceKind === "trip" ? "cash" : "juice",
       tripCount: 1,
+      lastBookingAt: new Date().toISOString(),
     });
   } catch (draftErr) {
     logWarn("prebooking", "draft reset or profile update failed after booking", formatError(draftErr));
@@ -696,6 +889,45 @@ export async function createPreBookingRequest(args: {
 /**
  * Handles incoming WhatsApp message from a rider (e.g. YES / NO).
  */
+export type RiderReplyDecision = "accept" | "decline";
+
+export function classifyRiderAcceptDecline(text: string): RiderReplyDecision | null {
+  const cleanText = text.trim().toLowerCase().replace(/[^a-z0-9 ]/g, "");
+  if (!cleanText) return null;
+
+  if (["yes", "y", "ok", "okay", "confirm", "confirmed", "accept", "accepted"].includes(cleanText)) {
+    return "accept";
+  }
+  if (["no", "n", "decline", "declined", "reject", "rejected"].includes(cleanText)) {
+    return "decline";
+  }
+  return null;
+}
+
+const APPROVAL_INTENT_KEYWORDS = [
+  "google",
+  "chat",
+  "post",
+  "report",
+  "summary",
+  "rundown",
+  "broadcast",
+  "customers",
+];
+
+export function shouldInterceptRiderDecision(args: {
+  text: string;
+  hasActiveBooking: boolean;
+}): boolean {
+  if (!args.hasActiveBooking) return false;
+  if (!classifyRiderAcceptDecline(args.text)) return false;
+  const haystack = args.text.toLowerCase();
+  if (APPROVAL_INTENT_KEYWORDS.some((keyword) => haystack.includes(keyword))) {
+    return false;
+  }
+  return true;
+}
+
 export async function handleRiderReply(args: {
   senderPhone: string;
   text: string;
@@ -736,14 +968,24 @@ export async function handleRiderReply(args: {
       args.senderPhone.replace(/\D/g, "") === process.env.TEST_RIDER_PHONE.replace(/\D/g, ""),
   );
 
-  const all = await listAllPreBookings();
-  const pending = all
-    .filter(
-      (b) =>
-        (b.status === "pending_rider" || b.status === "confirmed") &&
-        (isTestMode || b.assignedRider.toLowerCase().includes(rider.name.toLowerCase())),
+  const pendingSummaries = (
+    await querySummaries(
+      (s) =>
+        (s.status === "pending_rider" || s.status === "confirmed") &&
+        (isTestMode || s.assignedRider.toLowerCase().includes(rider.name.toLowerCase())),
     )
-    .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))[0];
+  ).sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
+
+  let pendingRecord: PreBooking | null = null;
+  for (const s of pendingSummaries) {
+    const record = await readBookingFile<PreBooking>(s.id);
+    if (record) {
+      pendingRecord = record;
+      break;
+    }
+  }
+
+  const pending = pendingRecord;
 
   const actualRider = (pending ? findRiderByName(pending.assignedRider) : null) || rider;
 
@@ -824,57 +1066,78 @@ export async function handleRiderReply(args: {
     };
   }
 
-  // Rider accepted: Dispatch on Kilo Fleet & send tracking link!
-  logInfo("prebooking", "rider accepted booking, creating Kilo delivery", {
+  // Rider accepted: ensure the run is live on Kilo Fleet & send tracking link!
+  logInfo("prebooking", "rider accepted booking", {
     bookingId: pending.id,
     rider: actualRider.name,
+    existingKiloDeliveryId: pending.kiloDeliveryId || "none",
   });
 
   try {
-    const hasPhotos = Boolean(pending.packageImages && pending.packageImages.length > 0);
-    // For food orders, errands, or passenger trips without package photos, use errand with at_place mode
-    const isTripOrErrand = pending.serviceKind === "trip" || pending.serviceKind === "errand" || !hasPhotos;
-    const serviceKind: KiloServiceKind = isTripOrErrand ? "errand" : (pending.serviceKind as any);
-    const errandMode: KiloErrandMode | undefined = serviceKind === "errand" ? "at_place" : undefined;
+    let deliveryId = pending.kiloDeliveryId;
+    let trackingUrl = pending.trackingUrl;
 
-    const kiloPayload: CreateKiloDeliveryInput = {
-      serviceKind,
-      errandMode,
-      deliveryMode: "pickup",
-      senderName: pending.customerName || "Customer",
-      senderPhone: pending.customerPhone,
-      receiverName: pending.customerName || "Customer",
-      receiverPhone: pending.customerPhone,
-      pickupAddress: pending.pickupAddress,
-      pickupCoords: pending.pickupCoords || { lat: -20.1024, lng: 57.5621 },
-      deliveryAddress: pending.deliveryAddress,
-      deliveryCoords: pending.deliveryCoords || { lat: -20.1026, lng: 57.5620 },
-      packageDescription: pending.packageDescription || `${pending.serviceKind.toUpperCase()} booking for ${pending.scheduledTime}`,
-      packageSize: pending.packageSize || "small",
-      packageImages: hasPhotos ? pending.packageImages! : [],
-      customerCollectionMethod: "cash_on_delivery",
-      idempotencyKey: `kilo_${pending.id}`,
-    };
+    if (deliveryId) {
+      if (actualRider.kiloRiderId) {
+        try {
+          await assignDeliveryRider(deliveryId, actualRider.kiloRiderId);
+          logInfo("prebooking", "re-assigned rider on existing Kilo delivery", {
+            deliveryId,
+            riderId: actualRider.kiloRiderId,
+          });
+        } catch (assignErr) {
+          logWarn("prebooking", "kilo re-assign warning", formatError(assignErr));
+        }
+      }
+      if (!trackingUrl) {
+        const existing = await getDelivery(deliveryId);
+        trackingUrl = getCustomTrackingUrl(existing.id, existing.access_code);
+      }
+    } else {
+      const hasPhotos = Boolean(pending.packageImages && pending.packageImages.length > 0);
+      // For food orders, errands, or passenger trips without package photos, use errand with at_place mode
+      const isTripOrErrand = pending.serviceKind === "trip" || pending.serviceKind === "errand" || !hasPhotos;
+      const serviceKind: KiloServiceKind = isTripOrErrand ? "errand" : toKiloServiceKind(pending.serviceKind);
+      const errandMode: KiloErrandMode | undefined = serviceKind === "errand" ? "at_place" : undefined;
 
-    const kiloRes = await createDelivery(kiloPayload);
-    const delivery = kiloRes.delivery;
+      const kiloPayload: CreateKiloDeliveryInput = {
+        serviceKind,
+        errandMode,
+        deliveryMode: "pickup",
+        senderName: pending.customerName || "Customer",
+        senderPhone: pending.customerPhone,
+        receiverName: pending.customerName || "Customer",
+        receiverPhone: pending.customerPhone,
+        pickupAddress: pending.pickupAddress,
+        pickupCoords: pending.pickupCoords || { lat: -20.1024, lng: 57.5621 },
+        deliveryAddress: pending.deliveryAddress,
+        deliveryCoords: pending.deliveryCoords || { lat: -20.1026, lng: 57.5620 },
+        packageDescription: pending.packageDescription || `${pending.serviceKind.toUpperCase()} booking for ${pending.scheduledTime}`,
+        packageSize: pending.packageSize || "small",
+        packageImages: hasPhotos ? pending.packageImages! : [],
+        customerCollectionMethod: resolveDefaultCollectionMethod(pending.serviceKind),
+        idempotencyKey: `kilo_${pending.id}`,
+      };
 
-    // Assign rider in Kilo
-    if (actualRider.kiloRiderId) {
-      try {
-        await assignDeliveryRider(delivery.id, actualRider.kiloRiderId);
-        logInfo("prebooking", "assigned rider in Kilo", {
-          deliveryId: delivery.id,
-          riderId: actualRider.kiloRiderId,
-        });
-      } catch (assignErr) {
-        logWarn("prebooking", "kilo assign warning", formatError(assignErr));
+      const kiloRes = await createDelivery(kiloPayload);
+      deliveryId = kiloRes.delivery.id;
+      trackingUrl = getCustomTrackingUrl(kiloRes.delivery.id, kiloRes.delivery.access_code);
+
+      if (actualRider.kiloRiderId) {
+        try {
+          await assignDeliveryRider(deliveryId, actualRider.kiloRiderId);
+          logInfo("prebooking", "assigned rider in Kilo", {
+            deliveryId,
+            riderId: actualRider.kiloRiderId,
+          });
+        } catch (assignErr) {
+          logWarn("prebooking", "kilo assign warning", formatError(assignErr));
+        }
       }
     }
 
-    const trackingUrl = getCustomTrackingUrl(delivery.id, delivery.access_code);
     pending.status = "confirmed";
-    pending.kiloDeliveryId = delivery.id;
+    pending.kiloDeliveryId = deliveryId;
     pending.trackingUrl = trackingUrl;
     pending.updatedAt = new Date().toISOString();
     await savePreBooking(pending);
@@ -967,28 +1230,29 @@ export async function getRiderAssignedBookings(args: {
     };
   }
 
-  const all = await listAllPreBookings();
   const targetRider = auth.isAdmin
     ? args.targetRiderName?.trim() || null
     : auth.rider?.name;
 
   // Filter active bookings
-  const activeBookings = all.filter((b) => {
-    if (b.status === "cancelled" || b.status === "declined") return false;
-    if (targetRider && !b.assignedRider.toLowerCase().includes(targetRider.toLowerCase())) {
-      return false;
+  const candidateSummaries = await querySummaries((s) => s.status !== "cancelled" && s.status !== "declined");
+  const activeBookings: PreBooking[] = [];
+  for (const s of candidateSummaries) {
+    if (targetRider && !s.assignedRider.toLowerCase().includes(targetRider.toLowerCase())) {
+      continue;
     }
     if (args.targetDate && args.targetDate.toLowerCase() !== "all") {
       const targetIso = resolveIsoDate(args.targetDate);
-      return (
-        b.scheduledDate === targetIso ||
-        b.slotKey.startsWith(targetIso) ||
-        b.scheduledDate.toLowerCase().includes(args.targetDate.toLowerCase()) ||
-        b.slotKey.includes(args.targetDate)
-      );
+      const matchesDate =
+        s.scheduledDate === targetIso ||
+        (s.slotKey ?? "").startsWith(targetIso) ||
+        s.scheduledDate.toLowerCase().includes(args.targetDate.toLowerCase()) ||
+        (s.slotKey ?? "").includes(args.targetDate);
+      if (!matchesDate) continue;
     }
-    return true;
-  });
+    const record = await readBookingFile<PreBooking>(s.id);
+    if (record) activeBookings.push(record);
+  }
 
   return {
     ok: true,

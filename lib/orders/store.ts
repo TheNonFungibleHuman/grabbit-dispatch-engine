@@ -97,6 +97,7 @@ export interface CustomerProfile {
   lastDeliveryAddress?: string;
   preferredPaymentMethod?: "cash" | "juice" | "transfer";
   tripCount: number;
+  lastBookingAt?: string;
   updatedAt: string;
 }
 

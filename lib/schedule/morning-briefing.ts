@@ -1,9 +1,10 @@
 import { getAvailabilitySnapshot } from "./availability.ts";
-import { listAllPreBookings } from "../orders/pre-booking.ts";
+import { listActiveBookingsOnDate } from "../orders/pre-booking.ts";
 import { FLEET_RIDERS } from "../riders/config.ts";
 import { sendCustomerText } from "../wasender/send-tracked.ts";
 import { readJson, writeJson } from "../blob/json-store.ts";
 import { formatError, logInfo, logWarn } from "../log.ts";
+import { mauritiusDateIso } from "../time.ts";
 
 export interface MorningBriefingState {
   lastSentDateIso?: string;
@@ -33,7 +34,7 @@ export async function generateMorningRiderBriefing(
 ): Promise<RiderDaySchedule | null> {
   const snapshot = await getAvailabilitySnapshot(now);
   const weekday = snapshot.weekday;
-  const todayMauritiusIso = new Date(now.getTime() + 4 * 3600 * 1000).toISOString().slice(0, 10);
+  const todayMauritiusIso = mauritiusDateIso(now);
 
   // Find all slots where rider is on duty
   const todaySlotInfo = snapshot.upcomingDays.find((d) => d.daysAhead === 0);
@@ -48,21 +49,14 @@ export async function generateMorningRiderBriefing(
     return null; // Rider not scheduled on duty today
   }
 
-  // Find assigned bookings for today
-  const allBookings = await listAllPreBookings();
-  const assigned = allBookings.filter((b) => {
-    if (!b.assignedRider.toLowerCase().includes(riderLower)) return false;
-    if (b.status !== "confirmed" && b.status !== "pending_rider") return false;
-    const bDate = b.scheduledDate || b.createdAt.slice(0, 10);
-    return bDate === todayMauritiusIso;
-  });
-
-  const assignedBookings = assigned.map((b) => ({
-    time: b.scheduledTime || "Scheduled",
-    route: `${b.pickupAddress} → ${b.deliveryAddress}`,
-    customer: b.customerName,
-    serviceKind: b.serviceKind === "trip" ? "Passenger Ride" : "Delivery",
-  }));
+  const assignedBookings = (await listActiveBookingsOnDate(todayMauritiusIso))
+    .filter((b) => b.assignedRider.toLowerCase().includes(riderLower))
+    .map((b) => ({
+      time: b.scheduledTime || "Scheduled",
+      route: `${b.pickupAddress} → ${b.deliveryAddress}`,
+      customer: b.customerName,
+      serviceKind: b.serviceKind === "trip" ? "Passenger Ride" : "Delivery",
+    }));
 
   const lines = [
     `Good morning ${riderName}! ☀️ Here is your Grabbit shift briefing for today (${weekday}, ${todayMauritiusIso}):`,
@@ -93,7 +87,7 @@ export async function sendDailyMorningBriefings(now = new Date()): Promise<{
   sentCount: number;
   results: Record<string, boolean>;
 }> {
-  const todayMauritiusIso = new Date(now.getTime() + 4 * 3600 * 1000).toISOString().slice(0, 10);
+  const todayMauritiusIso = mauritiusDateIso(now);
   const results: Record<string, boolean> = {};
 
   const state = (await readJson<MorningBriefingState>(BRIEFING_STATE_PATH)) || {
