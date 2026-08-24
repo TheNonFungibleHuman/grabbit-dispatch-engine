@@ -1,20 +1,26 @@
 import { recordOpsEvent } from "../ops/store.ts";
 import { sendTextMessage, type WasenderSendResult } from "./client.ts";
+import {
+  isKnownOutboundAiId,
+  registerOutboundAiId,
+} from "./message-id-store.ts";
 
-const OUTBOUND_AI_MESSAGE_IDS = new Set<string>();
-
-export function registerOutboundAiMessage(id?: string): void {
-  if (!id) return;
-  OUTBOUND_AI_MESSAGE_IDS.add(id);
-  if (OUTBOUND_AI_MESSAGE_IDS.size > 5000) {
-    const oldest = OUTBOUND_AI_MESSAGE_IDS.values().next().value;
-    if (oldest) OUTBOUND_AI_MESSAGE_IDS.delete(oldest);
+async function noteSendMetrics(ok: boolean): Promise<void> {
+  try {
+    const { recordMetric, noteOutboundResult } = await import("../metrics/recorder.ts");
+    void recordMetric(ok ? "outbound_sent" : "outbound_failed");
+    await noteOutboundResult(ok);
+  } catch {
+    // metrics must never break sends
   }
 }
 
-export function isOutboundAiMessage(id?: string): boolean {
-  if (!id) return false;
-  return OUTBOUND_AI_MESSAGE_IDS.has(id);
+export async function registerOutboundAiMessage(id?: string): Promise<void> {
+  await registerOutboundAiId(id);
+}
+
+export async function isOutboundAiMessage(id?: string): Promise<boolean> {
+  return isKnownOutboundAiId(id);
 }
 
 /**
@@ -26,7 +32,7 @@ export async function sendCustomerText(input: {
   messageId?: string;
 }): Promise<WasenderSendResult> {
   if (input.messageId) {
-    registerOutboundAiMessage(input.messageId);
+    await registerOutboundAiMessage(input.messageId);
   }
 
   try {
@@ -40,10 +46,10 @@ export async function sendCustomerText(input: {
     }
 
     if (result.data && typeof result.data === "object") {
-      const dataObj = result.data as Record<string, any>;
-      if (dataObj.msgId) registerOutboundAiMessage(String(dataObj.msgId));
-      if (dataObj.id) registerOutboundAiMessage(String(dataObj.id));
-      if (dataObj.keyId) registerOutboundAiMessage(String(dataObj.keyId));
+      const dataObj = result.data as { msgId?: unknown; id?: unknown; keyId?: unknown };
+      for (const key of ["msgId", "id", "keyId"] as const) {
+        if (dataObj[key]) await registerOutboundAiMessage(String(dataObj[key]));
+      }
     }
 
     await recordOpsEvent({
@@ -52,6 +58,7 @@ export async function sendCustomerText(input: {
       messageId: input.messageId,
       preview: input.text,
     });
+    await noteSendMetrics(true);
     return result;
   } catch (error) {
     await recordOpsEvent({
@@ -61,6 +68,7 @@ export async function sendCustomerText(input: {
       preview: input.text,
       error: error instanceof Error ? error.message : String(error),
     });
+    await noteSendMetrics(false);
     throw error;
   }
 }

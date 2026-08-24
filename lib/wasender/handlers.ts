@@ -5,6 +5,10 @@ import { recordOpsEvent } from "../ops/store";
 import { appendTranscriptEntry } from "../agent/transcript";
 import { sanitizeWhatsAppText } from "../agent/format";
 import { sendCustomerText } from "./send-tracked";
+import {
+  claimInboundMessageId,
+  completeInboundMessageId,
+} from "./message-id-store.ts";
 import { getSenderPhone } from "./parse";
 import type {
   IncomingUserMessage,
@@ -15,8 +19,6 @@ import type {
 
 export { getSenderPhone, parseWasenderWebhookPayload } from "./parse";
 export type { IncomingUserMessage } from "./types";
-
-const PROCESSED_MESSAGE_IDS = new Set<string>();
 
 export async function handleWasenderEvent(
   payload: WasenderWebhookEvent,
@@ -39,19 +41,26 @@ function extractMessageBody(message: WasenderIncomingMessage): string {
   if (message.messageBody && message.messageBody.trim()) {
     return message.messageBody.trim();
   }
-  const msg = message.message as Record<string, any> | undefined;
+  const msg = message.message as Record<string, unknown> | undefined;
   if (!msg) return "";
 
-  if (typeof msg.conversation === "string") return msg.conversation.trim();
-  if (typeof msg.extendedTextMessage?.text === "string") return msg.extendedTextMessage.text.trim();
-  if (typeof msg.buttonsResponseMessage?.selectedDisplayText === "string") return msg.buttonsResponseMessage.selectedDisplayText.trim();
-  if (typeof msg.buttonsResponseMessage?.selectedButtonId === "string") return msg.buttonsResponseMessage.selectedButtonId.trim();
-  if (typeof msg.templateButtonReplyMessage?.selectedDisplayText === "string") return msg.templateButtonReplyMessage.selectedDisplayText.trim();
-  if (typeof msg.listResponseMessage?.title === "string") return msg.listResponseMessage.title.trim();
-  if (typeof msg.listResponseMessage?.singleSelectReply?.selectedRowId === "string") return msg.listResponseMessage.singleSelectReply.selectedRowId.trim();
-  if (typeof msg.imageMessage?.caption === "string") return msg.imageMessage.caption.trim();
+  const readText = (value: unknown): string | undefined =>
+    typeof value === "string" && value.trim() ? value.trim() : undefined;
 
-  return "";
+  const node = (key: string): Record<string, unknown> | undefined =>
+    msg[key] as Record<string, unknown> | undefined;
+
+  return (
+    readText(msg.conversation) ??
+    readText(node("extendedTextMessage")?.text) ??
+    readText(node("buttonsResponseMessage")?.selectedDisplayText) ??
+    readText(node("buttonsResponseMessage")?.selectedButtonId) ??
+    readText(node("templateButtonReplyMessage")?.selectedDisplayText) ??
+    readText(node("listResponseMessage")?.title) ??
+    readText((node("listResponseMessage")?.singleSelectReply as Record<string, unknown> | undefined)?.selectedRowId) ??
+    readText(node("imageMessage")?.caption) ??
+    ""
+  );
 }
 
 async function handleIncomingMessage(
@@ -63,23 +72,34 @@ async function handleIncomingMessage(
     return;
   }
 
-  // Deduplicate incoming messages across webhook events
-  if (PROCESSED_MESSAGE_IDS.has(message.key.id)) {
-    logInfo("wasender", "ignored duplicate incoming message event", {
-      messageId: message.key.id,
-    });
+  // Deduplicate incoming messages across webhook events with a durable
+  // claim so a crash mid-processing can never silently swallow a retry.
+  const claim = await claimInboundMessageId(message.key.id);
+  if (claim !== "new") {
+    logInfo(
+      "wasender",
+      claim === "in_flight"
+        ? "message is already being processed elsewhere; ignoring concurrent event"
+        : "ignored duplicate incoming message event",
+      { messageId: message.key.id, claim },
+    );
     return;
   }
-  PROCESSED_MESSAGE_IDS.add(message.key.id);
-  if (PROCESSED_MESSAGE_IDS.size > 2000) {
-    const oldest = PROCESSED_MESSAGE_IDS.values().next().value;
-    if (oldest) PROCESSED_MESSAGE_IDS.delete(oldest);
-  }
 
+  try {
+    await processClaimedIncomingMessage(message);
+  } finally {
+    await completeInboundMessageId(message.key.id);
+  }
+}
+
+async function processClaimedIncomingMessage(
+  message: WasenderIncomingMessage,
+): Promise<void> {
   // Capture manual human messages sent from phone / WhatsApp Web
   if (message.key.fromMe) {
     const { isOutboundAiMessage } = await import("./send-tracked.ts");
-    if (isOutboundAiMessage(message.key.id)) {
+    if (await isOutboundAiMessage(message.key.id)) {
       logInfo("wasender", "ignored automated agent fromMe echo", {
         messageId: message.key.id,
       });
@@ -144,12 +164,48 @@ async function handleIncomingMessage(
 
 async function onUserMessage(message: IncomingUserMessage): Promise<void> {
   const startedAt = Date.now();
+  const { recordMetric } = await import("../metrics/recorder.ts");
+  void recordMetric("inbound");
   await recordOpsEvent({
     phone: message.sender,
     type: "inbound_received",
     messageId: message.messageId,
     preview: message.text,
   });
+
+  // 0. Compliance opt-out / re-subscribe handling — always wins, even mid-flow
+  try {
+    const { matchesOptOut, matchesResubscribe, suppressCustomerPhone, unsuppressCustomerPhone } =
+      await import("../compliance/opt-out.ts");
+    if (matchesOptOut(message.text)) {
+      await suppressCustomerPhone(message.sender);
+      const confirmation = sanitizeWhatsAppText(
+        "You have been unsubscribed and will not receive any promotional messages from Grabbit Express. Bookings still work as usual — just message us anytime. (Reply START to re-subscribe.)",
+      );
+      await sendCustomerText({ to: message.sender, text: confirmation });
+      await appendTranscriptEntry(message.sender, {
+        role: "note",
+        text: "[customer opted out of broadcasts]",
+      });
+      logInfo("wasender", "processed customer opt-out", { sender: message.sender });
+      return;
+    }
+    if (matchesResubscribe(message.text)) {
+      const changed = await unsuppressCustomerPhone(message.sender);
+      if (changed) {
+        const confirmation = sanitizeWhatsAppText(
+          "Welcome back! You are re-subscribed to Grabbit Express updates.",
+        );
+        await sendCustomerText({ to: message.sender, text: confirmation });
+      }
+      logInfo("wasender", "processed customer resubscribe request", {
+        sender: message.sender,
+        changed,
+      });
+    }
+  } catch (optErr) {
+    logWarn("wasender", "opt-out check failed", formatError(optErr));
+  }
 
   // 1. Check if incoming message is a 1-word command from a Fleet Rider (0 LLM tokens)
   try {
@@ -184,6 +240,41 @@ async function onUserMessage(message: IncomingUserMessage): Promise<void> {
         });
         return;
       }
+
+      const { shouldInterceptRiderDecision, handleRiderReply, riderHasActiveBooking } =
+        await import("../orders/pre-booking.ts");
+      if (
+        shouldInterceptRiderDecision({
+          text: message.text,
+          hasActiveBooking: await riderHasActiveBooking(auth.rider.name),
+        })
+      ) {
+          const replyResult = await handleRiderReply({
+            senderPhone: message.sender,
+            text: message.text,
+          });
+
+          if (replyResult.handled && replyResult.responseMessage) {
+            await sendCustomerText({
+              to: message.sender,
+              text: replyResult.responseMessage,
+            });
+            await appendTranscriptEntry(message.sender, {
+              role: "customer",
+              text: message.text,
+              messageId: message.messageId,
+            });
+            await appendTranscriptEntry(message.sender, {
+              role: "agent",
+              text: replyResult.responseMessage,
+              messageId: message.messageId,
+            });
+            logInfo("wasender", "handled rider booking decision with zero LLM tokens", {
+              rider: auth.rider.name,
+            });
+            return;
+          }
+        }
     }
   } catch (cmdErr) {
     logWarn("wasender", "rider command check failed", formatError(cmdErr));
