@@ -41,20 +41,20 @@ This repository (`grabbit-agent`) is the **fully autonomous WhatsApp Dispatcher 
 
 ```mermaid
 flowchart TD
-    Customer["Customer on WhatsApp"] -->|Webhook POST| Ingress["/webhook (WASender Receiver)"]
-    Admin["Admin (+999000000008)"] -->|Webhook POST| Ingress
-    Rider["Rider (Thierry / Sherif)"] -->|Webhook POST| Ingress
+    Customer["Customer on WhatsApp"] -->|"Webhook POST"| Ingress["/webhook (WASender Receiver)"]
+    Admin["Admin (+999000000008)"] -->|"Webhook POST"| Ingress
+    Rider["Rider (Thierry / Sherif)"] -->|"Webhook POST"| Ingress
 
     Ingress --> Verify["HMAC Signature Verification"]
     Verify --> Handler["lib/wasender/handlers.ts"]
 
     Handler --> CheckRiderCmd{"Is Fleet Rider 1-Word Command?<br>(Done / Break / Back)"}
-    CheckRiderCmd -->|YES (0 Tokens)| RiderCmdEngine["lib/riders/commands.ts<br>(Marks Booking Complete & Notifies Customer)"]
+    CheckRiderCmd -->|"YES (0 Tokens)"| RiderCmdEngine["lib/riders/commands.ts<br>(Marks Booking Complete & Notifies Customer)"]
     
-    CheckRiderCmd -->|NO| HumanTakeoverCheck{"Is Human Admin Active?<br>(Kill Switch / Manual Reply)"}
-    HumanTakeoverCheck -->|Agent Paused| RecordOnly["Append Transcript & Log Ops"]
+    CheckRiderCmd -->|"NO"| HumanTakeoverCheck{"Is Human Admin Active?<br>(Kill Switch / Manual Reply)"}
+    HumanTakeoverCheck -->|"Agent Paused"| RecordOnly["Append Transcript & Log Ops"]
 
-    HumanTakeoverCheck -->|Agent Active| Agent["lib/agent/deepseek.ts<br>(DeepSeek LLM Dispatch Brain)"]
+    HumanTakeoverCheck -->|"Agent Active"| Agent["lib/agent/deepseek.ts<br>(DeepSeek LLM Dispatch Brain)"]
 
     Agent --> ContextBuilder["lib/agent/tools.ts: buildAgentContextNote<br>• Weekly Schedule (Dense Token-Lean)<br>• Customer Profile Memory<br>• Active Rider Shifts & Escalations"]
     ContextBuilder --> Tools["DEEPSEEK_AGENT_TOOLS<br>• schedule_trip_or_delivery<br>• match_service_location<br>• admin_reply_to_customer<br>• preview/execute_broadcast"]
