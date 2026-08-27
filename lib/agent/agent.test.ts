@@ -86,3 +86,52 @@ describe("sessions", () => {
     );
   });
 });
+
+describe("buildAgentContextNote date filtering", () => {
+  it("only includes current and future bookings for riders, ignoring past dates", async () => {
+    const { buildAgentContextNote } = await import("./tools.ts");
+    const { savePreBooking } = await import("../orders/pre-booking.ts");
+    const { clearBookingIndexCache } = await import("../orders/booking-store.ts");
+
+    // Add a past booking for Thierry
+    await savePreBooking({
+      id: "pb_ctx_past_thierry",
+      customerPhone: "+99900000020",
+      customerName: "Old Past Trip",
+      serviceKind: "trip",
+      pickupAddress: "ALCHE",
+      deliveryAddress: "Mahogany",
+      scheduledDate: "2020-01-01",
+      scheduledTime: "10:00 am",
+      slotKey: "2020-01-01_10:00-11:00",
+      assignedRider: "Thierry",
+      status: "confirmed",
+      createdAt: "2020-01-01T06:00:00.000Z",
+      updatedAt: "2020-01-01T06:00:00.000Z",
+    });
+
+    // Add a future booking for Thierry
+    await savePreBooking({
+      id: "pb_ctx_future_thierry",
+      customerPhone: "+99900000021",
+      customerName: "Future Trip",
+      serviceKind: "trip",
+      pickupAddress: "ALCHE",
+      deliveryAddress: "Grand Baie",
+      scheduledDate: "2031-12-12",
+      scheduledTime: "2:00 pm",
+      slotKey: "2031-12-12_1:30-3:30",
+      assignedRider: "Thierry",
+      status: "confirmed",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+    clearBookingIndexCache();
+
+    // Thierry phone: +999000000009
+    const note = await buildAgentContextNote({ senderPhone: "+999000000009" });
+    assert.match(note, /Future Trip/);
+    assert.doesNotMatch(note, /Old Past Trip/);
+  });
+});
+

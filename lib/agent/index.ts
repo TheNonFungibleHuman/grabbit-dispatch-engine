@@ -28,6 +28,9 @@ function hasImageMessage(message: IncomingUserMessage): boolean {
   );
 }
 
+const recentSentReplies = new Map<string, { text: string; at: number }>();
+const SENT_REPLY_DEDUP_WINDOW_MS = 2500;
+
 async function sendAndRecord(args: {
   to: string;
   sender: string;
@@ -35,6 +38,24 @@ async function sendAndRecord(args: {
   messageId: string;
 }): Promise<void> {
   const text = sanitizeWhatsAppText(args.text);
+  const now = Date.now();
+  const last = recentSentReplies.get(args.to);
+  if (last && now - last.at < SENT_REPLY_DEDUP_WINDOW_MS && last.text === text) {
+    logWarn("agent", "suppressing exact duplicate outbound reply within cooldown", {
+      to: args.to,
+      messageId: args.messageId,
+      preview: text.slice(0, 80),
+    });
+    return;
+  }
+  recentSentReplies.set(args.to, { text, at: now });
+
+  if (recentSentReplies.size > 200) {
+    for (const [k, v] of recentSentReplies.entries()) {
+      if (now - v.at > 60_000) recentSentReplies.delete(k);
+    }
+  }
+
   await sendCustomerText({
     to: args.to,
     text,

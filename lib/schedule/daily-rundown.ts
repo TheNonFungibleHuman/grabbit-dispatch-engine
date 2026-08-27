@@ -177,17 +177,18 @@ export async function postDailySummaryToGoogleChat(customMessage?: string): Prom
 }
 
 /**
- * Checks if it is 8:30 PM in Mauritius (20:30 to 20:50) and sends today's rundown to Sherif.
+ * Checks if it is 8:30 PM in Mauritius (20:30 to 21:15) and sends today's rundown to Sherif.
  */
-export async function processDailyRundownCron(): Promise<{ triggered: boolean; reason?: string }> {
-  const now = new Date();
+export async function processDailyRundownCron(now = new Date()): Promise<{ triggered: boolean; reason?: string }> {
   const minutesOfDay = mauritiusMinutesOfDay(now);
   const mauritiusHours = Math.floor(minutesOfDay / 60);
   const mauritiusMinutes = minutesOfDay % 60;
   const todayIso = mauritiusDateIso(now);
 
-  // Check if current time is between 8:30 PM (20:30) and 8:50 PM (20:50)
-  const isAround830PM = mauritiusHours === 20 && mauritiusMinutes >= 30 && mauritiusMinutes <= 50;
+  // Check if current time is between 8:30 PM (20:30) and 9:15 PM (21:15)
+  const isAround830PM =
+    (mauritiusHours === 20 && mauritiusMinutes >= 30) ||
+    (mauritiusHours === 21 && mauritiusMinutes <= 15);
 
   if (!isAround830PM) {
     return { triggered: false, reason: `Not 8:30 PM Mauritius time (current: ${mauritiusHours}:${mauritiusMinutes < 10 ? '0' : ''}${mauritiusMinutes})` };

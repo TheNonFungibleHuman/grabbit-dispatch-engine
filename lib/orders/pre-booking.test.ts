@@ -853,6 +853,16 @@ describe("shouldInterceptRiderDecision", () => {
     assert.equal(shouldInterceptRiderDecision({ text: "confirm", hasActiveBooking: true }), true);
   });
 
+});
+
+describe("shouldInterceptRiderDecision", () => {
+  it("intercepts bare decisions when the rider has an active booking", async () => {
+    const { shouldInterceptRiderDecision } = await import("./pre-booking.ts");
+    assert.equal(shouldInterceptRiderDecision({ text: "yes", hasActiveBooking: true }), true);
+    assert.equal(shouldInterceptRiderDecision({ text: "no", hasActiveBooking: true }), true);
+    assert.equal(shouldInterceptRiderDecision({ text: "confirm", hasActiveBooking: true }), true);
+  });
+
   it("never intercepts without an active booking or a bare decision token", async () => {
     const { shouldInterceptRiderDecision } = await import("./pre-booking.ts");
     assert.equal(shouldInterceptRiderDecision({ text: "yes", hasActiveBooking: false }), false);
@@ -867,5 +877,84 @@ describe("shouldInterceptRiderDecision", () => {
     assert.equal(shouldInterceptRiderDecision({ text: "YES send the report", hasActiveBooking: true }), false);
     assert.equal(shouldInterceptRiderDecision({ text: "ok broadcast it", hasActiveBooking: true }), false);
     assert.equal(shouldInterceptRiderDecision({ text: "yes send summary to customers", hasActiveBooking: true }), false);
+  });
+});
+
+describe("updatePreBookingDetails", () => {
+  it("updates customer name and details on an existing booking", async () => {
+    const { savePreBooking, updatePreBookingDetails } = await import("./pre-booking.ts");
+    const { clearBookingIndexCache } = await import("./booking-store.ts");
+
+    const bookingId = "pb_update_test_101";
+    await savePreBooking({
+      id: bookingId,
+      customerPhone: "+99900000051",
+      customerName: "Hanneeeffff",
+      serviceKind: "trip",
+      pickupAddress: "ALCHE Campus",
+      deliveryAddress: "Mahogany Promenade",
+      scheduledDate: "2031-11-11",
+      scheduledTime: "12:45 pm",
+      slotKey: "2031-11-11_11:30 am to 1:30 pm",
+      assignedRider: "Thierry",
+      status: "confirmed",
+      kiloDeliveryId: "DEL_2031_999",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+    clearBookingIndexCache();
+
+    const res = await updatePreBookingDetails({
+      bookingId: "DEL_2031_999",
+      customerName: "Customer A",
+      deliveryAddress: "Grand Baie",
+    });
+
+    assert.equal(res.ok, true);
+    assert.equal(res.booking?.customerName, "Customer A");
+    assert.equal(res.booking?.deliveryAddress, "Grand Baie");
+    assert.equal(res.booking?.pickupAddress, "ALCHE Campus");
+  });
+
+  it("returns error if booking is not found", async () => {
+    const { updatePreBookingDetails } = await import("./pre-booking.ts");
+    const res = await updatePreBookingDetails({
+      bookingId: "non_existent_id_999",
+      customerName: "Ghost",
+    });
+    assert.equal(res.ok, false);
+    assert.match(res.error || "", /No booking found/i);
+  });
+});
+
+describe("autoExpireStaleBookings", () => {
+  it("auto-expires past confirmed bookings to completed", async () => {
+    const { savePreBooking, autoExpireStaleBookings, listAllPreBookings } = await import("./pre-booking.ts");
+    const { clearBookingIndexCache } = await import("./booking-store.ts");
+
+    const pastId = "pb_stale_past_test_01";
+    await savePreBooking({
+      id: pastId,
+      customerPhone: "+99900000069",
+      customerName: "Past Customer",
+      serviceKind: "trip",
+      pickupAddress: "ALCHE",
+      deliveryAddress: "Mahogany",
+      scheduledDate: "2020-01-01",
+      scheduledTime: "10:00 am",
+      slotKey: "2020-01-01_10:00-11:00",
+      assignedRider: "Thierry",
+      status: "confirmed",
+      createdAt: "2020-01-01T06:00:00.000Z",
+      updatedAt: "2020-01-01T06:00:00.000Z",
+    });
+    clearBookingIndexCache();
+
+    const res = await autoExpireStaleBookings(new Date("2026-08-27T00:00:00.000Z"));
+    assert.ok(res.expiredIds.includes(pastId));
+
+    const all = await listAllPreBookings();
+    const updated = all.find((b) => b.id === pastId);
+    assert.equal(updated?.status, "completed");
   });
 });

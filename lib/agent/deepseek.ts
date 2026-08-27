@@ -194,6 +194,7 @@ export async function generateAgentReply(
   let lastSuccessfulTrackingUrl: string | null = null;
   let responseId: string | undefined;
   let finalAssistantText = "";
+  const calledTools = new Set<string>();
 
   for (let round = 0; round < MAX_TOOL_ROUNDS; round += 1) {
     logInfo("agent", "deepseek round start", {
@@ -259,6 +260,7 @@ export async function generateAgentReply(
     });
 
     for (const toolCall of toolCalls) {
+      calledTools.add(toolCall.function.name);
       let parsedArgs: Record<string, unknown> = {};
       try {
         parsedArgs = JSON.parse(toolCall.function.arguments || "{}");
@@ -356,16 +358,42 @@ export async function generateAgentReply(
     text = `${text}\n\n🔴 *Live Tracking Link:*\n${lastSuccessfulTrackingUrl}`;
   }
 
+  const { isAuthorizedRiderOrAdmin } = await import("../riders/config.ts");
+  const callerAuth = isAuthorizedRiderOrAdmin(input.sender);
+
   // Safety overrides & fallback protections
   if (bookingFailure) {
-    const safeText = customerReplyForFailedBooking(bookingFailure);
-    logWarn("agent", "overriding reply after failed booking", {
-      messageId: input.messageId,
-      bookingFailure,
-      modelReplyPreview: text.slice(0, 160),
-      safeReplyPreview: safeText.slice(0, 160),
-    });
-    text = safeText;
+    if (callerAuth.isAdmin) {
+      text = `⚠️ Booking creation failed: ${bookingFailure.error || "Missing required fields"}. Please check the parameters.`;
+    } else {
+      const safeText = customerReplyForFailedBooking(bookingFailure);
+      logWarn("agent", "overriding reply after failed booking", {
+        messageId: input.messageId,
+        bookingFailure,
+        modelReplyPreview: text.slice(0, 160),
+        safeReplyPreview: safeText.slice(0, 160),
+      });
+      text = safeText;
+    }
+  } else if (
+    callerAuth.isAdmin &&
+    !calledTools.has("admin_reply_to_customer") &&
+    !calledTools.has("send_rider_broadcast_or_message") &&
+    !calledTools.has("notify_customer_of_rider_update") &&
+    !calledTools.has("execute_admin_broadcast")
+  ) {
+    const matchGreeting = text.match(/^(?:Hello|Hi|Dear)\s+([A-Za-z0-9_.\s]+?)[!,\n]/i);
+    if (matchGreeting) {
+      const name = matchGreeting[1].trim().toLowerCase();
+      const isAdminName = ["admin", "deen", "sherif", "hanif", "hanneeeffff"].some((n) => name.startsWith(n));
+      if (!isAdminName) {
+        logWarn("agent", "admin reply outputted customer greeting directly without tool call", {
+          messageId: input.messageId,
+          greeted: matchGreeting[1],
+        });
+        text = `⚠️ I prepared this message for ${matchGreeting[1]}, but it has NOT been sent to WhatsApp yet:\n\n"${text}"\n\nTo send it to them directly on WhatsApp, please tell me "Send to ${matchGreeting[1]}".`;
+      }
+    }
   } else if (
     !bookingSucceeded &&
     text &&

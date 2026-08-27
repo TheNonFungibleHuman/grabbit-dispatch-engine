@@ -375,8 +375,15 @@ export async function bookKiloDeliveryFromChat(args: {
 
   let errandMode: KiloErrandMode | undefined;
   if (serviceKind === "errand") {
-    const requested = args.toolArgs.errandMode;
+    let requested = args.toolArgs.errandMode;
     const enabled = caps.errand.enabledModes;
+    // Fallback: if 'link' requested but no links provided, fallback to 'at_place' if enabled
+    if (requested === "link") {
+      const links = args.toolArgs.errandLinks ?? [];
+      if (links.length < 1 && enabled.includes("at_place")) {
+        requested = "at_place";
+      }
+    }
     if (requested && enabled.includes(requested)) {
       errandMode = requested;
     } else if (enabled.includes(caps.errand.defaultMode)) {

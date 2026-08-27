@@ -24,3 +24,15 @@ describe("25-minute ride reminder window", () => {
     assert.equal(shouldSendRideReminder(23 * 60 + 50, 10), false);
   });
 });
+
+describe("processDailyRundownCron window check", () => {
+  it("rejects times outside 8:30pm - 9:15pm Mauritius time", async () => {
+    const { processDailyRundownCron } = await import("./daily-rundown.ts");
+    // 12:00 PM Mauritius (08:00 UTC)
+    const midday = new Date("2026-08-25T08:00:00.000Z");
+    const res = await processDailyRundownCron(midday);
+    assert.equal(res.triggered, false);
+    assert.match(res.reason || "", /Not 8:30 PM Mauritius time/);
+  });
+});
+

@@ -11,6 +11,7 @@ import { formatError, logError, logInfo, logWarn } from "../log.ts";
 import { getOrderDraft } from "../orders/store.ts";
 import { getAvailabilitySnapshot } from "../schedule/availability.ts";
 import { getKnowledgeBundle } from "../admin/knowledge.ts";
+import { mauritiusDateIso } from "../time.ts";
 import {
   formatTranscriptForAgent,
   loadTranscript,
@@ -86,7 +87,7 @@ export const AGENT_TOOLS = [
           type: "string",
           enum: ["at_place", "link", "photo"],
           description:
-            "Required for errands. at_place/link: photos optional. photo: need stored WhatsApp photos. link: need errandLinks.",
+            "Required for errands. at_place: physical purchase/pickup at shop/restaurant (DEFAULT for food/restaurants like PanAsian, KFC, etc.). link: only when customer provides exact product URL. photo: only when customer sent photo.",
         },
         errandLinks: {
           type: "array",
@@ -106,6 +107,29 @@ export const AGENT_TOOLS = [
         pickupLocationUnknown: { type: "boolean" },
       },
       required: ["packageDescription"],
+    },
+  },
+  {
+    type: "function" as const,
+    name: "update_booking_details",
+    description:
+      "ADMIN ONLY: Update fields on an existing booking or pre-booking (e.g. change customerName, pickupAddress, deliveryAddress, scheduledTime, scheduledDate, assignedRider).",
+    parameters: {
+      type: "object",
+      properties: {
+        bookingId: {
+          type: "string",
+          description: "Prebooking ID (pb_...), Kilo delivery ID (DEL_...), or customer phone number",
+        },
+        customerName: { type: "string", description: "Updated customer name (e.g. Customer A)" },
+        pickupAddress: { type: "string" },
+        deliveryAddress: { type: "string" },
+        scheduledTime: { type: "string" },
+        scheduledDate: { type: "string" },
+        assignedRider: { type: "string" },
+        packageDescription: { type: "string" },
+      },
+      required: ["bookingId"],
     },
   },
   {
@@ -429,8 +453,33 @@ export async function buildAgentContextNote(args: {
     logWarn("agent", "availability lookup failed", formatError(error));
   }
 
+  let adminBookingsNote = "";
   if (auth.isAdmin) {
     callerRoleNote = "role: AUTHORIZED DISPATCH ADMIN (+999000000008 / +9990000000003)";
+    try {
+      const todayIso = mauritiusDateIso(new Date());
+      const { listAllPreBookings } = await import("../orders/pre-booking.ts");
+      const all = await listAllPreBookings();
+      const todayBookings = all.filter((b) => {
+        const bDate = (b.scheduledDate && b.scheduledDate !== "today" && b.scheduledDate !== "tomorrow")
+          ? b.scheduledDate
+          : (b.slotKey?.split("_")[0] || b.createdAt.slice(0, 10));
+        return bDate === todayIso && b.status !== "cancelled" && b.status !== "declined";
+      });
+      if (todayBookings.length > 0) {
+        adminBookingsNote = [
+          `📋 TODAY'S CONFIRMED/ACTIVE BOOKINGS (${todayIso}) [Single source of truth — report exact status, NEVER invent status]:`,
+          ...todayBookings.map(
+            (b) => `• ${b.scheduledTime || "Flexible"} | Customer: ${b.customerName} (+${b.customerPhone}) | Route: ${b.pickupAddress} → ${b.deliveryAddress} | Rider: ${b.assignedRider} | STATUS: ${b.status.toUpperCase()}`
+          ),
+        ].join("\n");
+      } else {
+        adminBookingsNote = `📋 TODAY'S BOOKINGS (${todayIso}): No trips or deliveries currently booked for today.`;
+      }
+    } catch (e) {
+      logWarn("agent", "failed to load today bookings for admin context", formatError(e));
+    }
+
     try {
       const { listOpenEscalations } = await import("../ops/store.ts");
       const openEscalations = await listOpenEscalations();
@@ -449,18 +498,22 @@ export async function buildAgentContextNote(args: {
   } else if (auth.rider) {
     callerRoleNote = `role: FLEET RIDER (${auth.rider.name})`;
     try {
+      const todayIso = mauritiusDateIso(new Date());
       const { listAllPreBookings } = await import("../orders/pre-booking.ts");
       const all = await listAllPreBookings();
-      const active = all.filter(
-        (b) =>
-          b.assignedRider.toLowerCase().includes(auth.rider!.name.toLowerCase()) &&
-          (b.status === "confirmed" || b.status === "pending_rider" || b.status === "dispatched")
-      );
+      const active = all.filter((b) => {
+        if (!b.assignedRider.toLowerCase().includes(auth.rider!.name.toLowerCase())) return false;
+        if (b.status !== "confirmed" && b.status !== "pending_rider" && b.status !== "dispatched") return false;
+        const bDate = (b.scheduledDate && b.scheduledDate !== "today" && b.scheduledDate !== "tomorrow")
+          ? b.scheduledDate
+          : (b.slotKey?.split("_")[0] || b.createdAt.slice(0, 10));
+        return bDate >= todayIso;
+      });
       if (active.length > 0) {
         riderBookingsNote = [
           `🏍️ ACTIVE ASSIGNED TRIPS/DELIVERIES FOR RIDER ${auth.rider.name.toUpperCase()}:`,
           ...active.map(
-            (b) => `• Customer: ${b.customerName} (+${b.customerPhone}) | Time: ${b.scheduledTime} | Route: ${b.pickupAddress} → ${b.deliveryAddress}`
+            (b) => `• Customer: ${b.customerName} (+${b.customerPhone}) | Date: ${b.scheduledDate || todayIso} | Time: ${b.scheduledTime} | Route: ${b.pickupAddress} → ${b.deliveryAddress} | Status: ${b.status}`
           ),
           "RIDER CHAT INSTRUCTION: If rider is giving an arrival notice, delay update, or status (e.g. 'I am at the gate', 'Arrived', '5 mins away'), CALL `notify_customer_of_rider_update` to instantly message the customer!",
         ].join("\n");
@@ -491,6 +544,7 @@ export async function buildAgentContextNote(args: {
     customerProfileNote,
     photoNote,
     availabilityNote,
+    adminBookingsNote,
     riderBookingsNote,
     adminEscalationNote,
     "Receiver default: this WhatsApp user.",
@@ -949,6 +1003,48 @@ export async function executeAgentTool(args: {
       return result;
     }
 
+    if (args.name === "update_booking_details") {
+      const { isAuthorizedRiderOrAdmin } = await import("../riders/config.ts");
+      const auth = isAuthorizedRiderOrAdmin(args.senderPhone);
+      if (!auth.isAdmin) {
+        return { ok: false, error: "Access Denied: Only authorized Grabbit admins (+999000000008, +9990000000003) can update booking details." };
+      }
+
+      const value = parseToolArguments(args.toolArguments);
+      const bookingId = String(value.bookingId || "").trim();
+      if (!bookingId) {
+        return { ok: false, error: "bookingId is required" };
+      }
+
+      const { updatePreBookingDetails } = await import("../orders/pre-booking.ts");
+      const res = await updatePreBookingDetails({
+        bookingId,
+        customerName: value.customerName ? String(value.customerName) : undefined,
+        pickupAddress: value.pickupAddress ? String(value.pickupAddress) : undefined,
+        deliveryAddress: value.deliveryAddress ? String(value.deliveryAddress) : undefined,
+        scheduledTime: value.scheduledTime ? String(value.scheduledTime) : undefined,
+        scheduledDate: value.scheduledDate ? String(value.scheduledDate) : undefined,
+        assignedRider: value.assignedRider ? String(value.assignedRider) : undefined,
+        packageDescription: value.packageDescription ? String(value.packageDescription) : undefined,
+      });
+
+      if (!res.ok || !res.booking) {
+        return { ok: false, error: res.error || "Failed to update booking" };
+      }
+
+      return {
+        ok: true,
+        bookingId: res.booking.id,
+        updatedCustomerName: res.booking.customerName,
+        scheduledTime: res.booking.scheduledTime,
+        scheduledDate: res.booking.scheduledDate,
+        assignedRider: res.booking.assignedRider,
+        pickupAddress: res.booking.pickupAddress,
+        deliveryAddress: res.booking.deliveryAddress,
+        message: `Booking ${res.booking.id} (${res.booking.customerName}) updated successfully.`,
+      };
+    }
+
     if (args.name === "admin_reply_to_customer") {
       const { isAuthorizedRiderOrAdmin } = await import("../riders/config.ts");
       const auth = isAuthorizedRiderOrAdmin(args.senderPhone);
@@ -986,15 +1082,17 @@ export async function executeAgentTool(args: {
         return { ok: false, error: `Could not find a phone number for customer "${identifier}".` };
       }
 
+      const relayMsgId = `admin_relay_${Date.now()}`;
       await sendCustomerText({
         to: targetPhone,
         text: message,
-        messageId: `admin_relay_${Date.now()}`,
+        messageId: relayMsgId,
       });
 
       await appendTranscriptEntry(targetPhone, {
         role: "agent",
         text: message,
+        messageId: relayMsgId,
       });
 
       try {

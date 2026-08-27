@@ -1274,3 +1274,82 @@ export async function getRiderAssignedBookings(args: {
     })),
   };
 }
+
+export async function updatePreBookingDetails(args: {
+  bookingId: string;
+  customerName?: string;
+  pickupAddress?: string;
+  deliveryAddress?: string;
+  scheduledTime?: string;
+  scheduledDate?: string;
+  assignedRider?: string;
+  packageDescription?: string;
+}): Promise<{ ok: boolean; booking?: PreBooking; error?: string }> {
+  const all = await listAllPreBookings();
+  const idQuery = args.bookingId.trim().toLowerCase();
+
+  const target = all.find(
+    (b) =>
+      b.id.toLowerCase() === idQuery ||
+      (b.kiloDeliveryId && b.kiloDeliveryId.toLowerCase() === idQuery) ||
+      b.customerPhone.replace(/\D/g, "") === idQuery.replace(/\D/g, "")
+  );
+
+  if (!target) {
+    return { ok: false, error: `No booking found matching "${args.bookingId}".` };
+  }
+
+  if (args.customerName) target.customerName = args.customerName.trim();
+  if (args.pickupAddress) target.pickupAddress = args.pickupAddress.trim();
+  if (args.deliveryAddress) target.deliveryAddress = args.deliveryAddress.trim();
+  if (args.packageDescription) target.packageDescription = args.packageDescription.trim();
+  if (args.scheduledDate) target.scheduledDate = resolveIsoDate(args.scheduledDate);
+  if (args.scheduledTime) target.scheduledTime = args.scheduledTime.trim();
+  if (args.assignedRider) target.assignedRider = args.assignedRider.trim();
+
+  target.updatedAt = new Date().toISOString();
+  await savePreBooking(target);
+
+  logInfo("prebooking", "updated booking details", {
+    bookingId: target.id,
+    updates: args,
+  });
+
+  return { ok: true, booking: target };
+}
+
+export async function autoExpireStaleBookings(now = new Date()): Promise<{
+  expiredCount: number;
+  expiredIds: string[];
+}> {
+  const todayIso = mauritiusDateIso(now);
+  const all = await listAllPreBookings();
+  const expiredIds: string[] = [];
+
+  for (const b of all) {
+    if (b.status !== "confirmed" && b.status !== "pending_rider" && b.status !== "dispatched") {
+      continue;
+    }
+    const bDate = (b.scheduledDate && b.scheduledDate !== "today" && b.scheduledDate !== "tomorrow")
+      ? b.scheduledDate
+      : (b.slotKey?.split("_")[0] || b.createdAt.slice(0, 10));
+
+    // If scheduled date is strictly before today in Mauritius time
+    if (bDate < todayIso) {
+      const nextStatus = (b.status === "confirmed" || b.status === "dispatched") ? "completed" : "cancelled";
+      b.status = nextStatus;
+      b.updatedAt = new Date().toISOString();
+      await savePreBooking(b);
+      expiredIds.push(b.id);
+      logInfo("prebooking", "auto-expired stale past booking", {
+        bookingId: b.id,
+        scheduledDate: bDate,
+        todayIso,
+        oldStatus: b.status,
+        newStatus: nextStatus,
+      });
+    }
+  }
+
+  return { expiredCount: expiredIds.length, expiredIds };
+}
