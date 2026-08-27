@@ -304,6 +304,7 @@ export function evaluateAvailability(
     ...upcomingDays.map((d) => formatDayBlock(d)),
     "Rules for availability & scheduling:",
     "- Customers CAN pre-book any open slot across the entire week (Today, Tomorrow, or any upcoming weekday listed above).",
+    "- CRITICAL TIME COMPARISON: Compare requested time directly against 'now: ...'. If the requested time is later today (e.g. 09:10 AM when it is 08:52 AM), it is UPCOMING in the future! NEVER claim an upcoming time later today has already passed.",
     "- Do NOT invent riders, days, or times. Offer and schedule ONLY from the exact open slots listed above.",
     "- If asked about a future day (e.g. Tuesday, Thursday, Friday), confirm the open slots from that day's schedule above.",
   ].filter(Boolean);

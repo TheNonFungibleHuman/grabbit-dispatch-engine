@@ -220,10 +220,13 @@ export async function processIncomingUserMessage(
   }
 
   if (!message.text) {
+    const name = message.pushName?.trim();
     await sendAndRecord({
       to,
       sender: message.sender,
-      text: "Happy to help. Tell me what you need delivered, or send a package photo to start.",
+      text: name
+        ? `Hello ${name}! 👋 Welcome to Grabbit Express ⚡ Mauritius' electric rides & delivery service. How can I help you today? (Need a passenger ride, an errand, or a delivery?)`
+        : `Hello! 👋 Welcome to Grabbit Express ⚡ Mauritius' electric rides & delivery service. How can I help you today? (Need a passenger ride, an errand, or a delivery?)`,
       messageId: message.messageId,
     });
     return;
@@ -239,7 +242,7 @@ export async function processIncomingUserMessage(
         await sendAndRecord({
           to,
           sender: message.sender,
-          text: "Anytime. Ping us when you need the next delivery.",
+          text: "You're welcome! 😊 Ping us anytime you need a ride or delivery 🛵⚡",
           messageId: message.messageId,
         });
         logInfo("agent", "brief ack reply (quiet/pause gap)", {
