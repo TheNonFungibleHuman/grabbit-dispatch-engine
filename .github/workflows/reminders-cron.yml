@@ -1,0 +1,23 @@
+name: Grabbit Scheduled Dispatch & Reminders Cron
+
+on:
+  schedule:
+    # Runs every 5 minutes (standard UTC cron)
+    - cron: "*/5 * * * *"
+  workflow_dispatch: # Allows manual trigger from GitHub Actions UI
+
+jobs:
+  ping-reminders:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping Grabbit Reminders API
+        env:
+          APP_URL: ${{ secrets.GRABBIT_APP_URL || 'https://grabbit-whatsapp-agent.vercel.app' }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          echo "Pinging ${APP_URL}/api/reminders..."
+          if [ -n "$CRON_SECRET" ]; then
+            curl -s -f -H "Authorization: Bearer ${CRON_SECRET}" "${APP_URL}/api/reminders" || exit 0
+          else
+            curl -s -f "${APP_URL}/api/reminders" || exit 0
+          fi
