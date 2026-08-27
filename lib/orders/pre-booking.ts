@@ -41,6 +41,7 @@ export interface PreBooking {
   kiloDeliveryId?: string;
   trackingUrl?: string;
   paymentStatus?: "unpaid" | "paid";
+  paymentMethod?: string;
   reminderSent?: boolean;
   createdAt: string;
   updatedAt: string;

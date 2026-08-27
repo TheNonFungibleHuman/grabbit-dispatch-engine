@@ -3,6 +3,8 @@ import { formatError, logWarn } from "../log.ts";
 import { getSupabaseClient } from "../supabase/client.ts";
 
 const memory = new Map<string, string>();
+const cacheTimes = new Map<string, number>();
+const DEFAULT_CACHE_TTL_MS = 6000; // 6 seconds memory cache for fast dashboard transitions
 
 function memoryGet<T>(pathname: string): T | null {
   const raw = memory.get(pathname);
@@ -14,12 +16,22 @@ function memoryGet<T>(pathname: string): T | null {
   }
 }
 
+export function memoryGetWithTtl<T>(pathname: string, ttlMs: number = DEFAULT_CACHE_TTL_MS): T | null {
+  const at = cacheTimes.get(pathname);
+  if (!at || Date.now() - at > ttlMs) {
+    return null;
+  }
+  return memoryGet<T>(pathname);
+}
+
 function memorySet(pathname: string, value: unknown): void {
   memory.set(pathname, JSON.stringify(value));
+  cacheTimes.set(pathname, Date.now());
 }
 
 export function memoryClear(pathname: string): void {
   memory.delete(pathname);
+  cacheTimes.delete(pathname);
 }
 
 export async function writeJson(pathname: string, value: unknown): Promise<void> {
@@ -115,6 +127,73 @@ export async function readJson<T>(pathname: string): Promise<T | null> {
   }
 
   return null;
+}
+
+export async function readJsonCached<T>(
+  pathname: string,
+  ttlMs: number = DEFAULT_CACHE_TTL_MS,
+): Promise<T | null> {
+  const cached = memoryGetWithTtl<T>(pathname, ttlMs);
+  if (cached !== null) return cached;
+  return readJson<T>(pathname);
+}
+
+export async function readJsonBatch<T = unknown>(
+  pathnames: string[],
+  ttlMs: number = DEFAULT_CACHE_TTL_MS,
+): Promise<Record<string, T | null>> {
+  const result: Record<string, T | null> = {};
+  if (!pathnames.length) return result;
+
+  const toFetch: string[] = [];
+  for (const p of pathnames) {
+    const cached = memoryGetWithTtl<T>(p, ttlMs);
+    if (cached !== null) {
+      result[p] = cached;
+    } else {
+      toFetch.push(p);
+    }
+  }
+
+  if (toFetch.length === 0) {
+    return result;
+  }
+
+  const supabase = getSupabaseClient();
+  if (supabase) {
+    try {
+      const { data, error } = await supabase
+        .from("grabbit_documents")
+        .select("pathname, data")
+        .in("pathname", toFetch);
+
+      if (!error && Array.isArray(data)) {
+        const map = new Map<string, unknown>();
+        for (const row of data) {
+          if (row.pathname && row.data) {
+            map.set(row.pathname, row.data);
+            memorySet(row.pathname, row.data);
+          }
+        }
+        for (const p of toFetch) {
+          result[p] = (map.get(p) as T) ?? null;
+        }
+        return result;
+      }
+    } catch (err) {
+      logWarn("supabase", "readJsonBatch failed, falling back", {
+        toFetch,
+        ...formatError(err),
+      });
+    }
+  }
+
+  await Promise.all(
+    toFetch.map(async (p) => {
+      result[p] = await readJson<T>(p);
+    }),
+  );
+  return result;
 }
 
 export async function readJsonFresh<T>(pathname: string): Promise<T | null> {

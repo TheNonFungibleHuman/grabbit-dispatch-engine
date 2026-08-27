@@ -52,6 +52,21 @@ export function SlotsDashboard(props: {
   const [savingSchedule, setSavingSchedule] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
+  const [selectedDate, setSelectedDate] = useState<string>("ALL");
+  const [selectedRider, setSelectedRider] = useState<string>("ALL");
+  const [isQuickDispatchOpen, setIsQuickDispatchOpen] = useState(false);
+  const [creatingBooking, setCreatingBooking] = useState(false);
+  const [quickForm, setQuickForm] = useState({
+    customerName: "",
+    customerPhone: "",
+    serviceKind: "trip",
+    pickupAddress: "ALCHE Campus",
+    deliveryAddress: "Mahogany Shopping Promenade",
+    scheduledDate: "",
+    scheduledTime: "12:45 pm",
+    assignedRider: "Moses",
+    paymentMethod: "cash",
+  });
 
   function getMauritiusIsoDate(offsetDays: number = 0): string {
     try {
@@ -91,8 +106,6 @@ export function SlotsDashboard(props: {
 
   const todayMauritius = useMemo(() => getMauritiusIsoDate(0), []);
   const tomorrowMauritius = useMemo(() => getMauritiusIsoDate(1), []);
-
-  const [selectedDate, setSelectedDate] = useState<string>("ALL");
 
   const RIDER_PRESETS = [
     { label: "Closed / No Rider", value: "No Rider Available" },
@@ -256,6 +269,74 @@ export function SlotsDashboard(props: {
     }
   }
 
+  async function handleCreateQuickDispatch(e: React.FormEvent) {
+    e.preventDefault();
+    if (!quickForm.customerName.trim() || !quickForm.scheduledTime.trim()) {
+      alert("Please provide at least a customer name and scheduled time.");
+      return;
+    }
+    setCreatingBooking(true);
+    try {
+      const payload = {
+        ...quickForm,
+        scheduledDate: quickForm.scheduledDate || todayMauritius,
+      };
+      const res = await fetch("/api/slots", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        setIsQuickDispatchOpen(false);
+        setMessage(`✅ Quick dispatch created for ${quickForm.customerName} (${quickForm.scheduledTime})!`);
+        setQuickForm({
+          customerName: "",
+          customerPhone: "",
+          serviceKind: "trip",
+          pickupAddress: "ALCHE Campus",
+          deliveryAddress: "Mahogany Shopping Promenade",
+          scheduledDate: "",
+          scheduledTime: "12:45 pm",
+          assignedRider: "Moses",
+          paymentMethod: "cash",
+        });
+        await refreshBookings();
+      } else {
+        alert(data.error || "Failed to create booking");
+      }
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Failed to dispatch booking");
+    } finally {
+      setCreatingBooking(false);
+    }
+  }
+
+  function handleExportCsv() {
+    const headers = ["Time", "Date", "Service", "Customer Name", "Phone", "Pickup", "Delivery", "Rider", "Status", "Payment Method"];
+    const rows = filteredBookings.map((b) => [
+      `"${b.scheduledTime || ""}"`,
+      `"${b.scheduledDate || ""}"`,
+      `"${b.serviceKind || "trip"}"`,
+      `"${(b.customerName || "").replace(/"/g, '""')}"`,
+      `"${b.customerPhone || ""}"`,
+      `"${(b.pickupAddress || "").replace(/"/g, '""')}"`,
+      `"${(b.deliveryAddress || "").replace(/"/g, '""')}"`,
+      `"${b.assignedRider || ""}"`,
+      `"${b.status || ""}"`,
+      `"${b.paymentMethod || "cash"}"`,
+    ]);
+    const csvContent = [headers.join(","), ...rows.map((r) => r.join(","))].join("\n");
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.setAttribute("href", url);
+    link.setAttribute("download", `grabbit-manifest-${todayMauritius}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  }
+
   const activeCount = activeBookingsList.filter(
     (b) => b.status === "pending_rider" || b.status === "confirmed" || b.status === "dispatched",
   ).length;
@@ -291,6 +372,7 @@ export function SlotsDashboard(props: {
 
   const filteredBookings = sortedBookings.filter((b) => {
     if (selectedDate !== "ALL" && b.scheduledDate !== selectedDate) return false;
+    if (selectedRider !== "ALL" && !b.assignedRider?.toLowerCase().includes(selectedRider.toLowerCase())) return false;
     if (!searchQuery.trim()) return true;
     const q = searchQuery.toLowerCase();
     return (
@@ -590,82 +672,271 @@ export function SlotsDashboard(props: {
 
       {/* 3. Bookings Table */}
       <div className="rounded-[24px] bg-[var(--bg-card)] border border-[#E8E5DC] dark:border-[#1D2620] overflow-hidden shadow-sm">
-        <div className="p-5 border-b border-[#E8E5DC] dark:border-[#1D2620] flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div className="p-5 border-b border-[#E8E5DC] dark:border-[#1D2620] flex flex-col lg:flex-row lg:items-center justify-between gap-3">
           <div>
             <h2 className="font-display text-base font-bold text-[#101412] dark:text-[#F6F3EC]">Active Booked Time Slots</h2>
             <p className="text-xs text-[#6C746E] dark:text-[#8E9690]">Max 3 deliveries / 1 trip per slot · Cancelled bookings are automatically purged</p>
           </div>
 
-          {/* Date Filter & Search bar */}
-          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 w-full sm:w-auto">
-            <div className="flex items-center gap-1.5 bg-[#F6F3EC] dark:bg-[#0B0F0C] border border-[#E8E5DC] dark:border-[#1D2620] rounded-full px-3.5 py-1.5 text-xs shadow-xs">
-              <span className="text-[#6C746E] dark:text-[#8E9690] text-[11px] font-semibold">Filter Date:</span>
-              <select
-                value={selectedDate}
-                onChange={(e) => setSelectedDate(e.target.value)}
-                className="bg-transparent text-[#101412] dark:text-[#F6F3EC] font-bold text-xs focus:outline-none cursor-pointer pr-1"
-              >
-                <option value="ALL">All Dates ({activeBookingsList.length})</option>
-                {uniqueDates.map((d) => {
-                  const count = activeBookingsList.filter((b) => b.scheduledDate === d).length;
-                  const label = getRelativeDateLabel(d, todayMauritius);
-                  const displayLabel = label === d ? d : `${label} (${d})`;
-                  return (
-                    <option key={d} value={d}>
-                      {displayLabel} — {count} {count === 1 ? "booking" : "bookings"}
-                    </option>
-                  );
-                })}
-              </select>
-            </div>
+          {/* Action Buttons & Search */}
+          <div className="flex flex-wrap items-center gap-2 w-full lg:w-auto">
+            {/* Quick Dispatch Walk-in Button */}
+            <button
+              onClick={() => setIsQuickDispatchOpen(true)}
+              className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-bold bg-[#7ed957] text-[#101412] hover:bg-[#72c94d] shadow-sm transition-all"
+            >
+              <span>➕ Quick Dispatch</span>
+            </button>
 
-            <div className="relative w-full sm:w-60">
+            {/* Export Manifest CSV */}
+            <button
+              onClick={handleExportCsv}
+              className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-semibold bg-[#F6F3EC] dark:bg-[#0B0F0C] border border-[#E8E5DC] dark:border-[#1D2620] text-[#101412] dark:text-[#F6F3EC] hover:border-[#7ed957] transition-all"
+            >
+              <span>📄 Export Manifest</span>
+            </button>
+
+            <div className="relative flex-1 sm:w-52">
               <input
                 type="text"
                 placeholder="Search customer, rider, slot..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full rounded-full bg-[#F6F3EC] dark:bg-[#0B0F0C] border border-[#E8E5DC] dark:border-[#1D2620] px-4 py-2 text-xs text-[#101412] dark:text-[#F6F3EC] placeholder-[#6C746E] focus:border-[#7ed957] focus:outline-none"
+                className="w-full rounded-full bg-[#F6F3EC] dark:bg-[#0B0F0C] border border-[#E8E5DC] dark:border-[#1D2620] px-4 py-1.5 text-xs text-[#101412] dark:text-[#F6F3EC] placeholder-[#6C746E] focus:border-[#7ed957] focus:outline-none"
               />
             </div>
           </div>
         </div>
 
-        {/* Quick Date Tabs */}
-        <div className="px-5 py-2.5 bg-[#F6F3EC]/60 dark:bg-[#0B0F0C]/60 border-b border-[#E8E5DC] dark:border-[#1D2620] flex flex-wrap items-center gap-1.5 text-xs">
-          <button
-            onClick={() => setSelectedDate("ALL")}
-            className={`px-3 py-1 rounded-full text-xs font-semibold transition-all ${
-              selectedDate === "ALL"
-                ? "bg-[#101412] dark:bg-[#F6F3EC] text-white dark:text-[#101412] shadow-xs"
-                : "bg-[var(--bg-card)] text-[#6C746E] dark:text-[#8E9690] hover:text-[#101412] dark:hover:text-[#F6F3EC] border border-[#E8E5DC] dark:border-[#1D2620]"
-            }`}
-          >
-            All Bookings ({activeBookingsList.length})
-          </button>
-          {uniqueDates.map((d) => {
-            const count = activeBookingsList.filter((b) => b.scheduledDate === d).length;
-            const label = getRelativeDateLabel(d, todayMauritius);
-            return (
+        {/* Filters Bar: Date Tabs & Rider Filter Tabs */}
+        <div className="px-5 py-2.5 bg-[#F6F3EC]/60 dark:bg-[#0B0F0C]/60 border-b border-[#E8E5DC] dark:border-[#1D2620] flex flex-col md:flex-row md:items-center justify-between gap-3 text-xs">
+          {/* Quick Date Tabs */}
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="text-[11px] font-semibold text-[#6C746E] dark:text-[#8E9690] mr-1">Date:</span>
+            <button
+              onClick={() => setSelectedDate("ALL")}
+              className={`px-3 py-1 rounded-full text-xs font-semibold transition-all ${
+                selectedDate === "ALL"
+                  ? "bg-[#101412] dark:bg-[#F6F3EC] text-white dark:text-[#101412] shadow-xs"
+                  : "bg-[var(--bg-card)] text-[#6C746E] dark:text-[#8E9690] hover:text-[#101412] dark:hover:text-[#F6F3EC] border border-[#E8E5DC] dark:border-[#1D2620]"
+              }`}
+            >
+              All ({activeBookingsList.length})
+            </button>
+            {uniqueDates.map((d) => {
+              const count = activeBookingsList.filter((b) => b.scheduledDate === d).length;
+              const label = getRelativeDateLabel(d, todayMauritius);
+              return (
+                <button
+                  key={d}
+                  onClick={() => setSelectedDate(d)}
+                  className={`px-3 py-1 rounded-full text-xs font-semibold transition-all flex items-center gap-1.5 ${
+                    selectedDate === d
+                      ? "bg-[#7ed957] text-[#101412] font-bold shadow-xs"
+                      : "bg-[var(--bg-card)] text-[#6C746E] dark:text-[#8E9690] hover:text-[#101412] dark:hover:text-[#F6F3EC] border border-[#E8E5DC] dark:border-[#1D2620]"
+                  }`}
+                >
+                  <span>{label}</span>
+                  <span className={`text-[10px] px-1.5 py-0.2 rounded-full ${
+                    selectedDate === d ? "bg-[#101412] text-white" : "bg-[#EDEAE2] dark:bg-[#171E1A] text-[#6C746E] dark:text-[#8E9690]"
+                  }`}>
+                    {count}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Rider Filter Tabs */}
+          <div className="flex flex-wrap items-center gap-1.5 pt-2 md:pt-0 border-t md:border-t-0 border-[#E8E5DC] dark:border-[#1D2620]">
+            <span className="text-[11px] font-semibold text-[#6C746E] dark:text-[#8E9690] mr-1">Rider:</span>
+            {["ALL", "Moses", "Thierry", "Sherif"].map((r) => (
               <button
-                key={d}
-                onClick={() => setSelectedDate(d)}
-                className={`px-3 py-1 rounded-full text-xs font-semibold transition-all flex items-center gap-1.5 ${
-                  selectedDate === d
-                    ? "bg-[#7ed957] text-[#101412] font-bold shadow-xs"
+                key={r}
+                onClick={() => setSelectedRider(r)}
+                className={`px-2.5 py-0.5 rounded-full text-[11px] font-semibold transition-all ${
+                  selectedRider === r
+                    ? "bg-[#101412] dark:bg-[#F6F3EC] text-white dark:text-[#101412]"
                     : "bg-[var(--bg-card)] text-[#6C746E] dark:text-[#8E9690] hover:text-[#101412] dark:hover:text-[#F6F3EC] border border-[#E8E5DC] dark:border-[#1D2620]"
                 }`}
               >
-                <span>{label}</span>
-                <span className={`text-[10px] px-1.5 py-0.2 rounded-full ${
-                  selectedDate === d ? "bg-[#101412] text-white" : "bg-[#EDEAE2] dark:bg-[#171E1A] text-[#6C746E] dark:text-[#8E9690]"
-                }`}>
-                  {count}
-                </span>
+                {r === "ALL" ? "All Riders" : r}
               </button>
-            );
-          })}
+            ))}
+          </div>
         </div>
+
+        {/* Quick Dispatch Walk-in Modal */}
+        {isQuickDispatchOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
+            <div className="w-full max-w-lg rounded-[28px] bg-[var(--bg-card)] border border-[#E8E5DC] dark:border-[#1D2620] p-6 shadow-2xl space-y-5 animate-in fade-in zoom-in-95">
+              <div className="flex items-center justify-between pb-3 border-b border-[#E8E5DC] dark:border-[#1D2620]">
+                <div>
+                  <h3 className="font-display text-lg font-bold text-[#101412] dark:text-[#F6F3EC]">
+                    ⚡ Quick Dispatch Walk-in
+                  </h3>
+                  <p className="text-xs text-[#6C746E] dark:text-[#8E9690]">
+                    Create a trip or delivery immediately and assign a rider.
+                  </p>
+                </div>
+                <button
+                  onClick={() => setIsQuickDispatchOpen(false)}
+                  className="p-1 rounded-full text-[#6C746E] hover:text-[#101412] dark:hover:text-[#F6F3EC]"
+                >
+                  ✕
+                </button>
+              </div>
+
+              <form onSubmit={handleCreateQuickDispatch} className="space-y-4 text-xs">
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block font-semibold text-[#101412] dark:text-[#F6F3EC] mb-1">
+                      Passenger / Customer Name *
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="e.g. Customer A"
+                      value={quickForm.customerName}
+                      onChange={(e) => setQuickForm({ ...quickForm, customerName: e.target.value })}
+                      className="w-full rounded-xl bg-[#F6F3EC] dark:bg-[#0B0F0C] border border-[#E8E5DC] dark:border-[#1D2620] p-2.5 text-[#101412] dark:text-[#F6F3EC] focus:border-[#7ed957] focus:outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="block font-semibold text-[#101412] dark:text-[#F6F3EC] mb-1">
+                      Phone Number (WhatsApp)
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="e.g. +230 5932 3776"
+                      value={quickForm.customerPhone}
+                      onChange={(e) => setQuickForm({ ...quickForm, customerPhone: e.target.value })}
+                      className="w-full rounded-xl bg-[#F6F3EC] dark:bg-[#0B0F0C] border border-[#E8E5DC] dark:border-[#1D2620] p-2.5 text-[#101412] dark:text-[#F6F3EC] focus:border-[#7ed957] focus:outline-none"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block font-semibold text-[#101412] dark:text-[#F6F3EC] mb-1">
+                      Service Type
+                    </label>
+                    <select
+                      value={quickForm.serviceKind}
+                      onChange={(e) => setQuickForm({ ...quickForm, serviceKind: e.target.value })}
+                      className="w-full rounded-xl bg-[#F6F3EC] dark:bg-[#0B0F0C] border border-[#E8E5DC] dark:border-[#1D2620] p-2.5 text-[#101412] dark:text-[#F6F3EC] focus:border-[#7ed957] focus:outline-none"
+                    >
+                      <option value="trip">🚗 Passenger Trip</option>
+                      <option value="errand_or_delivery">🚚 Food / Package Delivery</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block font-semibold text-[#101412] dark:text-[#F6F3EC] mb-1">
+                      Assigned Rider
+                    </label>
+                    <select
+                      value={quickForm.assignedRider}
+                      onChange={(e) => setQuickForm({ ...quickForm, assignedRider: e.target.value })}
+                      className="w-full rounded-xl bg-[#F6F3EC] dark:bg-[#0B0F0C] border border-[#E8E5DC] dark:border-[#1D2620] p-2.5 text-[#101412] dark:text-[#F6F3EC] focus:border-[#7ed957] focus:outline-none"
+                    >
+                      <option value="Moses">Moses (Campus Rider)</option>
+                      <option value="Thierry">Thierry (Delivery)</option>
+                      <option value="Sherif">Sherif (Fleet Lead)</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block font-semibold text-[#101412] dark:text-[#F6F3EC] mb-1">
+                      Pickup Address *
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="e.g. ALCHE Campus"
+                      value={quickForm.pickupAddress}
+                      onChange={(e) => setQuickForm({ ...quickForm, pickupAddress: e.target.value })}
+                      className="w-full rounded-xl bg-[#F6F3EC] dark:bg-[#0B0F0C] border border-[#E8E5DC] dark:border-[#1D2620] p-2.5 text-[#101412] dark:text-[#F6F3EC] focus:border-[#7ed957] focus:outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="block font-semibold text-[#101412] dark:text-[#F6F3EC] mb-1">
+                      Destination Address *
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="e.g. L'Express bus stop"
+                      value={quickForm.deliveryAddress}
+                      onChange={(e) => setQuickForm({ ...quickForm, deliveryAddress: e.target.value })}
+                      className="w-full rounded-xl bg-[#F6F3EC] dark:bg-[#0B0F0C] border border-[#E8E5DC] dark:border-[#1D2620] p-2.5 text-[#101412] dark:text-[#F6F3EC] focus:border-[#7ed957] focus:outline-none"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-3 gap-3">
+                  <div>
+                    <label className="block font-semibold text-[#101412] dark:text-[#F6F3EC] mb-1">
+                      Date
+                    </label>
+                    <select
+                      value={quickForm.scheduledDate || todayMauritius}
+                      onChange={(e) => setQuickForm({ ...quickForm, scheduledDate: e.target.value })}
+                      className="w-full rounded-xl bg-[#F6F3EC] dark:bg-[#0B0F0C] border border-[#E8E5DC] dark:border-[#1D2620] p-2.5 text-[#101412] dark:text-[#F6F3EC] focus:border-[#7ed957] focus:outline-none"
+                    >
+                      <option value={todayMauritius}>Today ({todayMauritius})</option>
+                      <option value={tomorrowMauritius}>Tomorrow ({tomorrowMauritius})</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block font-semibold text-[#101412] dark:text-[#F6F3EC] mb-1">
+                      Time Slot *
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="e.g. 12:45 pm"
+                      value={quickForm.scheduledTime}
+                      onChange={(e) => setQuickForm({ ...quickForm, scheduledTime: e.target.value })}
+                      className="w-full rounded-xl bg-[#F6F3EC] dark:bg-[#0B0F0C] border border-[#E8E5DC] dark:border-[#1D2620] p-2.5 text-[#101412] dark:text-[#F6F3EC] focus:border-[#7ed957] focus:outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="block font-semibold text-[#101412] dark:text-[#F6F3EC] mb-1">
+                      Payment
+                    </label>
+                    <select
+                      value={quickForm.paymentMethod}
+                      onChange={(e) => setQuickForm({ ...quickForm, paymentMethod: e.target.value })}
+                      className="w-full rounded-xl bg-[#F6F3EC] dark:bg-[#0B0F0C] border border-[#E8E5DC] dark:border-[#1D2620] p-2.5 text-[#101412] dark:text-[#F6F3EC] focus:border-[#7ed957] focus:outline-none"
+                    >
+                      <option value="cash">Cash</option>
+                      <option value="juice">Juice / Bank Transfer</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-end gap-2 pt-3 border-t border-[#E8E5DC] dark:border-[#1D2620]">
+                  <button
+                    type="button"
+                    onClick={() => setIsQuickDispatchOpen(false)}
+                    className="px-4 py-2 rounded-full font-semibold text-[#6C746E] hover:text-[#101412] dark:hover:text-[#F6F3EC]"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={creatingBooking}
+                    className="px-5 py-2 rounded-full font-bold bg-[#7ed957] text-[#101412] hover:bg-[#72c94d] shadow-sm transition-all disabled:opacity-50"
+                  >
+                    {creatingBooking ? "Dispatching..." : "Confirm & Dispatch 🛵"}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
 
         {filteredBookings.length === 0 ? (
           <div className="p-12 text-center text-[#6C746E] dark:text-[#8E9690] text-xs">
