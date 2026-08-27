@@ -42,6 +42,7 @@ export interface PreBooking {
   trackingUrl?: string;
   paymentStatus?: "unpaid" | "paid";
   paymentMethod?: string;
+  fareAmount?: number | string;
   reminderSent?: boolean;
   createdAt: string;
   updatedAt: string;
@@ -1288,12 +1289,14 @@ export async function updatePreBookingDetails(args: {
 }): Promise<{ ok: boolean; booking?: PreBooking; error?: string }> {
   const all = await listAllPreBookings();
   const idQuery = args.bookingId.trim().toLowerCase();
+  const phoneDigits = args.bookingId.replace(/\D/g, "");
 
   const target = all.find(
     (b) =>
       b.id.toLowerCase() === idQuery ||
       (b.kiloDeliveryId && b.kiloDeliveryId.toLowerCase() === idQuery) ||
-      b.customerPhone.replace(/\D/g, "") === idQuery.replace(/\D/g, "")
+      (phoneDigits.length > 5 && b.customerPhone.replace(/\D/g, "").includes(phoneDigits)) ||
+      (b.customerName && b.customerName.toLowerCase().includes(idQuery))
   );
 
   if (!target) {
@@ -1306,7 +1309,23 @@ export async function updatePreBookingDetails(args: {
   if (args.packageDescription) target.packageDescription = args.packageDescription.trim();
   if (args.scheduledDate) target.scheduledDate = resolveIsoDate(args.scheduledDate);
   if (args.scheduledTime) target.scheduledTime = args.scheduledTime.trim();
-  if (args.assignedRider) target.assignedRider = args.assignedRider.trim();
+  if (args.assignedRider) {
+    const newRiderName = args.assignedRider.trim();
+    target.assignedRider = newRiderName;
+    const riderProfile = findRiderByName(newRiderName);
+    if (riderProfile?.kiloRiderId && target.kiloDeliveryId) {
+      try {
+        await assignDeliveryRider(target.kiloDeliveryId, riderProfile.kiloRiderId);
+        logInfo("prebooking", "synced updated rider to kilo", {
+          kiloDeliveryId: target.kiloDeliveryId,
+          rider: newRiderName,
+          kiloRiderId: riderProfile.kiloRiderId,
+        });
+      } catch (err) {
+        logWarn("prebooking", "failed to sync updated rider to kilo", formatError(err));
+      }
+    }
+  }
 
   target.updatedAt = new Date().toISOString();
   await savePreBooking(target);

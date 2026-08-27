@@ -60,9 +60,14 @@ interface FareEstimateInput {
   packageDescription?: string;
   pickupAddress?: string;
   deliveryAddress?: string;
+  fareAmount?: number | string;
 }
 
 export function estimateBookingFare(booking: FareEstimateInput): number {
+  if (booking.fareAmount !== undefined && booking.fareAmount !== null && booking.fareAmount !== "") {
+    const num = Number(booking.fareAmount);
+    if (!isNaN(num) && num > 0) return num;
+  }
   const desc = (booking.packageDescription || "").toLowerCase();
   const route = `${booking.pickupAddress || ""} ${booking.deliveryAddress || ""}`.toLowerCase();
   const isTrip = booking.serviceKind === "trip" || desc.includes("passenger") || desc.includes("trip") || desc.includes("ride");

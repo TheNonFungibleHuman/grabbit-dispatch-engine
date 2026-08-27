@@ -29,7 +29,8 @@ function hasImageMessage(message: IncomingUserMessage): boolean {
 }
 
 const recentSentReplies = new Map<string, { text: string; at: number }>();
-const SENT_REPLY_DEDUP_WINDOW_MS = 2500;
+const recentInboundTurns = new Map<string, { text: string; at: number }>();
+const SENT_REPLY_DEDUP_WINDOW_MS = 5000;
 
 async function sendAndRecord(args: {
   to: string;
@@ -75,6 +76,25 @@ export async function processIncomingUserMessage(
   message: IncomingUserMessage,
 ): Promise<void> {
   const to = toE164(message.sender);
+  const now = Date.now();
+  const lastInbound = recentInboundTurns.get(message.sender);
+
+  // Suppress rapid duplicate webhook triggers (e.g. duplicate webhook deliveries for emojis/acks within 5s)
+  if (
+    lastInbound &&
+    now - lastInbound.at < 5000 &&
+    (lastInbound.text === message.text || (message.text && isShortAcknowledgement(message.text)))
+  ) {
+    logWarn("agent", "suppressing rapid duplicate inbound acknowledgment turn", {
+      sender: message.sender,
+      messageId: message.messageId,
+      text: message.text,
+      gapMs: now - lastInbound.at,
+    });
+    return;
+  }
+  recentInboundTurns.set(message.sender, { text: message.text || "", at: now });
+
   logInfo("agent", "process start", {
     messageId: message.messageId,
     sender: message.sender,

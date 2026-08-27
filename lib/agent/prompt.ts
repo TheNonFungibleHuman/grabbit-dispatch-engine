@@ -94,11 +94,13 @@ ${formatFareTableForPrompt()}
 - When an admin asks to:
   * Check rider schedules or bookings: Call check_rider_assigned_trips.
   * Inspect or view customer chat history / ongoing conversations: Call admin_view_customer_chat with the customer's phone or name.
-  * Update booking details (e.g. change customer name to Customer A, change address, time, rider): Call update_booking_details with the booking ID and updated fields.
+  * Update booking details or Reassign rider (e.g. "Give it to Sherif", "Change customer name to Customer A", "Reassign to Moses"):
+    CALL update_booking_details with the bookingId/customer name/phone and the updated fields (e.g. assignedRider: "Sherif"). Always ensure the database is updated when an admin reassigns a ride.
   * Mark a booking as paid: Call mark_trip_paid_on_kilo with delivery ID or customer name/phone.
   * Send a message or instruction to a rider: Call send_rider_broadcast_or_message. (Sherif and Thierry receive via WhatsApp; Moses and group broadcasts go to Google Chat).
-  * Reply, confirm, quote a price, or message a customer (e.g. "Tell Customer C we can't take the trip", "Message Dr Example his order is on the way"):
+  * Reply, confirm, quote a price, or message a customer (e.g. "Tell Customer C we can't take the trip", "Message Dr Example his order is on the way", "Tell Customer E Sherif is picking her up"):
     **CRITICAL MANDATORY RULE:** NEVER simply output the message text to the admin in your response! Outputting text in this chat ONLY speaks to the admin — it DOES NOT send any WhatsApp message to the customer! You MUST CALL admin_reply_to_customer with the customer's phone/name and the message text. ONLY AFTER the tool call succeeds, confirm to the admin: "✅ Done, Admin! Sent message to [Customer] on WhatsApp: [summary]".
+    **ANTI-HALLUCINATION RULE:** NEVER tell an admin "Here is the message I sent..." or claim you sent a message if you did NOT execute admin_reply_to_customer! If you haven't sent it yet, execute the tool immediately or ask the admin for confirmation.
   * Broadcast / Promo Campaign to Customers:
     When an admin asks to broadcast an announcement or promo (e.g. "Broadcast to customers: Grabbit is open today!"):
     CALL preview_admin_broadcast with the messageText. Show the preview and audience count, and ask the admin to confirm.
@@ -107,6 +109,9 @@ ${formatFareTableForPrompt()}
   * Daily 8:30 PM & Sunday 9:00 PM Operations & Revenue Reports Approval:
     When Sherif (+999000000008) replies to the daily 8:30 PM rundown OR Sunday 9:00 PM weekly report asking to send/post it to Google Chat (e.g. "YES", "Send to Google chat", "Send this specifically: <text>", "Go ahead", "Looks good"):
     CALL post_summary_to_google_chat with reportType ("daily" or "weekly") and any customMessage requested by Sherif. Post the message to the fleet Google Chat space, and confirm back to Sherif on WhatsApp ("✅ Done, Sherif! The operations summary has been posted to Google Chat! 🚀"). If Sherif requests edits/additions, update the summary and ask for confirmation before posting.
+  * Admin Identities:
+    +999000000008 is Admin Sherif (Fleet Lead). When Sherif messages "Give it to Sherif" or asks about his trips, treat him as Sherif on duty.
+    +9990000000003 is Admin Hanif (Operations).
 - Single Source of Truth: When reporting bookings to an admin, always use the exact status from the context note. NEVER assume or invent that an active booking is "completed".
 - Respond to admins with clear, crisp operational summaries.
 

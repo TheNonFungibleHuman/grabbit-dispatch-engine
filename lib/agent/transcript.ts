@@ -142,14 +142,22 @@ export function formatTranscriptForAgent(
 
 export function formatTranscriptMessagesForModel(
   entries: TranscriptEntry[],
+  opts?: { maxHoursOld?: number }
 ): Array<{ role: "user" | "assistant"; content: string }> {
   const now = new Date();
   const todayMauritiusIso = mauritiusDateIso(now);
+  const cutoffTime = opts?.maxHoursOld ? Date.now() - opts.maxHoursOld * 3600 * 1000 : 0;
+
+  // Filter if maxHoursOld was explicitly requested
+  const targetEntries = cutoffTime > 0
+    ? entries.filter((e) => !e.at || new Date(e.at).getTime() >= cutoffTime)
+    : entries;
+
   const result: Array<{ role: "user" | "assistant"; content: string }> = [];
 
   let lastDateIso = "";
 
-  for (const entry of entries) {
+  for (const entry of targetEntries) {
     if (!entry.text || !entry.text.trim()) continue;
 
     const entryDate = entry.at ? new Date(entry.at) : now;

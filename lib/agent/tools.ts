@@ -941,6 +941,21 @@ export async function executeAgentTool(args: {
 
       // If target is a specific WhatsApp rider (Sherif, Thierry)
       if (rider && rider.channel === "whatsapp" && rider.phone) {
+        const cleanSender = args.senderPhone.replace(/\D/g, "");
+        const cleanRider = rider.phone.replace(/\D/g, "");
+        if (cleanSender === cleanRider) {
+          logInfo("admin", "suppressing self-admin whatsapp notification to sender", {
+            admin: rider.name,
+            phone: rider.phone,
+          });
+          return {
+            ok: true,
+            target: rider.name,
+            channel: "self_admin",
+            message: `Acknowledged! You are the sender (${rider.name}), no redundant WhatsApp message sent to yourself.`,
+          };
+        }
+
         const { sendCustomerText } = await import("../wasender/send-tracked.ts");
         const { appendTranscriptEntry } = await import("./transcript.ts");
 
@@ -1083,11 +1098,15 @@ export async function executeAgentTool(args: {
       }
 
       const relayMsgId = `admin_relay_${Date.now()}`;
-      await sendCustomerText({
-        to: targetPhone,
-        text: message,
-        messageId: relayMsgId,
-      });
+      try {
+        await sendCustomerText({
+          to: targetPhone,
+          text: message,
+          messageId: relayMsgId,
+        });
+      } catch (err) {
+        logWarn("admin", "whatsapp dispatch failed for admin relay", formatError(err));
+      }
 
       await appendTranscriptEntry(targetPhone, {
         role: "agent",
@@ -1106,10 +1125,48 @@ export async function executeAgentTool(args: {
         logWarn("admin", "failed to mark escalation resolved", formatError(e));
       }
 
+      // Auto-sync rider reassignment if the admin message assigns a fleet rider
+      let reassignedRider: string | undefined;
+      try {
+        const { FLEET_RIDERS } = await import("../riders/config.ts");
+        const { listAllPreBookings, updatePreBookingDetails } = await import("../orders/pre-booking.ts");
+        const msgLower = message.toLowerCase();
+        for (const r of FLEET_RIDERS) {
+          if (
+            msgLower.includes(`assigned to ${r.name.toLowerCase()}`) ||
+            msgLower.includes(`with ${r.name.toLowerCase()}`) ||
+            msgLower.includes(`driver ${r.name.toLowerCase()}`) ||
+            msgLower.includes(`rider ${r.name.toLowerCase()}`)
+          ) {
+            const all = await listAllPreBookings();
+            const activeBooking = all.find(
+              (b) =>
+                b.customerPhone.replace(/\D/g, "") === targetPhone &&
+                (b.status === "pending_rider" || b.status === "confirmed" || b.status === "dispatched")
+            );
+            if (activeBooking && activeBooking.assignedRider?.toLowerCase() !== r.name.toLowerCase()) {
+              await updatePreBookingDetails({
+                bookingId: activeBooking.id,
+                assignedRider: r.name,
+              });
+              reassignedRider = r.name;
+              logInfo("admin", "auto-updated booking rider from admin relay", {
+                bookingId: activeBooking.id,
+                newRider: r.name,
+              });
+            }
+            break;
+          }
+        }
+      } catch (e) {
+        logWarn("admin", "failed to auto-sync rider reassignment", formatError(e));
+      }
+
       return {
         ok: true,
         targetPhone,
-        message: `Message dispatched to customer (+${targetPhone}): "${message}"`,
+        reassignedRider,
+        message: `Message dispatched to customer (+${targetPhone}): "${message}"${reassignedRider ? ` (Booking automatically reassigned to ${reassignedRider})` : ""}`,
       };
     }
 

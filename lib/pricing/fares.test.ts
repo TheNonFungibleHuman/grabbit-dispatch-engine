@@ -87,6 +87,14 @@ describe("estimateBookingFare parity with legacy rundown table", () => {
       estimateBookingFare({ ...base, serviceKind: "errand", deliveryAddress: "Mahogany" }),
       100,
     );
+    assert.equal(
+      estimateBookingFare({ ...base, fareAmount: 150, deliveryAddress: "Mahogany" }),
+      150,
+    );
+    assert.equal(
+      estimateBookingFare({ ...base, fareAmount: "120", deliveryAddress: "Mahogany" }),
+      120,
+    );
   });
 });
 

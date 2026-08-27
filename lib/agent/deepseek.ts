@@ -179,7 +179,7 @@ export async function generateAgentReply(
     const { loadTranscript, formatTranscriptMessagesForModel } = await import("./transcript.ts");
     const transcript = await loadTranscript(input.sender);
     const recentEntries = transcript.entries.slice(-12);
-    const formattedHistory = formatTranscriptMessagesForModel(recentEntries);
+    const formattedHistory = formatTranscriptMessagesForModel(recentEntries, { maxHoursOld: 36 });
     messages.push(...formattedHistory);
   } catch (error) {
     logWarn("agent", "failed to load transcript for history", formatError(error));

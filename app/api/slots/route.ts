@@ -50,9 +50,10 @@ export async function POST(request: Request) {
       deliveryAddress,
       scheduledDate,
       scheduledTime,
-      assignedRider,
+      assignedRider = "Sherif",
       serviceKind = "trip",
       paymentMethod = "cash",
+      fareAmount,
       packageDescription,
     } = body;
 
@@ -65,6 +66,10 @@ export async function POST(request: Request) {
 
     const { savePreBooking, syncBookingToKiloIfMissing } =
       await import("@/lib/orders/pre-booking");
+    const { notifyRiderForBooking } = await import("@/lib/riders/notify-rider");
+    const { findRiderByName } = await import("@/lib/riders/config");
+    const { sendCustomerText } = await import("@/lib/wasender/send-tracked");
+    const { appendTranscriptEntry } = await import("@/lib/agent/transcript");
 
     const dateIso = scheduledDate || mauritiusDateIso(new Date());
     const cleanTime = scheduledTime.replace(/\s+/g, "").toLowerCase();
@@ -87,6 +92,7 @@ export async function POST(request: Request) {
       packageDescription: packageDescription || (serviceKind === "trip" ? `Trip to ${deliveryAddress}` : `Delivery from ${pickupAddress}`),
       status: "confirmed" as const,
       paymentMethod,
+      fareAmount: fareAmount ? String(fareAmount).trim() : undefined,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
@@ -94,10 +100,65 @@ export async function POST(request: Request) {
     await savePreBooking(newBooking);
     const synced = await syncBookingToKiloIfMissing(newBooking);
 
+    // 1. Notify the assigned fleet rider (WhatsApp for Sherif/Thierry, Google Chat for Moses)
+    try {
+      await notifyRiderForBooking({
+        bookingId: synced.id,
+        customerName,
+        customerPhone: customerPhone || "Walk-in",
+        serviceKind: serviceKind === "trip" ? "trip" : "delivery",
+        pickupAddress,
+        dropoffAddress: deliveryAddress,
+        scheduledTime: `${scheduledTime} (${dateIso})`,
+        assignedRider: assignedRider || "Sherif",
+        trackingUrl: synced.trackingUrl,
+      });
+    } catch (riderErr) {
+      console.error("[slots] failed to notify rider", riderErr);
+    }
+
+    // 2. Notify the customer via WhatsApp if valid phone provided
+    const cleanPhone = (customerPhone || "").replace(/\D/g, "");
+    if (cleanPhone.length >= 7) {
+      const to = customerPhone.startsWith("+") ? customerPhone : `+${cleanPhone}`;
+      const riderProfile = findRiderByName(assignedRider || "Sherif");
+      const riderContact = riderProfile?.phone ? `${riderProfile.name} (${riderProfile.phone})` : (riderProfile?.name || assignedRider);
+      const fareLine = fareAmount ? `• *Fare:* Rs ${fareAmount}` : "";
+      const customerMsg = [
+        `Hello ${customerName}! 👋 Your ${serviceKind === "trip" ? "trip" : "delivery"} has been confirmed by Grabbit Dispatch. ✅`,
+        ``,
+        `🛵 *Booking Details:*`,
+        `• *Pickup:* ${pickupAddress}`,
+        `• *Destination:* ${deliveryAddress}`,
+        `• *Time:* ${scheduledTime} (${dateIso})`,
+        fareLine,
+        `• *Payment:* ${paymentMethod === "cash" ? "Cash to rider" : "Bank Transfer / Juice"}`,
+        `• *Assigned Rider:* ${riderContact}`,
+        synced.trackingUrl ? `\n🔴 *Live Tracking:* ${synced.trackingUrl}` : ``,
+        ``,
+        `We look forward to taking you! 🛵⚡`,
+      ].filter(Boolean).join("\n");
+
+      try {
+        await sendCustomerText({
+          to,
+          text: customerMsg,
+          messageId: `dispatch_${synced.id}`,
+        });
+        await appendTranscriptEntry(to, {
+          role: "agent",
+          text: customerMsg,
+          messageId: `dispatch_${synced.id}`,
+        });
+      } catch (custErr) {
+        console.error("[slots] failed to send customer whatsapp confirmation", custErr);
+      }
+    }
+
     return NextResponse.json({
       ok: true,
       booking: synced,
-      message: `Booking created successfully for ${customerName}`,
+      message: `Booking created successfully for ${customerName} (Rider & Customer notified)`,
     });
   } catch (err) {
     return NextResponse.json(

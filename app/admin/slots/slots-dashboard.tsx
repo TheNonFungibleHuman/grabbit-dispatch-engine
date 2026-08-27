@@ -66,6 +66,7 @@ export function SlotsDashboard(props: {
     scheduledTime: "12:45 pm",
     assignedRider: "Moses",
     paymentMethod: "cash",
+    fareAmount: "80",
   });
 
   function getMauritiusIsoDate(offsetDays: number = 0): string {
@@ -300,6 +301,7 @@ export function SlotsDashboard(props: {
           scheduledTime: "12:45 pm",
           assignedRider: "Moses",
           paymentMethod: "cash",
+          fareAmount: "80",
         });
         await refreshBookings();
       } else {
@@ -878,6 +880,18 @@ export function SlotsDashboard(props: {
                 <div className="grid grid-cols-3 gap-3">
                   <div>
                     <label className="block font-semibold text-[#101412] dark:text-[#F6F3EC] mb-1">
+                      Fare (Rs)
+                    </label>
+                    <input
+                      type="number"
+                      placeholder="e.g. 80"
+                      value={quickForm.fareAmount}
+                      onChange={(e) => setQuickForm({ ...quickForm, fareAmount: e.target.value })}
+                      className="w-full rounded-xl bg-[#F6F3EC] dark:bg-[#0B0F0C] border border-[#E8E5DC] dark:border-[#1D2620] p-2.5 text-[#101412] dark:text-[#F6F3EC] focus:border-[#7ed957] focus:outline-none font-bold"
+                    />
+                  </div>
+                  <div>
+                    <label className="block font-semibold text-[#101412] dark:text-[#F6F3EC] mb-1">
                       Date
                     </label>
                     <select
@@ -902,18 +916,26 @@ export function SlotsDashboard(props: {
                       className="w-full rounded-xl bg-[#F6F3EC] dark:bg-[#0B0F0C] border border-[#E8E5DC] dark:border-[#1D2620] p-2.5 text-[#101412] dark:text-[#F6F3EC] focus:border-[#7ed957] focus:outline-none"
                     />
                   </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className="block font-semibold text-[#101412] dark:text-[#F6F3EC] mb-1">
-                      Payment
+                      Payment Method
                     </label>
                     <select
                       value={quickForm.paymentMethod}
                       onChange={(e) => setQuickForm({ ...quickForm, paymentMethod: e.target.value })}
                       className="w-full rounded-xl bg-[#F6F3EC] dark:bg-[#0B0F0C] border border-[#E8E5DC] dark:border-[#1D2620] p-2.5 text-[#101412] dark:text-[#F6F3EC] focus:border-[#7ed957] focus:outline-none"
                     >
-                      <option value="cash">Cash</option>
+                      <option value="cash">Cash to Rider</option>
                       <option value="juice">Juice / Bank Transfer</option>
                     </select>
+                  </div>
+                  <div className="flex items-end">
+                    <p className="text-[11px] text-[#6C746E] dark:text-[#8E9690] pb-2">
+                      ⚡ Automatically sends WhatsApp booking confirmation to customer and notifies rider!
+                    </p>
                   </div>
                 </div>
 
