@@ -50,12 +50,27 @@ export interface PreBooking {
 
 export async function listAllPreBookings(): Promise<PreBooking[]> {
   const { summaries } = await getIndex();
-  const bookings: PreBooking[] = [];
-  for (const summary of summaries) {
-    const record = await readBookingFile<PreBooking>(summary.id);
-    if (record) bookings.push(record);
-  }
-  return bookings;
+  // Return summaries directly (which contain all booking metadata) for ultra-fast single query performance
+  return summaries.map((s) => ({
+    id: s.id,
+    status: (s.status ?? "confirmed") as PreBooking["status"],
+    assignedRider: s.assignedRider ?? "",
+    scheduledDate: s.scheduledDate ?? "",
+    scheduledTime: s.scheduledTime ?? "",
+    slotKey: s.slotKey ?? "",
+    customerPhone: s.customerPhone ?? "",
+    customerName: s.customerName ?? "",
+    serviceKind: (s.serviceKind ?? "trip") as PreBooking["serviceKind"],
+    tripType: s.tripType as PreBooking["tripType"],
+    pickupAddress: s.pickupAddress ?? "",
+    deliveryAddress: s.deliveryAddress ?? "",
+    kiloDeliveryId: s.kiloDeliveryId,
+    fareAmount: s.fareAmount,
+    paymentMethod: s.paymentMethod,
+    paymentStatus: s.paymentStatus,
+    createdAt: s.createdAt ?? new Date(0).toISOString(),
+    updatedAt: s.updatedAt ?? s.createdAt ?? new Date(0).toISOString(),
+  }));
 }
 
 export async function savePreBooking(booking: PreBooking): Promise<void> {
@@ -79,6 +94,9 @@ function toSummary(b: PreBooking): BookingSummary {
     pickupAddress: b.pickupAddress,
     deliveryAddress: b.deliveryAddress,
     kiloDeliveryId: b.kiloDeliveryId,
+    fareAmount: b.fareAmount,
+    paymentMethod: b.paymentMethod,
+    paymentStatus: b.paymentStatus,
     createdAt: b.createdAt,
     updatedAt: b.updatedAt,
   };

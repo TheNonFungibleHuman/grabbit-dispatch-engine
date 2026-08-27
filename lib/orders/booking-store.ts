@@ -22,6 +22,9 @@ export interface BookingSummary {
   pickupAddress?: string;
   deliveryAddress?: string;
   kiloDeliveryId?: string;
+  fareAmount?: number | string;
+  paymentMethod?: string;
+  paymentStatus?: "unpaid" | "paid";
   createdAt: string;
   updatedAt: string;
 }
@@ -101,13 +104,26 @@ function summarizeFromRecord(record: Partial<BookingSummary> & { id: string }): 
     pickupAddress: record.pickupAddress,
     deliveryAddress: record.deliveryAddress,
     kiloDeliveryId: record.kiloDeliveryId,
+    fareAmount: record.fareAmount,
+    paymentMethod: record.paymentMethod,
+    paymentStatus: record.paymentStatus,
     createdAt: record.createdAt ?? new Date(0).toISOString(),
     updatedAt: record.updatedAt ?? record.createdAt ?? new Date(0).toISOString(),
   };
 }
 
 async function migrateLegacyIndex(raw: LegacyIndex | null): Promise<IndexState> {
-  const ids = Array.isArray(raw?.ids) ? raw!.ids : [];
+  let ids = Array.isArray(raw?.ids) ? raw!.ids : [];
+  if (ids.length === 0) {
+    try {
+      const paths = await listJsonPaths("grabbit/prebookings/");
+      ids = paths
+        .filter((p) => p.includes("pb_") && p.endsWith(".json"))
+        .map((p) => p.replace("grabbit/prebookings/", "").replace(".json", ""));
+    } catch {
+      ids = [];
+    }
+  }
   const summaries: BookingSummary[] = [];
   for (const id of ids) {
     const record = await readJson<BookingSummary>(bookingPath(id));
