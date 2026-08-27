@@ -6,6 +6,7 @@ import {
   getAvailabilitySnapshot,
   summarizeAvailabilityForAdmin,
 } from "@/lib/schedule/availability";
+import { mauritiusDateIso } from "@/lib/time";
 import { SlotsDashboard } from "./slots-dashboard";
 
 export default async function AdminSlotsPage() {
@@ -19,9 +20,22 @@ export default async function AdminSlotsPage() {
     getAvailabilitySnapshot(),
   ]);
 
-  const bookings = rawBookings.filter(
-    (b) => b.status !== "cancelled" && b.status !== "declined",
-  );
+  const todayIso = mauritiusDateIso(new Date());
+  const allowedDates = new Set([
+    mauritiusDateIso(new Date(), -2),
+    mauritiusDateIso(new Date(), -1),
+    todayIso,
+    mauritiusDateIso(new Date(), 1),
+  ]);
+
+  const bookings = rawBookings.filter((b) => {
+    if (b.status === "cancelled" || b.status === "declined") return false;
+    const bDate =
+      b.scheduledDate && b.scheduledDate !== "today" && b.scheduledDate !== "tomorrow"
+        ? b.scheduledDate
+        : b.slotKey?.split("_")[0] || b.createdAt?.slice(0, 10);
+    return allowedDates.has(bDate) || (b.scheduledDate === "today" && allowedDates.has(todayIso));
+  });
 
   return (
     <SlotsDashboard

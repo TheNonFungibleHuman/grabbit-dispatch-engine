@@ -77,6 +77,7 @@ export function SlotsDashboard(props: {
       if (diffDays === 0) return "Today";
       if (diffDays === 1) return "Tomorrow";
       if (diffDays === -1) return "Yesterday";
+      if (diffDays === -2) return "2 days ago";
       if (diffDays > 1 && diffDays < 7) {
         return new Intl.DateTimeFormat("en-US", { weekday: "short", timeZone: "UTC" }).format(
           new Date(dateStr + "T00:00:00Z"),
@@ -104,10 +105,29 @@ export function SlotsDashboard(props: {
     { label: "All 3 (Thierry, Sherif, Moses)", value: "SHERIF, MOSES, THIERRY(Delivery)" },
   ];
 
-  // Completely filter out cancelled or declined bookings from all views & metrics
+  const allowedDashboardDates = useMemo(() => {
+    return new Set([
+      getMauritiusIsoDate(-2),
+      getMauritiusIsoDate(-1),
+      getMauritiusIsoDate(0),
+      getMauritiusIsoDate(1),
+    ]);
+  }, []);
+
+  // Only show orders from today, tomorrow, yesterday, and 2 days ago (exclude cancelled/declined)
   const activeBookingsList = useMemo(() => {
-    return bookings.filter((b) => b.status !== "cancelled" && b.status !== "declined");
-  }, [bookings]);
+    return bookings.filter((b) => {
+      if (b.status === "cancelled" || b.status === "declined") return false;
+      const bDate =
+        b.scheduledDate && b.scheduledDate !== "today" && b.scheduledDate !== "tomorrow"
+          ? b.scheduledDate
+          : b.slotKey?.split("_")[0] || b.createdAt?.slice(0, 10);
+      return (
+        allowedDashboardDates.has(bDate) ||
+        (b.scheduledDate === "today" && allowedDashboardDates.has(todayMauritius))
+      );
+    });
+  }, [bookings, allowedDashboardDates, todayMauritius]);
 
   async function refreshBookings() {
     setLoading(true);
@@ -241,13 +261,14 @@ export function SlotsDashboard(props: {
   ).length;
 
   const uniqueDates = useMemo(() => {
-    const dates = new Set([
-      todayMauritius,
-      tomorrowMauritius,
-      ...activeBookingsList.map((b) => b.scheduledDate).filter(Boolean),
-    ]);
-    return Array.from(dates).sort().reverse();
-  }, [todayMauritius, tomorrowMauritius, activeBookingsList]);
+    const dates = [
+      getMauritiusIsoDate(1),
+      getMauritiusIsoDate(0),
+      getMauritiusIsoDate(-1),
+      getMauritiusIsoDate(-2),
+    ];
+    return dates;
+  }, []);
 
   function parseTimeToMinutesHelper(timeStr: string): number {
     const match = timeStr.match(/^(\d{1,2}):(\d{2})\s*(am|pm)?$/i);

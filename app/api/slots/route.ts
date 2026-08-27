@@ -5,11 +5,29 @@ import {
   clearAllPreBookings,
   listAllPreBookings,
 } from "@/lib/orders/pre-booking";
+import { mauritiusDateIso } from "@/lib/time";
 
 export async function GET() {
   const { syncBookingToKiloIfMissing } = await import("@/lib/orders/pre-booking");
   const raw = await listAllPreBookings();
-  const valid = raw.filter((b) => b.status !== "cancelled" && b.status !== "declined");
+
+  const todayIso = mauritiusDateIso(new Date());
+  const allowedDates = new Set([
+    mauritiusDateIso(new Date(), -2),
+    mauritiusDateIso(new Date(), -1),
+    todayIso,
+    mauritiusDateIso(new Date(), 1),
+  ]);
+
+  const valid = raw.filter((b) => {
+    if (b.status === "cancelled" || b.status === "declined") return false;
+    const bDate =
+      b.scheduledDate && b.scheduledDate !== "today" && b.scheduledDate !== "tomorrow"
+        ? b.scheduledDate
+        : b.slotKey?.split("_")[0] || b.createdAt?.slice(0, 10);
+    return allowedDates.has(bDate) || (b.scheduledDate === "today" && allowedDates.has(todayIso));
+  });
+
   const bookings = await Promise.all(valid.map((b) => syncBookingToKiloIfMissing(b)));
   return NextResponse.json({
     ok: true,

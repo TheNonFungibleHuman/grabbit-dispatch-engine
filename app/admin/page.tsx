@@ -4,6 +4,7 @@ import { isAdminAuthed } from "@/lib/admin/auth";
 import { getOpsDashboard } from "@/lib/ops/store";
 import { listAllPreBookings } from "@/lib/orders/pre-booking";
 import { getAvailabilitySnapshot } from "@/lib/schedule/availability";
+import { mauritiusDateIso } from "@/lib/time";
 import { OverviewDashboard } from "./overview-dashboard";
 
 export default async function AdminIndexPage() {
@@ -18,9 +19,22 @@ export default async function AdminIndexPage() {
     getOpsDashboard(),
   ]);
 
-  const bookings = rawBookings.filter(
-    (b) => b.status !== "cancelled" && b.status !== "declined",
-  );
+  const todayIso = mauritiusDateIso(new Date());
+  const allowedDates = new Set([
+    mauritiusDateIso(new Date(), -2),
+    mauritiusDateIso(new Date(), -1),
+    todayIso,
+    mauritiusDateIso(new Date(), 1),
+  ]);
+
+  const bookings = rawBookings.filter((b) => {
+    if (b.status === "cancelled" || b.status === "declined") return false;
+    const bDate =
+      b.scheduledDate && b.scheduledDate !== "today" && b.scheduledDate !== "tomorrow"
+        ? b.scheduledDate
+        : b.slotKey?.split("_")[0] || b.createdAt?.slice(0, 10);
+    return allowedDates.has(bDate) || (b.scheduledDate === "today" && allowedDates.has(todayIso));
+  });
 
   return (
     <OverviewDashboard
