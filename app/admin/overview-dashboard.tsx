@@ -41,7 +41,7 @@ export function OverviewDashboard(props: {
   const todayBookings = props.bookings.filter(
     (b) =>
       b.scheduledDate === todayIso ||
-      b.scheduledDate === "today" ||
+      (b.scheduledDate === "today" && b.createdAt?.slice(0, 10) === todayIso) ||
       b.slotKey?.startsWith(todayIso),
   );
 

@@ -50,6 +50,8 @@ function extractMessageBody(message: WasenderIncomingMessage): string {
   const node = (key: string): Record<string, unknown> | undefined =>
     msg[key] as Record<string, unknown> | undefined;
 
+  const docNode = node("documentMessage") || (node("documentWithCaptionMessage")?.message as Record<string, unknown> | undefined)?.documentMessage as Record<string, unknown> | undefined;
+
   return (
     readText(msg.conversation) ??
     readText(node("extendedTextMessage")?.text) ??
@@ -59,6 +61,8 @@ function extractMessageBody(message: WasenderIncomingMessage): string {
     readText(node("listResponseMessage")?.title) ??
     readText((node("listResponseMessage")?.singleSelectReply as Record<string, unknown> | undefined)?.selectedRowId) ??
     readText(node("imageMessage")?.caption) ??
+    readText(docNode?.caption) ??
+    (docNode?.fileName ? `[Document: ${String(docNode.fileName)}]` : undefined) ??
     ""
   );
 }

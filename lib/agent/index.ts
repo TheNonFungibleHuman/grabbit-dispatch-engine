@@ -28,6 +28,15 @@ function hasImageMessage(message: IncomingUserMessage): boolean {
   );
 }
 
+function hasDocumentMessage(message: IncomingUserMessage): boolean {
+  return Boolean(
+    message.raw?.message &&
+      typeof message.raw.message === "object" &&
+      ("documentMessage" in message.raw.message ||
+        "documentWithCaptionMessage" in message.raw.message),
+  );
+}
+
 const recentSentReplies = new Map<string, { text: string; at: number }>();
 const recentInboundTurns = new Map<string, { text: string; at: number }>();
 const SENT_REPLY_DEDUP_WINDOW_MS = 5000;
@@ -101,13 +110,50 @@ export async function processIncomingUserMessage(
     to,
     hasText: Boolean(message.text),
     hasImage: hasImageMessage(message),
+    hasDocument: hasDocumentMessage(message),
   });
 
   await appendTranscriptEntry(message.sender, {
     role: "customer",
-    text: message.text || (hasImageMessage(message) ? "(image)" : ""),
+    text:
+      message.text ||
+      (hasImageMessage(message) ? "(image)" : hasDocumentMessage(message) ? "(document/pdf)" : ""),
     messageId: message.messageId,
   });
+
+  // Handle incoming document attachments (e.g. PDF payment receipts, menus)
+  if (hasDocumentMessage(message)) {
+    const caption = message.text?.trim() || "";
+    const name = message.pushName?.trim();
+    const isPaymentReceipt =
+      caption.toLowerCase().includes("pay") ||
+      caption.toLowerCase().includes("receipt") ||
+      caption.toLowerCase().includes("proof") ||
+      caption.toLowerCase().includes("juice") ||
+      caption.toLowerCase().includes("mcb") ||
+      caption.toLowerCase().includes("absa") ||
+      caption.toLowerCase().includes("here") ||
+      caption.toLowerCase().includes("transfer") ||
+      !caption;
+
+    logInfo("agent", "received document/pdf message", {
+      sender: message.sender,
+      caption,
+      isPaymentReceipt,
+    });
+
+    if (isPaymentReceipt) {
+      await sendAndRecord({
+        to,
+        sender: message.sender,
+        text: name
+          ? `Got your document/payment receipt, ${name}! 📄 Our dispatch team has received it to verify the transfer. Your booking is on the schedule!`
+          : `Got your document/payment receipt! 📄 Our dispatch team has received it to verify the transfer. Your booking is on the schedule!`,
+        messageId: message.messageId,
+      });
+      return;
+    }
+  }
 
   if (hasImageMessage(message) && message.raw?.message) {
     try {

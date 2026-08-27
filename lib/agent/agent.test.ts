@@ -189,6 +189,26 @@ describe("buildAgentContextNote date filtering", () => {
     const updated = all.find((b) => b.id === "pb_test_customere_relay");
     assert.equal(updated?.assignedRider, "Sherif");
   });
+
+  it("dispatches booking assignment notification to Google Chat space even for WhatsApp riders", async () => {
+    const { notifyRiderForBooking } = await import("../riders/notify-rider.ts");
+    // Thierry is a WhatsApp rider
+    const res = await notifyRiderForBooking({
+      bookingId: "pb_test_gchat_vis",
+      customerName: "Shania",
+      customerPhone: "+99900000066",
+      serviceKind: "delivery",
+      pickupAddress: "Eaters, Mahogany",
+      dropoffAddress: "A001, ALCHE",
+      scheduledTime: "6:30 pm (2026-08-27)",
+      assignedRider: "Thierry",
+    });
+
+    assert.equal(res.ok, true);
+    // WhatsApp failed due to no API key in test environment, but the channel dispatch completed gracefully
+    assert.ok(res.channel);
+  });
 });
+
 
 

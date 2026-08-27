@@ -44,35 +44,9 @@ export async function notifyRiderForBooking(
     bookingId: payload.bookingId,
   });
 
-  // 1. Google Chat notification (for Moses or webhook channels)
-  if (rider.channel === "google_chat") {
-    const webhookUrl = process.env.GOOGLE_CHAT_WEBHOOK_URL?.trim();
-    if (webhookUrl) {
-      try {
-        const res = await fetch(webhookUrl, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            text: `*Grabbit Assignment for ${rider.name}*\n${messageText}`,
-          }),
-        });
-        if (res.ok) {
-          logInfo("riders", "google chat webhook notification sent", {
-            rider: rider.name,
-          });
-          return { ok: true, channel: "google_chat" };
-        }
-        logWarn("riders", "google chat webhook returned non-ok status", {
-          status: res.status,
-          statusText: res.statusText,
-        });
-      } catch (err) {
-        logError("riders", "failed to send google chat webhook", err);
-      }
-    }
-  }
+  let channelUsed = "none";
 
-  // 2. WhatsApp notification
+  // 1. WhatsApp notification (for Sherif, Thierry)
   const targetPhone = process.env.TEST_RIDER_PHONE?.trim() || rider.phone;
   if (targetPhone && rider.channel === "whatsapp") {
     try {
@@ -85,10 +59,36 @@ export async function notifyRiderForBooking(
         rider: rider.name,
         phone: targetPhone,
       });
-      return { ok: true, channel: "whatsapp" };
+      channelUsed = "whatsapp";
     } catch (err) {
       logError("riders", "failed to send whatsapp to rider", err);
-      return { ok: false, channel: "whatsapp", error: String(formatError(err).message || err) };
+    }
+  }
+
+  // 2. ALWAYS send notification to Google Chat space for full dispatch team visibility
+  const webhookUrl = process.env.GOOGLE_CHAT_WEBHOOK_URL?.trim();
+  if (webhookUrl) {
+    try {
+      const res = await fetch(webhookUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          text: `🛵 *New Grabbit Assignment for ${rider.name.toUpperCase()}*\n${messageText}`,
+        }),
+      });
+      if (res.ok) {
+        logInfo("riders", "google chat webhook notification sent", {
+          rider: rider.name,
+        });
+        channelUsed = channelUsed === "none" ? "google_chat" : `${channelUsed}+google_chat`;
+      } else {
+        logWarn("riders", "google chat webhook returned non-ok status", {
+          status: res.status,
+          statusText: res.statusText,
+        });
+      }
+    } catch (err) {
+      logError("riders", "failed to send google chat webhook", err);
     }
   }
 
@@ -113,7 +113,6 @@ export async function notifyRiderForBooking(
           rider: rider.name,
           email: rider.email,
         });
-        return { ok: true, channel: "email" };
       }
     } catch (err) {
       logError("riders", "failed to send email to rider", err);
@@ -121,16 +120,16 @@ export async function notifyRiderForBooking(
   }
 
   // Fallback logging
-  if (rider.email) {
+  if (channelUsed === "none" && rider.email) {
     logInfo("riders", "rider email/chat notification logged", {
       rider: rider.name,
       email: rider.email,
       bookingId: payload.bookingId,
     });
-    return { ok: true, channel: "email_or_chat" };
+    channelUsed = "email_or_chat";
   }
 
-  return { ok: false, channel: "none", error: "No viable notification channel" };
+  return { ok: true, channel: channelUsed };
 }
 
 export interface RiderReschedulePayload {

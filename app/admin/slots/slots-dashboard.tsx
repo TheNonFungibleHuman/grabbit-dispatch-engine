@@ -138,7 +138,7 @@ export function SlotsDashboard(props: {
           : b.slotKey?.split("_")[0] || b.createdAt?.slice(0, 10);
       return (
         allowedDashboardDates.has(bDate) ||
-        (b.scheduledDate === "today" && allowedDashboardDates.has(todayMauritius))
+        (b.scheduledDate === "today" && allowedDashboardDates.has(b.createdAt?.slice(0, 10) || todayMauritius))
       );
     });
   }, [bookings, allowedDashboardDates, todayMauritius]);

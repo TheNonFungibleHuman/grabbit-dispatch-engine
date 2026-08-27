@@ -33,7 +33,10 @@ export default async function AdminIndexPage() {
       b.scheduledDate && b.scheduledDate !== "today" && b.scheduledDate !== "tomorrow"
         ? b.scheduledDate
         : b.slotKey?.split("_")[0] || b.createdAt?.slice(0, 10);
-    return allowedDates.has(bDate) || (b.scheduledDate === "today" && allowedDates.has(todayIso));
+    return (
+      allowedDates.has(bDate) ||
+      (b.scheduledDate === "today" && allowedDates.has(b.createdAt?.slice(0, 10) || todayIso))
+    );
   });
 
   return (
