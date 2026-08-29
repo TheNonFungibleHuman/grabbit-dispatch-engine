@@ -94,7 +94,7 @@ export interface MapDraftToCreateInputArgs {
 export function resolveDefaultCollectionMethod(
   serviceKind?: string,
 ): KiloCollectionMethod {
-  return serviceKind === "trip" ? "cash_on_delivery" : "online_checkout";
+  return "cash_on_delivery";
 }
 
 export type PreBookingKiloStatus = "confirmed" | "dispatched" | "completed" | "cancelled";

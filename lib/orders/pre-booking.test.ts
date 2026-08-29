@@ -839,9 +839,9 @@ describe("kilo integration integrity", () => {
   it("resolves collection methods from one shared policy helper", async () => {
     const { resolveDefaultCollectionMethod } = await import("../kilo/map-order.ts");
     assert.equal(resolveDefaultCollectionMethod("trip"), "cash_on_delivery");
-    assert.equal(resolveDefaultCollectionMethod("errand"), "online_checkout");
-    assert.equal(resolveDefaultCollectionMethod("pickup_delivery"), "online_checkout");
-    assert.equal(resolveDefaultCollectionMethod(undefined), "online_checkout");
+    assert.equal(resolveDefaultCollectionMethod("errand"), "cash_on_delivery");
+    assert.equal(resolveDefaultCollectionMethod("pickup_delivery"), "cash_on_delivery");
+    assert.equal(resolveDefaultCollectionMethod(undefined), "cash_on_delivery");
   });
 });
 
