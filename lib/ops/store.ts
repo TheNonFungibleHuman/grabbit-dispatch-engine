@@ -95,6 +95,11 @@ export async function getOpsDashboard(): Promise<{
   };
 }
 
+export async function getRecentOpsEvents(limit = 50): Promise<OpsEvent[]> {
+  const state = await loadOpsState();
+  return (state.recent || []).slice(-limit);
+}
+
 export interface PendingEscalation {
   id: string;
   customerPhone: string;

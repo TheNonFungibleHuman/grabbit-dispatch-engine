@@ -524,6 +524,7 @@ export async function buildAgentContextNote(args: {
   }
 
   let customerProfileNote = "";
+  let customerActiveBookingsNote = "";
   if (!auth.isAdmin && !auth.rider) {
     try {
       const { getCustomerProfile } = await import("../orders/store.ts");
@@ -534,6 +535,41 @@ export async function buildAgentContextNote(args: {
     } catch (e) {
       logWarn("agent", "failed to load customer profile", formatError(e));
     }
+
+    try {
+      const { listAllPreBookings } = await import("../orders/pre-booking.ts");
+      const todayIso = mauritiusDateIso(new Date());
+      const all = await listAllPreBookings();
+      const phoneDigits = args.senderPhone.replace(/\D/g, "");
+      const customerBookings = all.filter((b) => {
+        if (b.customerPhone.replace(/\D/g, "") !== phoneDigits) return false;
+        if (b.status === "cancelled" || b.status === "declined" || b.status === "completed") return false;
+        const bDate = (b.scheduledDate && b.scheduledDate !== "today" && b.scheduledDate !== "tomorrow")
+          ? b.scheduledDate
+          : (b.slotKey?.split("_")[0] || b.createdAt.slice(0, 10));
+        return bDate >= todayIso;
+      });
+
+      if (customerBookings.length > 0) {
+        customerActiveBookingsNote = [
+          `📅 CUSTOMER'S UPCOMING & ADVANCE BOOKINGS (already confirmed on file):`,
+          ...customerBookings.map(
+            (b) => `• Date: ${b.scheduledDate || "Today"} | Time: ${b.scheduledTime} | Route: ${b.pickupAddress} → ${b.deliveryAddress} | Rider: ${b.assignedRider} | Service: ${b.serviceKind} | Status: ${b.status}`
+          ),
+          `NOTE: When customer asks about their upcoming ride or schedule, confirm these exact details!`,
+        ].join("\n");
+      }
+    } catch (e) {
+      logWarn("agent", "failed to load customer active bookings for context", formatError(e));
+    }
+  }
+
+  let learnedGuidelinesNote = "";
+  try {
+    const { getLearnedGuidelinesContextNote } = await import("../ops/self-improve.ts");
+    learnedGuidelinesNote = await getLearnedGuidelinesContextNote();
+  } catch (e) {
+    logWarn("agent", "failed to load learned guidelines", formatError(e));
   }
 
   return [
@@ -542,6 +578,8 @@ export async function buildAgentContextNote(args: {
     `pushName: ${args.pushName?.trim() || "Customer"}`,
     callerRoleNote,
     customerProfileNote,
+    customerActiveBookingsNote,
+    learnedGuidelinesNote,
     photoNote,
     availabilityNote,
     adminBookingsNote,
@@ -1091,9 +1129,26 @@ export async function executeAgentTool(args: {
       }
 
       const value = parseToolArguments(args.toolArguments);
-      const bookingId = String(value.bookingId || "").trim();
+      let bookingId = String(value.bookingId || "").trim();
+
+      if (!bookingId && (value.customerNameOrPhone || value.customerName)) {
+        const query = String(value.customerNameOrPhone || value.customerName).toLowerCase().trim();
+        const { listAllPreBookings } = await import("../orders/pre-booking.ts");
+        const all = await listAllPreBookings();
+        const match = all.find(
+          (b) =>
+            b.id === query ||
+            (b.customerName && b.customerName.toLowerCase().includes(query)) ||
+            (b.customerPhone && b.customerPhone.includes(query)) ||
+            (b.kiloDeliveryId && b.kiloDeliveryId.toLowerCase().includes(query))
+        );
+        if (match) {
+          bookingId = match.id;
+        }
+      }
+
       if (!bookingId) {
-        return { ok: false, error: "bookingId is required" };
+        return { ok: false, error: "bookingId or customerNameOrPhone is required" };
       }
 
       const { updatePreBookingDetails } = await import("../orders/pre-booking.ts");

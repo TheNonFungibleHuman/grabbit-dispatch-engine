@@ -156,13 +156,16 @@ async function processClaimedIncomingMessage(
     ),
   });
 
-  await onUserMessage({
-    messageId: message.key.id,
-    sender,
-    remoteJid: message.key.remoteJid,
-    text,
-    pushName: message.pushName,
-    raw: message,
+  const { withPhoneSessionLock } = await import("./session-lock.ts");
+  await withPhoneSessionLock(sender, async () => {
+    await onUserMessage({
+      messageId: message.key.id,
+      sender,
+      remoteJid: message.key.remoteJid,
+      text,
+      pushName: message.pushName,
+      raw: message,
+    });
   });
 }
 
