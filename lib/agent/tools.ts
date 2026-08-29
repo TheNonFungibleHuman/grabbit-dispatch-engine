@@ -744,6 +744,21 @@ export async function executeAgentTool(args: {
             ? " Pay your rider in cash on delivery."
             : " Complete the transfer and send the receipt to finalize.";
 
+      if (serviceKind === "trip") {
+        return {
+          ok: true,
+          serviceKind: "trip",
+          scheduledDate,
+          scheduledTime,
+          assignedRider: riderName,
+          riderPhone: riderProf?.phone || undefined,
+          status: "confirmed",
+          fareRs,
+          paymentMethod,
+          message: `Your passenger trip for ${scheduledDate} at ${scheduledTime} is confirmed and assigned to rider ${riderName}${riderPhoneStr}! Fare: Rs ${fareRs} (${paymentMethod === "cash" ? "pay rider in cash" : "pre-paid via transfer"}). Contact your rider directly if needed.`,
+        };
+      }
+
       return {
         ok: true,
         serviceKind,
@@ -805,6 +820,22 @@ export async function executeAgentTool(args: {
         };
       }
 
+      const { findRiderByName } = await import("../riders/config.ts");
+      const riderProf = findRiderByName(assignedRider);
+      const riderPhoneStr = riderProf?.phone ? ` (${riderProf.phone})` : "";
+
+      if (result.booking?.serviceKind === "trip") {
+        return {
+          ok: true,
+          serviceKind: "trip",
+          newScheduledDate,
+          newScheduledTime,
+          assignedRider,
+          riderPhone: riderProf?.phone || undefined,
+          message: `Your passenger trip is now rescheduled to ${newScheduledDate} at ${newScheduledTime} with rider ${assignedRider}${riderPhoneStr}!`,
+        };
+      }
+
       const trackingUrl = result.trackingUrl || "https://delivery.grabbit-express.com";
 
       return {
@@ -823,25 +854,46 @@ export async function executeAgentTool(args: {
       const value = parseToolArguments(args.toolArguments);
       const inquiryMessage = String(value.inquiryMessage || "Customer is checking on order status");
 
-      const { listAllPreBookings } = await import("../orders/pre-booking.ts");
+      const { listAllPreBookings, parseTimeToMinutes } = await import("../orders/pre-booking.ts");
       const { notifyRiderCustomerInquiry } = await import("../riders/notify-rider.ts");
+      const { findRiderByName } = await import("../riders/config.ts");
+      const { mauritiusDateIso, mauritiusMinutesOfDay } = await import("../time.ts");
       const phoneClean = args.senderPhone.replace(/\D/g, "");
 
+      const now = new Date();
+      const todayIso = mauritiusDateIso(now);
+      const nowMinutes = mauritiusMinutesOfDay(now);
+
       const all = await listAllPreBookings();
+      // Filter for bookings for TODAY that are active and not in the past by > 45 minutes
       const activeBooking = all
-        .filter(
-          (b) =>
-            b.customerPhone.replace(/\D/g, "") === phoneClean &&
-            (b.status === "pending_rider" || b.status === "confirmed" || b.status === "dispatched"),
-        )
+        .filter((b) => {
+          if (b.customerPhone.replace(/\D/g, "") !== phoneClean) return false;
+          if (b.status !== "pending_rider" && b.status !== "confirmed" && b.status !== "dispatched") return false;
+          const bDate = (b.scheduledDate && b.scheduledDate !== "today" && b.scheduledDate !== "tomorrow")
+            ? b.scheduledDate
+            : (b.slotKey?.split("_")[0] || b.createdAt.slice(0, 10));
+          if (bDate !== todayIso) return false;
+
+          // Check if scheduled time has passed by more than 45 minutes
+          if (b.scheduledTime) {
+            const schedMin = parseTimeToMinutes(b.scheduledTime);
+            if (schedMin !== null && nowMinutes - schedMin > 45) {
+              return false; // Trip was earlier in the day and has concluded
+            }
+          }
+          return true;
+        })
         .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0];
 
       if (!activeBooking) {
         return {
           ok: false,
-          error: "No active delivery or trip found in progress for your number.",
+          error: "No active delivery or trip currently scheduled for right now. If you need to book a new ride or delivery, please check available upcoming slots.",
         };
       }
+
+      const riderProf = findRiderByName(activeBooking.assignedRider);
 
       await notifyRiderCustomerInquiry({
         assignedRider: activeBooking.assignedRider,
@@ -853,11 +905,24 @@ export async function executeAgentTool(args: {
         trackingUrl: activeBooking.trackingUrl,
       });
 
+      if (activeBooking.serviceKind === "trip") {
+        return {
+          ok: true,
+          serviceKind: "trip",
+          assignedRider: activeBooking.assignedRider,
+          riderPhone: riderProf?.phone || undefined,
+          scheduledTime: activeBooking.scheduledTime,
+          message: `I've sent an alert to rider ${activeBooking.assignedRider}. You can also reach your rider directly at ${riderProf?.phone || 'our dispatch team'}.`,
+        };
+      }
+
       return {
         ok: true,
+        serviceKind: activeBooking.serviceKind,
         assignedRider: activeBooking.assignedRider,
+        riderPhone: riderProf?.phone || undefined,
         scheduledTime: activeBooking.scheduledTime,
-        trackingUrl: activeBooking.trackingUrl || "https://delivery.grabbit-express.com",
+        trackingUrl: activeBooking.trackingUrl,
         message: `I've sent an alert to rider ${activeBooking.assignedRider}. You can also follow their real-time map location here: ${activeBooking.trackingUrl || 'https://delivery.grabbit-express.com'}`,
       };
     }

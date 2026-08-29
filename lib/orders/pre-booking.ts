@@ -146,6 +146,11 @@ export async function syncBookingToKiloIfMissing(booking: PreBooking): Promise<P
     return booking;
   }
 
+  // Only route deliveries and errands through Kilo. Passenger trips do NOT route through Kilo.
+  if (booking.serviceKind === "trip") {
+    return booking;
+  }
+
   // If kiloDeliveryId is present, verify it on Kilo
   if (booking.kiloDeliveryId) {
     try {
@@ -740,44 +745,47 @@ export async function createPreBookingRequest(args: {
   let kiloDeliveryId: string | undefined;
   let trackingUrl: string | undefined;
 
-  try {
-    const kiloPayload: CreateKiloDeliveryInput = {
-      serviceKind: kiloServiceKind,
-      errandMode: kiloErrandMode,
-      deliveryMode: "pickup",
-      senderName: sanitizeKiloName(args.customerName),
-      senderPhone: args.customerPhone,
-      receiverName: sanitizeKiloName(args.customerName),
-      receiverPhone: args.customerPhone,
-      pickupAddress: args.pickupAddress,
-      pickupCoords: args.pickupCoords || { lat: -20.1024, lng: 57.5621 },
-      deliveryAddress: args.deliveryAddress,
-      deliveryCoords: args.deliveryCoords || { lat: -20.1026, lng: 57.5620 },
-      packageDescription: args.packageDescription || `${args.serviceKind.toUpperCase()} booking for ${args.scheduledTime}`,
-      packageSize: args.packageSize || "small",
-      packageImages: hasPhotos ? args.packageImages! : [],
-      customerCollectionMethod: resolveDefaultCollectionMethod(args.serviceKind),
-      idempotencyKey: `kilo_${bookingId}`,
-    };
+  // Only create deliveries and errands on Kilo. Passenger trips do NOT route through Kilo.
+  if (args.serviceKind !== "trip") {
+    try {
+      const kiloPayload: CreateKiloDeliveryInput = {
+        serviceKind: kiloServiceKind,
+        errandMode: kiloErrandMode,
+        deliveryMode: "pickup",
+        senderName: sanitizeKiloName(args.customerName),
+        senderPhone: args.customerPhone,
+        receiverName: sanitizeKiloName(args.customerName),
+        receiverPhone: args.customerPhone,
+        pickupAddress: args.pickupAddress,
+        pickupCoords: args.pickupCoords || { lat: -20.1024, lng: 57.5621 },
+        deliveryAddress: args.deliveryAddress,
+        deliveryCoords: args.deliveryCoords || { lat: -20.1026, lng: 57.5620 },
+        packageDescription: args.packageDescription || `${args.serviceKind.toUpperCase()} booking for ${args.scheduledTime}`,
+        packageSize: args.packageSize || "small",
+        packageImages: hasPhotos ? args.packageImages! : [],
+        customerCollectionMethod: resolveDefaultCollectionMethod(args.serviceKind),
+        idempotencyKey: `kilo_${bookingId}`,
+      };
 
-    const kiloRes = await createDelivery(kiloPayload);
-    const delivery = kiloRes.delivery;
-    kiloDeliveryId = delivery.id;
-    trackingUrl = getCustomTrackingUrl(delivery.id, delivery.access_code);
+      const kiloRes = await createDelivery(kiloPayload);
+      const delivery = kiloRes.delivery;
+      kiloDeliveryId = delivery.id;
+      trackingUrl = getCustomTrackingUrl(delivery.id, delivery.access_code);
 
-    if (actualRider?.kiloRiderId) {
-      try {
-        await assignDeliveryRider(delivery.id, actualRider.kiloRiderId);
-        logInfo("prebooking", "auto-assigned rider in Kilo", {
-          deliveryId: delivery.id,
-          riderId: actualRider.kiloRiderId,
-        });
-      } catch (assignErr) {
-        logWarn("prebooking", "kilo assign warning", formatError(assignErr));
+      if (actualRider?.kiloRiderId) {
+        try {
+          await assignDeliveryRider(delivery.id, actualRider.kiloRiderId);
+          logInfo("prebooking", "auto-assigned rider in Kilo", {
+            deliveryId: delivery.id,
+            riderId: actualRider.kiloRiderId,
+          });
+        } catch (assignErr) {
+          logWarn("prebooking", "kilo assign warning", formatError(assignErr));
+        }
       }
+    } catch (kiloErr) {
+      logError("prebooking", "failed to create Kilo delivery", kiloErr);
     }
-  } catch (kiloErr) {
-    logError("prebooking", "failed to create Kilo delivery", kiloErr);
   }
 
   const booking: PreBooking = {

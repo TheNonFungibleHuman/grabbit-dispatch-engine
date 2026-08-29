@@ -208,7 +208,46 @@ describe("buildAgentContextNote date filtering", () => {
     // WhatsApp failed due to no API key in test environment, but the channel dispatch completed gracefully
     assert.ok(res.channel);
   });
+
+  it("decouples passenger trips from Kilo tracking links and includes rider phone number", async () => {
+    const { executeAgentTool } = await import("./tools.ts");
+    const res = (await executeAgentTool({
+      name: "schedule_trip_or_delivery",
+      toolArguments: {
+        serviceKind: "trip",
+        tripType: "one_way",
+        pickupAddress: "ALCHE Campus",
+        deliveryAddress: "Mahogany",
+        customerName: "Test Passenger",
+        paymentMethod: "cash",
+        scheduledDate: "today",
+        scheduledTime: "11:30 am",
+      },
+      senderPhone: "+99900000073",
+    })) as { ok: boolean; trackingUrl?: string; kiloDeliveryId?: string; message: string; riderPhone?: string };
+
+    assert.equal(res.ok, true);
+    assert.equal(res.trackingUrl, undefined, "Passenger trips must not have trackingUrl");
+    assert.equal(res.kiloDeliveryId, undefined, "Passenger trips must not have kiloDeliveryId");
+    assert.ok(res.message.includes("passenger trip"));
+    assert.ok(!res.message.includes("Live Tracking Link:"));
+  });
+
+  it("prevents check_with_rider from alerting riders when no active ride is currently running", async () => {
+    const { executeAgentTool } = await import("./tools.ts");
+    const res = (await executeAgentTool({
+      name: "check_with_rider",
+      toolArguments: {
+        inquiryMessage: "Where is my driver?",
+      },
+      senderPhone: "+99900000013", // Number with no active ride right now
+    })) as { ok: boolean; error?: string };
+
+    assert.equal(res.ok, false);
+    assert.ok(res.error?.includes("No active"));
+  });
 });
+
 
 
 
