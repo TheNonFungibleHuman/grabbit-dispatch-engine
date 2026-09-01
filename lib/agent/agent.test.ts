@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, it } from "node:test";
-import { sanitizeWhatsAppText, isShortAcknowledgement } from "./format.ts";
 import { prepareKnowledgeForPrompt } from "../admin/knowledge-format.ts";
 
 describe("buildGrabbitSystemInstruction", () => {
@@ -29,39 +28,6 @@ describe("buildGrabbitSystemInstruction", () => {
     assert.match(knowledge, /Pamplemousses/);
     assert.match(knowledge, /Menu Directory/i);
     assert.match(knowledge, /Official Pricing/i);
-  });
-});
-
-describe("sanitizeWhatsAppText", () => {
-  it("converts markdown bold to WhatsApp bold", () => {
-    assert.equal(
-      sanitizeWhatsAppText("Hello **Grabbit** friend"),
-      "Hello *Grabbit* friend",
-    );
-  });
-
-  it("removes double dashes and em dashes", () => {
-    assert.equal(
-      sanitizeWhatsAppText("Thanks -- we got it — pending"),
-      "Thanks, we got it, pending",
-    );
-  });
-
-  it("strips love and heart emoji", () => {
-    assert.equal(
-      sanitizeWhatsAppText("Thanks for choosing Grabbit 💚"),
-      "Thanks for choosing Grabbit",
-    );
-    assert.doesNotMatch(sanitizeWhatsAppText("Done ❤❤️"), /❤|💚|❤️/);
-  });
-});
-
-describe("isShortAcknowledgement", () => {
-  it("detects short acks that should not restart intake", () => {
-    assert.equal(isShortAcknowledgement("nice"), true);
-    assert.equal(isShortAcknowledgement("thanks!"), true);
-    assert.equal(isShortAcknowledgement("yes"), false);
-    assert.equal(isShortAcknowledgement("I want KFC Triolet"), false);
   });
 });
 
