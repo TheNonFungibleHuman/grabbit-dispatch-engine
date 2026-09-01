@@ -177,10 +177,13 @@ export async function processWeeklyReportCron(now = new Date()): Promise<{ trigg
   const mauritiusMinutes = minutesOfDay % 60;
   const todayIso = mauritiusDateIso(now);
 
-  // Check if today is Sunday and time is around 9:00 PM (21:00 - 21:30)
-  const isSundayNight = mauritiusDay === 0 && mauritiusHours === 21 && mauritiusMinutes <= 30;
+  // Check if today is Sunday and time is evening (20:30 - 21:30)
+  const isSundayNight =
+    mauritiusDay === 0 &&
+    ((mauritiusHours === 20 && mauritiusMinutes >= 30) ||
+      (mauritiusHours === 21 && mauritiusMinutes <= 30));
   if (!isSundayNight) {
-    return { triggered: false, reason: "Not Sunday 9:00 PM Mauritius time" };
+    return { triggered: false, reason: "Not Sunday evening (8:30 - 9:30 PM) Mauritius time" };
   }
 
   const state = (await readJson<WeeklyReportState>(WEEKLY_REPORT_STATE_PATH)) || {};

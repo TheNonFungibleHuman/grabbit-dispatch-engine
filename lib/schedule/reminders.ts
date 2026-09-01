@@ -79,7 +79,7 @@ export async function processUpcomingBookingReminders(now = new Date()): Promise
   try {
     const mauritiusHour = Math.floor(mauritiusMinutes / 60) % 24;
     const mauritiusMin = mauritiusMinutes % 60;
-    if ((mauritiusHour === 7 && mauritiusMin >= 30) || (mauritiusHour === 8 && mauritiusMin <= 15)) {
+    if ((mauritiusHour === 7 && mauritiusMin >= 30) || (mauritiusHour === 8 && mauritiusMin <= 30)) {
       const { sendDailyMorningBriefings } = await import("./morning-briefing.ts");
       await sendDailyMorningBriefings(now);
     }
@@ -87,7 +87,7 @@ export async function processUpcomingBookingReminders(now = new Date()): Promise
     logWarn("reminders", "morning briefing check error", formatError(briefingErr));
   }
 
-  // Check 8:30 PM Mauritius daily rundown for Sherif (8:30 - 9:15 PM)
+  // Check 8:30 PM Mauritius daily rundown for Admins (8:30 - 9:30 PM)
   try {
     const { processDailyRundownCron } = await import("./daily-rundown.ts");
     await processDailyRundownCron(now);
