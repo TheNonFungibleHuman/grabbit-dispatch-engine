@@ -206,3 +206,31 @@ export function looksLikeFalseDeferredOrderPromise(text: string): boolean {
 export function closedHoursComeBackReply(): string {
   return "We can only place deliveries during open rider hours (Mauritius time). Nothing is placed until then, and the team won’t pick this up overnight. Please message us again in the next open slot and say you want to place the order.";
 }
+
+export function isRepetitivePolicyLoop(reply: string, recentHistory: Array<{ role: string; content?: string | null }>): string | null {
+  const replyLower = reply.toLowerCase();
+  const isPaymentPolicyReply =
+    replyLower.includes("juice: 55198540") ||
+    replyLower.includes("mcb account: 999000000006") ||
+    (replyLower.includes("pre-payment") && replyLower.includes("transfer"));
+
+  if (!isPaymentPolicyReply) return null;
+
+  const previousAssistantReplies = recentHistory.filter((m) => m.role === "assistant");
+  const previousPolicyCount = previousAssistantReplies.filter((m) => {
+    const c = (m.content || "").toLowerCase();
+    return c.includes("55198540") || c.includes("pre-payment");
+  }).length;
+
+  if (previousPolicyCount >= 1) {
+    const lastUserMsg = recentHistory[recentHistory.length - 1];
+    const userContent = (lastUserMsg?.content || "").toLowerCase();
+    const isShortOrReaction = userContent.length < 35 || /^(?:👍|😏|🤦|❤️|okay|ok|thanks|thank god|and yes|yes|no)\b/i.test(userContent.trim());
+
+    if (isShortOrReaction) {
+      return "Understood! Whenever you're ready to proceed or if you need a passenger ride, just let me know. Have a great day! 😊";
+    }
+  }
+
+  return null;
+}

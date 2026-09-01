@@ -7,6 +7,12 @@ import { mauritiusClockLabel } from "../time.ts";
 
 export interface RiderStatusState {
   breaks: Record<string, { onBreak: boolean; untilIso?: string; untilTimeStr?: string; startedAt: string }>;
+  maintenance?: {
+    active: boolean;
+    untilTimeStr: string;
+    reason?: string;
+    startedAt: string;
+  };
 }
 
 const RIDER_STATUS_PATH = "grabbit/riders/status.json";
@@ -34,6 +40,47 @@ export async function getRiderBreakStatus(riderName: string): Promise<boolean> {
     return isRiderOnBreak(riderName, state.breaks);
   } catch {
     return false;
+  }
+}
+
+export async function setFleetMaintenanceWindow(untilTimeStr: string, reason?: string): Promise<void> {
+  try {
+    const state = (await readJson<RiderStatusState>(RIDER_STATUS_PATH)) || { breaks: {} };
+    state.maintenance = {
+      active: true,
+      untilTimeStr: untilTimeStr.trim(),
+      reason: reason?.trim() || "Fleet maintenance",
+      startedAt: new Date().toISOString(),
+    };
+    await writeJson(RIDER_STATUS_PATH, state);
+    logInfo("riders", "set fleet maintenance window", { untilTimeStr, reason });
+  } catch (err) {
+    logWarn("riders", "failed to set fleet maintenance window", formatError(err));
+  }
+}
+
+export async function clearFleetMaintenanceWindow(): Promise<void> {
+  try {
+    const state = (await readJson<RiderStatusState>(RIDER_STATUS_PATH)) || { breaks: {} };
+    if (state.maintenance) {
+      state.maintenance.active = false;
+      await writeJson(RIDER_STATUS_PATH, state);
+      logInfo("riders", "cleared fleet maintenance window");
+    }
+  } catch (err) {
+    logWarn("riders", "failed to clear fleet maintenance window", formatError(err));
+  }
+}
+
+export async function getFleetMaintenanceStatus(): Promise<{ active: boolean; untilTimeStr?: string; reason?: string }> {
+  try {
+    const state = (await readJson<RiderStatusState>(RIDER_STATUS_PATH)) || { breaks: {} };
+    if (state.maintenance?.active) {
+      return { active: true, untilTimeStr: state.maintenance.untilTimeStr, reason: state.maintenance.reason };
+    }
+    return { active: false };
+  } catch {
+    return { active: false };
   }
 }
 

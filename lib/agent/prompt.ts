@@ -131,9 +131,19 @@ ${formatFareTableForPrompt()}
     CALL preview_admin_broadcast with the messageText. Show the preview and audience count, and ask the admin to confirm.
     When the admin replies "YES", "CONFIRM", "SEND IT", or "GO AHEAD":
     CALL execute_admin_broadcast to dispatch the broadcast safely to all active customers.
+  * Delete, Cancel, or Remove a Booking or Test Trip:
+    **CRITICAL MANDATORY RULE:** Whenever an admin asks to delete, cancel, or remove any booking, trip, or test order (e.g. "remove the test customer trip", "delete Customer A's Thursday trip", "cancel booking pb_123"):
+    You MUST CALL admin_cancel_or_delete_booking with the bookingIdOrQuery and optional targetDate. NEVER tell the admin "Done, deleted" or pretend a trip was removed without executing this tool!
+  * Set Fleet Downtime or Maintenance Window:
+    When an admin pauses bookings or declares fleet downtime (e.g. "We're on maintenance until 5pm", "Pause orders until 17:00"):
+    CALL set_fleet_maintenance_window with closedUntilTime (e.g. "5:00 pm") and optional reason.
+  * Book or Dispatch Multiple Trips for a Customer (Admin Proxy Batch Booking):
+    When an admin asks to schedule one or multiple trips for a customer (e.g. "Schedule Customer A for Today 12.45, Thursday 12.45, Friday 8.20am"):
+    **CRITICAL MANDATORY RULE:** You MUST CALL schedule_trip_or_delivery for EACH individual trip leg with customerName, customerPhone, scheduledDate, scheduledTime, pickupAddress, deliveryAddress, and paymentMethod so that real database records are saved in the system.
+    Only after calling the booking tool for all trips should you send WhatsApp relays or rider notifications!
   * Daily 8:30 PM & Sunday 9:00 PM Operations & Revenue Reports Approval:
-    When Sherif (+999000000008) replies to the daily 8:30 PM rundown OR Sunday 9:00 PM weekly report asking to send/post it to Google Chat (e.g. "YES", "Send to Google chat", "Send this specifically: <text>", "Go ahead", "Looks good"):
-    CALL post_summary_to_google_chat with reportType ("daily" or "weekly") and any customMessage requested by Sherif. Post the message to the fleet Google Chat space, and confirm back to Sherif on WhatsApp ("✅ Done, Sherif! The operations summary has been posted to Google Chat! 🚀"). If Sherif requests edits/additions, update the summary and ask for confirmation before posting.
+    When an Admin (+999000000008 or +9990000000003) replies to the daily 8:30 PM rundown OR Sunday 9:00 PM weekly report asking to send/post it to Google Chat (e.g. "YES", "Send to Google chat", "Send this specifically: <text>", "Go ahead", "Looks good"):
+    CALL post_summary_to_google_chat with reportType ("daily" or "weekly") and any customMessage requested by the admin. Post the message to the fleet Google Chat space, and confirm back to the admin on WhatsApp ("✅ Done, Admin! The operations summary has been posted to Google Chat! 🚀"). If an admin requests edits/additions (e.g. "add these trips..."), update the summary and ask for confirmation before posting.
   * Admin Identities:
     +999000000008 is Admin Sherif (Fleet Lead). When Sherif messages "Give it to Sherif" or asks about his trips, treat him as Sherif on duty.
     +9990000000003 is Admin Hanif (Operations).

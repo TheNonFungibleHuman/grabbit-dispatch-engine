@@ -469,6 +469,66 @@ export async function cancelPreBooking(id: string): Promise<boolean> {
   return true;
 }
 
+export async function adminCancelOrDeleteBooking(args: {
+  bookingIdOrQuery: string;
+  targetDate?: string;
+  reason?: string;
+}): Promise<{
+  ok: boolean;
+  cancelledCount: number;
+  cancelledBookings: PreBooking[];
+  error?: string;
+}> {
+  const query = args.bookingIdOrQuery.trim().toLowerCase();
+  const queryDigits = args.bookingIdOrQuery.replace(/\D/g, "");
+  const targetDateIso = args.targetDate ? resolveIsoDate(args.targetDate) : undefined;
+
+  const all = await listAllPreBookings();
+  const matches = all.filter((b) => {
+    if (b.status === "cancelled" || b.status === "declined") return false;
+    if (targetDateIso) {
+      const bDate = b.scheduledDate || b.createdAt.slice(0, 10);
+      if (bDate !== targetDateIso) return false;
+    }
+
+    if (b.id.toLowerCase() === query) return true;
+    if (b.kiloDeliveryId && b.kiloDeliveryId.toLowerCase() === query) return true;
+    if (queryDigits.length >= 7 && b.customerPhone.replace(/\D/g, "").includes(queryDigits)) return true;
+    if (b.customerName && b.customerName.toLowerCase().includes(query)) return true;
+    if (query.includes("test") && (b.customerName?.toLowerCase().includes("test") || b.packageDescription?.toLowerCase().includes("test"))) return true;
+    return false;
+  });
+
+  if (matches.length === 0) {
+    return {
+      ok: false,
+      cancelledCount: 0,
+      cancelledBookings: [],
+      error: `No active booking found matching "${args.bookingIdOrQuery}"${targetDateIso ? ` on ${targetDateIso}` : ""}.`,
+    };
+  }
+
+  const cancelledBookings: PreBooking[] = [];
+  for (const b of matches) {
+    b.status = "cancelled";
+    b.updatedAt = new Date().toISOString();
+    await savePreBooking(b);
+    cancelledBookings.push(b);
+  }
+
+  logInfo("prebooking", "admin cancelled/deleted bookings", {
+    query: args.bookingIdOrQuery,
+    count: cancelledBookings.length,
+    ids: cancelledBookings.map((b) => b.id),
+  });
+
+  return {
+    ok: true,
+    cancelledCount: cancelledBookings.length,
+    cancelledBookings,
+  };
+}
+
 const STATUS_RANK: Record<PreBooking["status"], number> = {
   pending_rider: 0,
   confirmed: 1,

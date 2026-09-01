@@ -6,6 +6,8 @@ import { readJson, writeJson } from "../blob/json-store.ts";
 import { formatError, logError, logInfo, logWarn } from "../log.ts";
 import { mauritiusDateIso, mauritiusMinutesOfDay } from "../time.ts";
 
+import { ADMIN_PHONES } from "../riders/config.ts";
+
 export const SHERIF_PHONE = "+999000000008";
 export const DAILY_RUNDOWN_PATH = "grabbit/ops/daily-rundown.json";
 
@@ -106,26 +108,34 @@ export async function sendDailyRundownDraftToSherif(targetDateIso?: string): Pro
 }> {
   const rundown = await generateDailyTripsRundown(targetDateIso);
 
-  await sendCustomerText({
-    to: SHERIF_PHONE,
-    text: rundown.summaryText,
-    messageId: `rundown_sherif_${Date.now()}`,
-  });
+  const recipients = ADMIN_PHONES.length > 0 ? ADMIN_PHONES : [SHERIF_PHONE];
+  for (const phone of recipients) {
+    try {
+      await sendCustomerText({
+        to: phone,
+        text: rundown.summaryText,
+        messageId: `rundown_admin_${Date.now()}_${phone.replace(/\D/g, "").slice(-4)}`,
+      });
 
-  await appendTranscriptEntry(SHERIF_PHONE, {
-    role: "agent",
-    text: rundown.summaryText,
-  });
+      await appendTranscriptEntry(phone, {
+        role: "agent",
+        text: rundown.summaryText,
+      });
+    } catch (err) {
+      logWarn("rundown", "failed to send rundown to admin phone", { phone, ...formatError(err) });
+    }
+  }
 
   const state: DailyRundownState = (await readJson<DailyRundownState>(DAILY_RUNDOWN_PATH)) || {};
   state.lastSentDate = rundown.dateStr;
   state.lastDraftMessage = rundown.googleChatText;
   await writeJson(DAILY_RUNDOWN_PATH, state);
 
-  logInfo("rundown", "sent 8:30pm daily rundown draft to Sherif on WhatsApp", {
+  logInfo("rundown", "sent 8:30pm daily rundown draft to Admins on WhatsApp", {
     date: rundown.dateStr,
     totalBookings: rundown.totalBookings,
     totalRevenue: rundown.totalRevenue,
+    recipients,
   });
 
   return {
@@ -177,7 +187,7 @@ export async function postDailySummaryToGoogleChat(customMessage?: string): Prom
 }
 
 /**
- * Checks if it is 8:30 PM in Mauritius (20:30 to 21:15) and sends today's rundown to Sherif.
+ * Checks if it is 8:30 PM in Mauritius (20:30 to 21:30) and sends today's rundown to Admins.
  */
 export async function processDailyRundownCron(now = new Date()): Promise<{ triggered: boolean; reason?: string }> {
   const minutesOfDay = mauritiusMinutesOfDay(now);
@@ -185,10 +195,10 @@ export async function processDailyRundownCron(now = new Date()): Promise<{ trigg
   const mauritiusMinutes = minutesOfDay % 60;
   const todayIso = mauritiusDateIso(now);
 
-  // Check if current time is between 8:30 PM (20:30) and 9:15 PM (21:15)
+  // Check if current time is between 8:30 PM (20:30) and 9:30 PM (21:30)
   const isAround830PM =
     (mauritiusHours === 20 && mauritiusMinutes >= 30) ||
-    (mauritiusHours === 21 && mauritiusMinutes <= 15);
+    (mauritiusHours === 21 && mauritiusMinutes <= 30);
 
   if (!isAround830PM) {
     return { triggered: false, reason: `Not 8:30 PM Mauritius time (current: ${mauritiusHours}:${mauritiusMinutes < 10 ? '0' : ''}${mauritiusMinutes})` };
@@ -196,7 +206,7 @@ export async function processDailyRundownCron(now = new Date()): Promise<{ trigg
 
   const state: DailyRundownState = (await readJson<DailyRundownState>(DAILY_RUNDOWN_PATH)) || {};
   if (state.lastSentDate === todayIso) {
-    return { triggered: false, reason: `Daily rundown for ${todayIso} already sent to Sherif` };
+    return { triggered: false, reason: `Daily rundown for ${todayIso} already sent to Admins` };
   }
 
   await sendDailyRundownDraftToSherif(todayIso);

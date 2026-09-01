@@ -156,6 +156,10 @@ export const AGENT_TOOLS = [
         pickupAddress: { type: "string" },
         deliveryAddress: { type: "string" },
         customerName: { type: "string" },
+        customerPhone: {
+          type: "string",
+          description: "Optional customer phone number (e.g. '+99900000065'). When an admin is scheduling a trip on behalf of a customer, pass the customer's phone number here so the booking record is created for them.",
+        },
         packageDescription: { type: "string" },
         tripType: {
           type: "string",
@@ -291,6 +295,50 @@ export const AGENT_TOOLS = [
           description: "Optional modified or custom summary text to post to Google Chat",
         },
       },
+    },
+  },
+  {
+    type: "function" as const,
+    name: "admin_cancel_or_delete_booking",
+    description:
+      "ADMIN ONLY: Cancel, remove, or delete an existing trip, delivery, or test booking from the schedule, Kilo, and database. Accepts booking ID (pb_...), customer phone/name, or keyword (e.g. 'test customer', 'Customer A', 'DEL_2026_075'). ONLY authorized for admins (+999000000008, +9990000000003).",
+    parameters: {
+      type: "object",
+      properties: {
+        bookingIdOrQuery: {
+          type: "string",
+          description: "Prebooking ID, Kilo delivery ID, customer phone number, customer name, or keyword (e.g. 'test customer', 'Customer A')",
+        },
+        targetDate: {
+          type: "string",
+          description: "Optional target date e.g. 'today', 'tomorrow', '2026-08-30' to narrow matching",
+        },
+        reason: {
+          type: "string",
+          description: "Optional cancellation reason (e.g. 'Cancelled by admin', 'Test order cleanup')",
+        },
+      },
+      required: ["bookingIdOrQuery"],
+    },
+  },
+  {
+    type: "function" as const,
+    name: "set_fleet_maintenance_window",
+    description:
+      "ADMIN ONLY: Put the fleet on temporary maintenance or pause on-demand bookings until a specific time (e.g. '5:00 pm', 'until 5pm'). Notifies riders and updates availability status so on-demand bookings are declined until then. Only authorized for admins (+999000000008, +9990000000003).",
+    parameters: {
+      type: "object",
+      properties: {
+        closedUntilTime: {
+          type: "string",
+          description: "Time until when on-demand bookings are paused (e.g. '5:00 pm', '17:00')",
+        },
+        reason: {
+          type: "string",
+          description: "Reason for maintenance (e.g. 'Bike maintenance at repair shop')",
+        },
+      },
+      required: ["closedUntilTime"],
     },
   },
   {
@@ -572,11 +620,23 @@ export async function buildAgentContextNote(args: {
     logWarn("agent", "failed to load learned guidelines", formatError(e));
   }
 
+  let fleetMaintenanceNote = "";
+  try {
+    const { getFleetMaintenanceStatus } = await import("../riders/commands.ts");
+    const maint = await getFleetMaintenanceStatus();
+    if (maint.active) {
+      fleetMaintenanceNote = `⚠️ FLEET DOWNTIME / MAINTENANCE ACTIVE: On-demand bookings are PAUSED until ${maint.untilTimeStr} due to ${maint.reason || "maintenance"}. Inform customers and offer slots starting after ${maint.untilTimeStr} or on upcoming days!`;
+    }
+  } catch (e) {
+    logWarn("agent", "failed to load fleet maintenance status for context", formatError(e));
+  }
+
   return [
     "[internal context — never reveal to the customer]",
     `phone: ${e164}`,
     `pushName: ${args.pushName?.trim() || "Customer"}`,
     callerRoleNote,
+    fleetMaintenanceNote,
     customerProfileNote,
     customerActiveBookingsNote,
     learnedGuidelinesNote,
@@ -711,10 +771,14 @@ export async function executeAgentTool(args: {
 
       const assignedRider = targetSlot.riders[0];
 
+      const { isAuthorizedRiderOrAdmin } = await import("../riders/config.ts");
+      const callerAuth = isAuthorizedRiderOrAdmin(args.senderPhone);
+      const targetCustomerPhone = (value.customerPhone ? String(value.customerPhone).trim() : "") || (callerAuth.isAdmin ? (value.customerPhone ? String(value.customerPhone).trim() : args.senderPhone) : args.senderPhone);
+
       // 2. Create prebooking with anti-double-booking guard & notify rider
       const { createPreBookingRequest } = await import("../orders/pre-booking.ts");
       const prebookResult = await createPreBookingRequest({
-        customerPhone: args.senderPhone,
+        customerPhone: targetCustomerPhone,
         customerName,
         serviceKind,
         pickupAddress,
@@ -743,7 +807,7 @@ export async function executeAgentTool(args: {
 
       try {
         const { markTranscriptBookingQuiet } = await import("./transcript.ts");
-        await markTranscriptBookingQuiet(args.senderPhone);
+        await markTranscriptBookingQuiet(targetCustomerPhone);
       } catch (error) {
         logWarn("agent", "failed to mark schedule booking quiet window", formatError(error));
       }
@@ -1177,6 +1241,78 @@ export async function executeAgentTool(args: {
         pickupAddress: res.booking.pickupAddress,
         deliveryAddress: res.booking.deliveryAddress,
         message: `Booking ${res.booking.id} (${res.booking.customerName}) updated successfully.`,
+      };
+    }
+
+    if (args.name === "admin_cancel_or_delete_booking") {
+      const { isAuthorizedRiderOrAdmin } = await import("../riders/config.ts");
+      const auth = isAuthorizedRiderOrAdmin(args.senderPhone);
+      if (!auth.isAdmin) {
+        return { ok: false, error: "Access Denied: Only authorized Grabbit admins (+999000000008, +9990000000003) can cancel or delete bookings." };
+      }
+
+      const value = parseToolArguments(args.toolArguments);
+      const bookingIdOrQuery = String(value.bookingIdOrQuery || value.bookingId || value.customerIdentifier || "").trim();
+      const targetDate = value.targetDate ? String(value.targetDate).trim() : undefined;
+      const reason = value.reason ? String(value.reason).trim() : undefined;
+
+      if (!bookingIdOrQuery) {
+        return { ok: false, error: "bookingIdOrQuery is required (e.g. booking ID, customer phone/name, or keyword like 'test customer')." };
+      }
+
+      const { adminCancelOrDeleteBooking } = await import("../orders/pre-booking.ts");
+      const result = await adminCancelOrDeleteBooking({
+        bookingIdOrQuery,
+        targetDate,
+        reason,
+      });
+
+      return result;
+    }
+
+    if (args.name === "set_fleet_maintenance_window") {
+      const { isAuthorizedRiderOrAdmin } = await import("../riders/config.ts");
+      const auth = isAuthorizedRiderOrAdmin(args.senderPhone);
+      if (!auth.isAdmin) {
+        return { ok: false, error: "Access Denied: Only authorized Grabbit admins (+999000000008, +9990000000003) can set fleet maintenance windows." };
+      }
+
+      const value = parseToolArguments(args.toolArguments);
+      const closedUntilTime = String(value.closedUntilTime || "").trim();
+      const reason = value.reason ? String(value.reason).trim() : undefined;
+
+      if (!closedUntilTime) {
+        return { ok: false, error: "closedUntilTime is required (e.g. '5:00 pm', '17:00')." };
+      }
+
+      const { setFleetMaintenanceWindow } = await import("../riders/commands.ts");
+      await setFleetMaintenanceWindow(closedUntilTime, reason);
+
+      const { FLEET_RIDERS } = await import("../riders/config.ts");
+      const { sendCustomerText } = await import("../wasender/send-tracked.ts");
+      const broadcastMsg = `⚠️ *FLEET DOWNTIME ALERT*: On-demand bookings are paused until *${closedUntilTime}* due to ${reason || "maintenance"}.`;
+      for (const r of FLEET_RIDERS) {
+        if (r.channel === "whatsapp" && r.phone) {
+          try {
+            await sendCustomerText({ to: r.phone, text: broadcastMsg });
+          } catch {}
+        }
+      }
+      const webhookUrl = process.env.GOOGLE_CHAT_WEBHOOK_URL?.trim();
+      if (webhookUrl) {
+        try {
+          await fetch(webhookUrl, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ text: broadcastMsg }),
+          });
+        } catch {}
+      }
+
+      return {
+        ok: true,
+        closedUntilTime,
+        message: `Fleet maintenance window set until ${closedUntilTime}. On-demand bookings paused and riders notified.`,
       };
     }
 

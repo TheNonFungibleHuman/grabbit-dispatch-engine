@@ -1,5 +1,6 @@
 import { listAllPreBookings, type PreBooking } from "../orders/pre-booking.ts";
 import { estimateBookingFare, SHERIF_PHONE } from "./daily-rundown.ts";
+import { ADMIN_PHONES } from "../riders/config.ts";
 import { sendCustomerText } from "../wasender/send-tracked.ts";
 import { readJson, writeJson } from "../blob/json-store.ts";
 import { addDaysIso, mauritiusDateIso, mauritiusMinutesOfDay, mauritiusWeekday } from "../time.ts";
@@ -190,28 +191,33 @@ export async function processWeeklyReportCron(now = new Date()): Promise<{ trigg
   const report = await generateWeeklyExecutiveReport(now);
 
   try {
-    // Send exclusively to Sherif on WhatsApp
-    await sendCustomerText({
-      to: SHERIF_PHONE,
-      text: report.summaryText,
-    });
+    const recipients = ADMIN_PHONES.length > 0 ? ADMIN_PHONES : [SHERIF_PHONE];
+    for (const phone of recipients) {
+      try {
+        await sendCustomerText({
+          to: phone,
+          text: report.summaryText,
+        });
 
-    try {
-      const { appendTranscriptEntry } = await import("../agent/transcript.ts");
-      await appendTranscriptEntry(SHERIF_PHONE, {
-        role: "agent",
-        text: report.summaryText,
-      });
-    } catch {}
+        const { appendTranscriptEntry } = await import("../agent/transcript.ts");
+        await appendTranscriptEntry(phone, {
+          role: "agent",
+          text: report.summaryText,
+        });
+      } catch (err) {
+        logWarn("weekly_report", "failed to send weekly report to admin phone", { phone, ...formatError(err) });
+      }
+    }
 
     state.lastSentWeekIso = todayIso;
     state.sentAt = new Date().toISOString();
     state.lastSummaryText = report.summaryText;
     await writeJson(WEEKLY_REPORT_STATE_PATH, state);
 
-    logInfo("weekly_report", "dispatched Sunday weekly report exclusively to Sherif on WhatsApp", {
+    logInfo("weekly_report", "dispatched Sunday weekly report to Admins on WhatsApp", {
       weekEnding: todayIso,
       totalRevenue: report.totalRevenue,
+      recipients,
     });
 
     return { triggered: true };

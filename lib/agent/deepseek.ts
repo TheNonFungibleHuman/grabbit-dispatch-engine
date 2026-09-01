@@ -363,10 +363,10 @@ export async function generateAgentReply(
 
   // Safety overrides & fallback protections
   if (bookingFailure) {
+    const safeText = customerReplyForFailedBooking(bookingFailure);
     if (callerAuth.isAdmin) {
-      text = `⚠️ Booking creation failed: ${bookingFailure.error || "Missing required fields"}. Please check the parameters.`;
+      text = `⚠️ Booking could not be created: ${safeText} (${bookingFailure.error || "validation error"})`;
     } else {
-      const safeText = customerReplyForFailedBooking(bookingFailure);
       logWarn("agent", "overriding reply after failed booking", {
         messageId: input.messageId,
         bookingFailure,
@@ -380,7 +380,9 @@ export async function generateAgentReply(
     !calledTools.has("admin_reply_to_customer") &&
     !calledTools.has("send_rider_broadcast_or_message") &&
     !calledTools.has("notify_customer_of_rider_update") &&
-    !calledTools.has("execute_admin_broadcast")
+    !calledTools.has("execute_admin_broadcast") &&
+    !calledTools.has("admin_cancel_or_delete_booking") &&
+    !calledTools.has("set_fleet_maintenance_window")
   ) {
     const matchGreeting = text.match(/^(?:Hello|Hi|Dear)\s+([A-Za-z0-9_.\s]+?)[!,\n]/i);
     if (matchGreeting) {
@@ -393,6 +395,17 @@ export async function generateAgentReply(
         });
         text = `⚠️ I prepared this message for ${matchGreeting[1]}, but it has NOT been sent to WhatsApp yet:\n\n"${text}"\n\nTo send it to them directly on WhatsApp, please tell me "Send to ${matchGreeting[1]}".`;
       }
+    }
+  } else if (callerAuth.isAdmin && calledTools.has("admin_reply_to_customer")) {
+    const cleaned = text
+      .replace(/^(?:Hello|Hi|Dear|Good morning|Good afternoon)\s+[^!,\n]+[!,\n][^\n]*\n+/i, "")
+      .replace(/^(?:Hello|Hi)!?\s*👋?[^\n]*\n+/i, "")
+      .trim();
+    if (cleaned && cleaned.length > 5) {
+      text = cleaned;
+    }
+    if (!text.includes("✅") && !text.toLowerCase().includes("sent") && !text.toLowerCase().includes("done")) {
+      text = `✅ Done, Admin! Sent message to customer on WhatsApp:\n\n"${text}"`.trim();
     }
   } else if (
     !bookingSucceeded &&
@@ -411,12 +424,40 @@ export async function generateAgentReply(
     if (!text) {
       text = "Got your request! Let me confirm your details and notify the on-duty rider.";
     }
-  } else if (!text) {
-    logWarn("agent", "empty deepseek output; using fallback reply", {
-      messageId: input.messageId,
-    });
-    text =
-      "Got you. Mind sending that again in a short line so I can help right away? 🙂";
+  }
+
+  // Repetition guard on customer policy loops
+  if (!callerAuth.isAdmin && !callerAuth.rider && text) {
+    const { isRepetitivePolicyLoop } = await import("./booking-guard.ts");
+    const repetitiveFix = isRepetitivePolicyLoop(text, messages as any);
+    if (repetitiveFix) {
+      logInfo("agent", "suppressing repetitive payment policy loop for customer", {
+        messageId: input.messageId,
+      });
+      text = repetitiveFix;
+    }
+  }
+
+  if (!text) {
+    if (calledTools.size > 0) {
+      logInfo("agent", "synthesized response after successful tool execution with empty assistant text", {
+        messageId: input.messageId,
+        calledTools: Array.from(calledTools),
+      });
+      if (callerAuth.isAdmin) {
+        text = "✅ Done, Admin! Processed your requested dispatch actions and notified the relevant parties.";
+      } else {
+        text = "Got your request! Your details have been processed with our dispatch team. 👍";
+      }
+    } else if (callerAuth.isAdmin) {
+      text = "Hello Admin! 👨‍💼 Dispatch system is online. Could you specify which booking, rider, or customer action you'd like to perform?";
+    } else {
+      logWarn("agent", "empty deepseek output; using fallback reply", {
+        messageId: input.messageId,
+      });
+      text =
+        "Got you. Mind sending that again in a short line so I can help right away? 🙂";
+    }
   }
 
   logInfo("agent", "deepseek generate done", {

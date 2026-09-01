@@ -1,4 +1,4 @@
-﻿import assert from "node:assert/strict";
+import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   customerReplyForFailedBooking,
@@ -87,6 +87,33 @@ describe("booking-guard", () => {
   });
 });
 
+describe("isRepetitivePolicyLoop", () => {
+  it("suppresses repetitive multi-paragraph payment instructions when customer sends short acknowledgment or emoji", async () => {
+    const { isRepetitivePolicyLoop } = await import("./booking-guard.ts");
+    const longPaymentReply = "Please transfer to secure your order: 📱 Juice: 55198540 🏦 MCB Account: 999000000006 (Account Holder). Please send screenshot...";
+    const history = [
+      { role: "assistant", content: "Please transfer to Juice: 55198540 before we dispatch." },
+      { role: "user", content: "😏" },
+    ];
+
+    const suppressed = isRepetitivePolicyLoop(longPaymentReply, history as any);
+    assert.ok(suppressed);
+    assert.match(suppressed, /Understood!/i);
+  });
+
+  it("allows payment instructions when user asks a substantive question", async () => {
+    const { isRepetitivePolicyLoop } = await import("./booking-guard.ts");
+    const longPaymentReply = "Please transfer to secure your order: 📱 Juice: 55198540 🏦 MCB Account: 999000000006 (Account Holder).";
+    const history = [
+      { role: "assistant", content: "Please transfer to Juice: 55198540 before we dispatch." },
+      { role: "user", content: "Could you send me the payment account number again please?" },
+    ];
+
+    const result = isRepetitivePolicyLoop(longPaymentReply, history as any);
+    assert.equal(result, null);
+  });
+});
+
 describe("fabricatedTrackingLinks", () => {
   const REAL = "https://delivery.grabbit-express.com/track/DEL_1/ABC";
 
@@ -106,3 +133,5 @@ describe("fabricatedTrackingLinks", () => {
     assert.equal(fabricatedTrackingLinks("No links here", "{}").length, 0);
   });
 });
+
+
