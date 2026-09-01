@@ -7,7 +7,7 @@ interface SuppressionIndex {
   phones: Record<string, string>;
 }
 
-const OPT_OUT_TOKENS = [
+const OPT_OUT_SET = new Set([
   "stop",
   "stopall",
   "stop all",
@@ -16,29 +16,20 @@ const OPT_OUT_TOKENS = [
   "optout",
   "remove me",
   "delete my number",
-];
+]);
 
-const RESUBSCRIBE_TOKENS = ["start", "unstop", "subscribe", "resubscribe"];
+const RESUBSCRIBE_SET = new Set(["start", "unstop", "subscribe", "resubscribe"]);
 
-function normalizeCommandText(text: string): string {
-  return text
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9 ]/g, "")
-    .replace(/\s+/g, " ")
-    .trim();
+function cleanCmd(text: string): string {
+  return text.trim().toLowerCase().replace(/[^a-z0-9 ]/g, "").replace(/\s+/g, " ");
 }
 
 export function matchesOptOut(text: string): boolean {
-  const normalized = normalizeCommandText(text);
-  if (!normalized) return false;
-  return OPT_OUT_TOKENS.includes(normalized);
+  return OPT_OUT_SET.has(cleanCmd(text));
 }
 
 export function matchesResubscribe(text: string): boolean {
-  const normalized = normalizeCommandText(text);
-  if (!normalized) return false;
-  return RESUBSCRIBE_TOKENS.includes(normalized);
+  return RESUBSCRIBE_SET.has(cleanCmd(text));
 }
 
 export function suppressedPhoneKey(phone: string): string {

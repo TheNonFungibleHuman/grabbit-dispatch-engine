@@ -1,6 +1,9 @@
 import { readJson, writeJson } from "../blob/json-store.ts";
-import { normalizeSender } from "./sessions.ts";
 import { mauritiusClockLabel, mauritiusDateIso } from "../time.ts";
+
+export function normalizeSender(sender: string): string {
+  return sender.replace(/\D/g, "");
+}
 
 export type TranscriptRole = "customer" | "agent" | "note";
 

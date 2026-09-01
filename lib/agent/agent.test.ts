@@ -4,11 +4,6 @@ import { join } from "node:path";
 import { describe, it } from "node:test";
 import { sanitizeWhatsAppText, isShortAcknowledgement } from "./format.ts";
 import { prepareKnowledgeForPrompt } from "../admin/knowledge-format.ts";
-import {
-  clearPreviousInteractionId,
-  getPreviousInteractionId,
-  setPreviousInteractionId,
-} from "./sessions.ts";
 
 describe("buildGrabbitSystemInstruction", () => {
   it("includes Grabbit coverage areas and WhatsApp formatting rules", () => {
@@ -70,22 +65,6 @@ describe("isShortAcknowledgement", () => {
   });
 });
 
-describe("sessions", () => {
-  it("keeps interaction ids isolated per customer phone", async () => {
-    await clearPreviousInteractionId("+99900000028");
-    await clearPreviousInteractionId("+99900000022");
-
-    await setPreviousInteractionId("+230 5519 8540", "int_a");
-    await setPreviousInteractionId("+99900000022", "int_b");
-
-    assert.equal(await getPreviousInteractionId("99900000028"), "int_a");
-    assert.equal(await getPreviousInteractionId("+99900000022"), "int_b");
-    assert.notEqual(
-      await getPreviousInteractionId("99900000028"),
-      await getPreviousInteractionId("99900000022"),
-    );
-  });
-});
 
 describe("buildAgentContextNote date filtering", () => {
   it("only includes current and future bookings for riders, ignoring past dates", async () => {
