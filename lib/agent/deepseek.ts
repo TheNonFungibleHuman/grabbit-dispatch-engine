@@ -375,38 +375,17 @@ export async function generateAgentReply(
       });
       text = safeText;
     }
-  } else if (
-    callerAuth.isAdmin &&
-    !calledTools.has("admin_reply_to_customer") &&
-    !calledTools.has("send_rider_broadcast_or_message") &&
-    !calledTools.has("notify_customer_of_rider_update") &&
-    !calledTools.has("execute_admin_broadcast") &&
-    !calledTools.has("admin_cancel_or_delete_booking") &&
-    !calledTools.has("set_fleet_maintenance_window")
-  ) {
-    const matchGreeting = text.match(/^(?:Hello|Hi|Dear)\s+([A-Za-z0-9_.\s]+?)[!,\n]/i);
-    if (matchGreeting) {
-      const name = matchGreeting[1].trim().toLowerCase();
-      const isAdminName = ["admin", "deen", "sherif", "hanif", "hanneeeffff"].some((n) => name.startsWith(n));
-      if (!isAdminName) {
-        logWarn("agent", "admin reply outputted customer greeting directly without tool call", {
-          messageId: input.messageId,
-          greeted: matchGreeting[1],
-        });
-        text = `⚠️ I prepared this message for ${matchGreeting[1]}, but it has NOT been sent to WhatsApp yet:\n\n"${text}"\n\nTo send it to them directly on WhatsApp, please tell me "Send to ${matchGreeting[1]}".`;
-      }
-    }
-  } else if (callerAuth.isAdmin && calledTools.has("admin_reply_to_customer")) {
-    const cleaned = text
-      .replace(/^(?:Hello|Hi|Dear|Good morning|Good afternoon)\s+[^!,\n]+[!,\n][^\n]*\n+/i, "")
-      .replace(/^(?:Hello|Hi)!?\s*👋?[^\n]*\n+/i, "")
-      .trim();
-    if (cleaned && cleaned.length > 5) {
-      text = cleaned;
-    }
-    if (!text.includes("✅") && !text.toLowerCase().includes("sent") && !text.toLowerCase().includes("done")) {
-      text = `✅ Done, Admin! Sent message to customer on WhatsApp:\n\n"${text}"`.trim();
-    }
+  } else if (callerAuth.isAdmin) {
+    const { enforceAdminActionInvariants } = await import("./action-gateway.ts");
+    const gatewayRes = await enforceAdminActionInvariants({
+      senderPhone: input.sender,
+      isAdmin: true,
+      incomingText: input.text,
+      assistantText: text,
+      calledTools,
+      messageId: input.messageId,
+    });
+    text = gatewayRes.text;
   } else if (
     !bookingSucceeded &&
     text &&

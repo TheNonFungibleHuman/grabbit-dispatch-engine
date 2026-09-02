@@ -369,13 +369,13 @@ export const AGENT_TOOLS = [
     type: "function" as const,
     name: "admin_reply_to_customer",
     description:
-      "ADMIN ONLY: Send a direct WhatsApp message or price quote back to a customer thread. Only authorized for admins (+999000000008, +9990000000003).",
+      "MANDATORY FOR ADMINS: Send a direct WhatsApp message, cancellation notice, or price quote to ANY customer thread (e.g. 'tell Customer B...', 'message Customer D...', 'send to customer...'). Resolves customer name (Customer B, Customer D, Customer F) or phone number automatically. Only authorized for admins (+999000000008, +9990000000003).",
     parameters: {
       type: "object",
       properties: {
         customerIdentifier: {
           type: "string",
-          description: "Customer phone number (e.g. '+23054805634') or customer name (e.g. 'Winter')",
+          description: "Customer phone number (e.g. '+99900000054', '58589448') or customer name (e.g. 'Customer B', 'Customer D', 'Customer F', 'Customer A')",
         },
         message: {
           type: "string",
@@ -389,13 +389,13 @@ export const AGENT_TOOLS = [
     type: "function" as const,
     name: "admin_view_customer_chat",
     description:
-      "ADMIN ONLY: Inspect and read the recent WhatsApp conversation history with any customer by phone number or name. Only authorized for admins (+999000000008, +9990000000003).",
+      "ADMIN ONLY: Inspect and read the recent live WhatsApp conversation history with any customer by phone number or name (e.g. 'see messages with Customer B', 'show chat with Customer D'). Only authorized for admins (+999000000008, +9990000000003).",
     parameters: {
       type: "object",
       properties: {
         customerIdentifier: {
           type: "string",
-          description: "Customer phone number (e.g. '+99900000027', '99900000027') or customer name (e.g. 'Hanif', 'Winter')",
+          description: "Customer phone number (e.g. '+99900000027', '58589448') or customer name (e.g. 'Customer B', 'Customer D', 'Hanif', 'Winter')",
         },
       },
       required: ["customerIdentifier"],
@@ -508,24 +508,24 @@ export async function buildAgentContextNote(args: {
       const todayIso = mauritiusDateIso(new Date());
       const { listAllPreBookings } = await import("../orders/pre-booking.ts");
       const all = await listAllPreBookings();
-      const todayBookings = all.filter((b) => {
+      const upcomingBookings = all.filter((b) => {
         const bDate = (b.scheduledDate && b.scheduledDate !== "today" && b.scheduledDate !== "tomorrow")
           ? b.scheduledDate
           : (b.slotKey?.split("_")[0] || b.createdAt.slice(0, 10));
-        return bDate === todayIso && b.status !== "cancelled" && b.status !== "declined";
+        return bDate >= todayIso && b.status !== "cancelled" && b.status !== "declined";
       });
-      if (todayBookings.length > 0) {
+      if (upcomingBookings.length > 0) {
         adminBookingsNote = [
-          `📋 TODAY'S CONFIRMED/ACTIVE BOOKINGS (${todayIso}) [Single source of truth — report exact status, NEVER invent status]:`,
-          ...todayBookings.map(
-            (b) => `• ${b.scheduledTime || "Flexible"} | Customer: ${b.customerName} (+${b.customerPhone}) | Route: ${b.pickupAddress} → ${b.deliveryAddress} | Rider: ${b.assignedRider} | STATUS: ${b.status.toUpperCase()}`
+          `📋 ACTIVE & UPCOMING BOOKINGS THIS WEEK (${todayIso} onwards) [Single source of truth — report exact status, NEVER invent status]:`,
+          ...upcomingBookings.map(
+            (b) => `• Date: ${b.scheduledDate || todayIso} | Time: ${b.scheduledTime || "Flexible"} | Customer: ${b.customerName} (+${b.customerPhone}) | Route: ${b.pickupAddress} → ${b.deliveryAddress} | Rider: ${b.assignedRider} | STATUS: ${b.status.toUpperCase()}`
           ),
         ].join("\n");
       } else {
-        adminBookingsNote = `📋 TODAY'S BOOKINGS (${todayIso}): No trips or deliveries currently booked for today.`;
+        adminBookingsNote = `📋 THIS WEEK'S BOOKINGS (${todayIso} onwards): No trips or deliveries currently booked.`;
       }
     } catch (e) {
-      logWarn("agent", "failed to load today bookings for admin context", formatError(e));
+      logWarn("agent", "failed to load upcoming bookings for admin context", formatError(e));
     }
 
     try {
@@ -1327,31 +1327,14 @@ export async function executeAgentTool(args: {
       const identifier = String(value.customerIdentifier || "").trim();
       const message = String(value.message || "").trim();
 
-      const { getOpsDashboard } = await import("../ops/store.ts");
-      const { loadTranscript, appendTranscriptEntry } = await import("./transcript.ts");
+      const { resolveCustomerIdentity } = await import("../orders/customer-resolver.ts");
       const { sendCustomerText } = await import("../wasender/send-tracked.ts");
-
-      let targetPhone = identifier.replace(/\D/g, "");
-
-      // If name was provided, search recent threads to resolve phone
-      if (targetPhone.length < 7) {
-        const { recentThreads } = await getOpsDashboard();
-        for (const t of recentThreads) {
-          const transcript = await loadTranscript(t.phone);
-          if (
-            transcript.entries.some((e) =>
-              e.text.toLowerCase().includes(identifier.toLowerCase()),
-            )
-          ) {
-            targetPhone = t.phone;
-            break;
-          }
-        }
-      }
-
-      if (!targetPhone) {
+      const { appendTranscriptEntry } = await import("./transcript.ts");
+      const resolved = await resolveCustomerIdentity(identifier);
+      if (!resolved || !resolved.phone) {
         return { ok: false, error: `Could not find a phone number for customer "${identifier}".` };
       }
+      const targetPhone = resolved.phone;
 
       const relayMsgId = `admin_relay_${Date.now()}`;
       try {
@@ -1499,29 +1482,12 @@ export async function executeAgentTool(args: {
 
       const value = parseToolArguments(args.toolArguments);
       const identifier = String(value.customerIdentifier || "").trim();
-      const { getOpsDashboard } = await import("../ops/store.ts");
-      const { loadTranscript } = await import("./transcript.ts");
-
-      let targetPhone = identifier.replace(/\D/g, "");
-
-      if (targetPhone.length < 7) {
-        const { recentThreads } = await getOpsDashboard();
-        for (const t of recentThreads) {
-          const transcript = await loadTranscript(t.phone);
-          if (
-            transcript.entries.some((e) =>
-              e.text.toLowerCase().includes(identifier.toLowerCase()),
-            )
-          ) {
-            targetPhone = t.phone;
-            break;
-          }
-        }
+      const { resolveCustomerIdentity } = await import("../orders/customer-resolver.ts");
+      const resolved = await resolveCustomerIdentity(identifier);
+      if (!resolved || !resolved.phone) {
+        return { ok: false, error: `Could not find an active chat record for "${identifier}".` };
       }
-
-      if (!targetPhone) {
-        return { ok: false, error: `Could not find an active chat for "${identifier}".` };
-      }
+      const targetPhone = resolved.phone;
 
       const transcript = await loadTranscript(targetPhone);
       const recent = transcript.entries.slice(-10);
