@@ -9,8 +9,10 @@ import {
   type BookingSummary,
 } from "./booking-store.ts";
 import { formatError, logError, logInfo, logWarn } from "../log.ts";
-import { mauritiusDateIso, resolveRelativeDateWord } from "../time.ts";
+import { mauritiusDateIso, resolveRelativeDateWord, parseTimeToMinutes, formatMinutesToTime } from "../time.ts";
 import { FLEET_RIDERS, findRiderByName, findRiderByPhone, getCustomTrackingUrl, isAuthorizedRiderOrAdmin, type RiderProfile } from "../riders/config.ts";
+
+export { parseTimeToMinutes, formatMinutesToTime };
 import { notifyRiderForBooking, notifyRiderOfReschedule } from "../riders/notify-rider.ts";
 import { assignDeliveryRider, createDelivery, getDelivery } from "../kilo/client.ts";
 import { mapKiloEventToPreBookingStatus, resolveDefaultCollectionMethod, sanitizeKiloName } from "../kilo/map-order.ts";
@@ -215,37 +217,6 @@ export async function syncBookingToKiloIfMissing(booking: PreBooking): Promise<P
   return booking;
 }
 
-export function parseTimeToMinutes(timeStr: string): number | null {
-  if (!timeStr) return null;
-  const clean = timeStr.toLowerCase().trim();
-
-  // Match e.g. "6:10 pm", "06:10pm", "6:10", "18:10", "6pm", "6 pm"
-  const match = clean.match(/(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/i);
-  if (!match) return null;
-
-  let hours = parseInt(match[1], 10);
-  const minutes = match[2] ? parseInt(match[2], 10) : 0;
-  const meridian = match[3]?.toLowerCase();
-
-  if (meridian === "pm" && hours < 12) {
-    hours += 12;
-  } else if (meridian === "am" && hours === 12) {
-    hours = 0;
-  }
-
-  if (hours < 0 || hours > 23 || minutes < 0 || minutes > 59) return null;
-  return hours * 60 + minutes;
-}
-
-export function formatMinutesToTime(minutes: number): string {
-  const h24 = Math.floor(minutes / 60) % 24;
-  const m = minutes % 60;
-  const meridian = h24 >= 12 ? "pm" : "am";
-  const h12 = h24 % 12 === 0 ? 12 : h24 % 12;
-  const mStr = m.toString().padStart(2, "0");
-  return `${h12}:${mStr} ${meridian}`;
-}
-
 export const MIN_BOOKING_GAP_MINUTES_ONE_WAY = 15;
 export const MIN_BOOKING_GAP_MINUTES_ROUND_TRIP = 30;
 export const MIN_BOOKING_GAP_MINUTES = 15;
@@ -277,12 +248,14 @@ export function evaluateSlotRules(
 ): CheckSlotResult {
   const targetMin = args.scheduledTime ? parseTimeToMinutes(args.scheduledTime) : null;
   const targetDate = args.scheduledDate || "";
+  const reqDate = targetDate || args.slotKey?.split("_")[0] || "";
 
   // 1. Strict gap buffer per rider on the same date/slot (30 mins if round-trip, 15 mins for one-way)
   if (targetMin !== null) {
     const isNewRoundTrip = args.tripType === "round_trip";
     for (const b of riderActiveCandidates) {
-      const isSameDay = !targetDate || !b.scheduledDate || b.scheduledDate === targetDate || b.slotKey === args.slotKey;
+      const bDate = b.scheduledDate || b.slotKey?.split("_")[0] || b.createdAt?.slice(0, 10) || "";
+      const isSameDay = (reqDate && bDate) ? reqDate === bDate : (!reqDate || !bDate || b.slotKey === args.slotKey);
       if (isSameDay) {
         const existingMin = parseTimeToMinutes(b.scheduledTime);
         if (existingMin !== null) {
@@ -316,7 +289,8 @@ export function evaluateSlotRules(
     const hourEnd = hourStart + 60;
 
     const bookingsInHour = riderActiveCandidates.filter((b) => {
-      const isSameDay = !targetDate || !b.scheduledDate || b.scheduledDate === targetDate || b.slotKey === args.slotKey;
+      const bDate = b.scheduledDate || b.slotKey?.split("_")[0] || b.createdAt?.slice(0, 10) || "";
+      const isSameDay = (reqDate && bDate) ? reqDate === bDate : (!reqDate || !bDate || b.slotKey === args.slotKey);
       if (!isSameDay) return false;
       const bMin = parseTimeToMinutes(b.scheduledTime);
       return bMin !== null && bMin >= hourStart && bMin < hourEnd;
@@ -412,6 +386,7 @@ export interface SlotCandidate {
   tripType?: string;
   pickupAddress?: string;
   deliveryAddress?: string;
+  createdAt?: string;
 }
 
 export function isActiveStatus(status: string): boolean {

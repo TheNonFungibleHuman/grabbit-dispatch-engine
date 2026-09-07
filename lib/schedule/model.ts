@@ -1,3 +1,5 @@
+import { parseTimeToMinutes } from "../time.ts";
+
 export const MAURITIUS_TZ = "Indian/Mauritius";
 
 export type WeekdayKey =
@@ -83,23 +85,6 @@ function parseCsvLine(line: string): string[] {
   }
   cells.push(current.trim());
   return cells;
-}
-
-function parseTimeToMinutes(raw: string): number | null {
-  const cleaned = raw
-    .toLowerCase()
-    .replace(/\./g, "")
-    .replace(/\s+/g, " ")
-    .trim();
-  const match = cleaned.match(/^(\d{1,2})(?::(\d{2}))?\s*(am|pm)$/i);
-  if (!match) return null;
-  let hour = Number(match[1]);
-  const minute = Number(match[2] ?? "0");
-  const meridiem = match[3].toLowerCase();
-  if (!Number.isFinite(hour) || !Number.isFinite(minute)) return null;
-  if (hour === 12) hour = 0;
-  if (meridiem === "pm") hour += 12;
-  return hour * 60 + minute;
 }
 
 export function parseTimeSlotLabel(

@@ -62,6 +62,17 @@ async function handlePollResults(payload: WasenderWebhookEvent): Promise<void> {
     return;
   }
 
+  const remoteJid = data.key?.remoteJid || "";
+  if (
+    remoteJid.endsWith("@g.us") ||
+    remoteJid.endsWith("@broadcast") ||
+    remoteJid === "status@broadcast" ||
+    remoteJid.includes("newsletter")
+  ) {
+    logInfo("wasender", "ignored group/broadcast poll event", { remoteJid });
+    return;
+  }
+
   const pollId = data.key?.id || String(payload.timestamp || Date.now());
 
   for (const option of data.pollResult) {
@@ -167,6 +178,20 @@ async function handleIncomingMessage(
   const message = payload.data?.messages;
   if (!message?.key?.id) {
     logWarn("wasender", "messages.received without message key or id");
+    return;
+  }
+
+  const remoteJid = message.key?.remoteJid || "";
+  if (
+    remoteJid.endsWith("@g.us") ||
+    remoteJid.endsWith("@broadcast") ||
+    remoteJid === "status@broadcast" ||
+    remoteJid.includes("newsletter")
+  ) {
+    logInfo("wasender", "ignored group/broadcast/status message event", {
+      remoteJid,
+      messageId: message.key.id,
+    });
     return;
   }
 

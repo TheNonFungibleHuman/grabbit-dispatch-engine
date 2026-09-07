@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { memoryClear, readJson, writeJson } from "../blob/json-store.ts";
 import { formatError, logInfo, logWarn } from "../log.ts";
-import { mauritiusDateIso, resolveRelativeDateWord } from "../time.ts";
+import { mauritiusDateIso, resolveRelativeDateWord, parseTimeToMinutes } from "../time.ts";
 import {
   evaluateAvailability,
   parseRiderScheduleCsv,
@@ -312,23 +312,8 @@ export async function getRiderForTargetSlot(args: {
   const weekday = weekdayKeys[isNaN(dateObj.getTime()) ? now.getDay() : dateObj.getUTCDay()] || "MON";
 
   // Parse time to minutes
-  let timeMinutes = 12 * 60; // default 12pm
-  const timeRaw = args.targetTime.toLowerCase().trim();
-  const matchMeridiem = timeRaw.match(/^(\d{1,2})(?::(\d{2}))?\s*(am|pm)$/i);
-  const match24 = timeRaw.match(/^(\d{1,2}):(\d{2})$/);
-
-  if (matchMeridiem) {
-    let h = parseInt(matchMeridiem[1], 10);
-    const m = parseInt(matchMeridiem[2] || "0", 10);
-    const pm = matchMeridiem[3].toLowerCase() === "pm";
-    if (pm && h < 12) h += 12;
-    if (!pm && h === 12) h = 0;
-    timeMinutes = h * 60 + m;
-  } else if (match24) {
-    const h = parseInt(match24[1], 10);
-    const m = parseInt(match24[2], 10);
-    timeMinutes = h * 60 + m;
-  }
+  const parsedMins = parseTimeToMinutes(args.targetTime);
+  const timeMinutes = parsedMins !== null ? parsedMins : 12 * 60; // default 12pm
 
   // Find slot that covers this time
   const matchedSlot = slots.find(

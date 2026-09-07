@@ -17,6 +17,7 @@ import { sanitizeWhatsAppText } from "@/lib/agent/format";
 import { sendCustomerText } from "@/lib/wasender/send-tracked";
 
 export const runtime = "nodejs";
+export const maxDuration = 60;
 
 export async function GET() {
   return NextResponse.json({
@@ -131,11 +132,25 @@ export async function POST(request: Request) {
         return;
       }
 
+      const sanitized = sanitizeWhatsAppText(text);
       await sendCustomerText({
         to: toWhatsAppE164(notifyPhone),
-        text: sanitizeWhatsAppText(text),
+        text: sanitized,
         messageId: extracted.deliveryId,
       });
+      try {
+        const { appendTranscriptEntry } = await import("@/lib/agent/transcript");
+        await appendTranscriptEntry(toWhatsAppE164(notifyPhone), {
+          role: "agent",
+          text: sanitized,
+          messageId: extracted.deliveryId,
+        });
+      } catch (transcriptError) {
+        console.warn("[kilo] transcript record skipped", {
+          error: transcriptError,
+          deliveryId: extracted.deliveryId,
+        });
+      }
       console.info("[kilo] status WhatsApp sent", {
         deliveryId: extracted.deliveryId,
         event,

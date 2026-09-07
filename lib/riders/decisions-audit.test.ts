@@ -322,3 +322,111 @@ describe("Unfamiliar Scenario Circuit Breaker & Customer Session Freeze Lock", (
     assert.match(resolvedEsc?.responseMessage || "", /we cannot do Flic en Flac/i);
   });
 });
+
+describe("Second-Round Audit Hardening & Regressions", () => {
+  it("ignores WhatsApp group messages, broadcast channels, and status broadcasts", async () => {
+    const { handleWasenderEvent } = await import("../wasender/handlers.ts");
+    const { loadTranscript } = await import("../agent/transcript.ts");
+
+    // Group message
+    const groupJid = "9990000000001@g.us";
+    await handleWasenderEvent({
+      event: "messages.received",
+      timestamp: Date.now(),
+      data: {
+        messages: {
+          key: { id: `group_msg_${Date.now()}`, remoteJid: groupJid },
+          pushName: "Student Group",
+          messageBody: "Hey everyone, who wants to split a cab?",
+        },
+      },
+    });
+
+    // Verify transcript for group is completely untouched / non-existent
+    const transcript = await loadTranscript(groupJid);
+    assert.equal(transcript.entries.length, 0, "must not process or record messages from groups");
+
+    // Status broadcast message
+    await handleWasenderEvent({
+      event: "messages.received",
+      timestamp: Date.now(),
+      data: {
+        messages: {
+          key: { id: `status_msg_${Date.now()}`, remoteJid: "status@broadcast" },
+          pushName: "Status",
+          messageBody: "My WhatsApp status update",
+        },
+      },
+    });
+  });
+
+  it("accurately parses British/Mauritian dot time formats and slot ranges", async () => {
+    const { parseTimeToMinutes, formatMinutesToTime } = await import("../time.ts");
+    const { parseTimeSlotLabel } = await import("../schedule/model.ts");
+
+    // Dot separated times
+    assert.equal(parseTimeToMinutes("12.45 pm"), 12 * 60 + 45);
+    assert.equal(parseTimeToMinutes("8.20am"), 8 * 60 + 20);
+    assert.equal(parseTimeToMinutes("14.30"), 14 * 60 + 30);
+    assert.equal(parseTimeToMinutes("09.15"), 9 * 60 + 15);
+    assert.equal(parseTimeToMinutes("7.00 PM"), 19 * 60);
+
+    // Standard colon separated times still work
+    assert.equal(parseTimeToMinutes("12:45 pm"), 12 * 60 + 45);
+    assert.equal(parseTimeToMinutes("6pm"), 18 * 60);
+    assert.equal(parseTimeToMinutes("12:00 am"), 0);
+
+    // Format minutes back to string
+    assert.equal(formatMinutesToTime(765), "12:45 pm");
+    assert.equal(formatMinutesToTime(500), "8:20 am");
+
+    // Slot label parsing with dot notation
+    const slot = parseTimeSlotLabel("12.30pm - 2.30pm");
+    assert.ok(slot);
+    assert.equal(slot?.startMinutes, 750);
+    assert.equal(slot?.endMinutes, 870);
+  });
+
+  it("prevents false cross-day slot conflicts when candidate records omit scheduledDate", async () => {
+    const { evaluateSlotRules } = await import("../orders/pre-booking.ts");
+
+    // Candidate booking is for yesterday / different day, but scheduledDate is omitted (legacy summary)
+    // Date is only present in slotKey or createdAt
+    const candidates = [
+      {
+        id: "legacy_bk_01",
+        assignedRider: "Thierry",
+        slotKey: "2026-09-06_12:00-13:00",
+        scheduledTime: "12:00 pm",
+        serviceKind: "trip" as const,
+        tripType: "one_way" as const,
+        customerPhone: "+99900000019",
+        createdAt: "2026-09-06T12:00:00.000Z",
+      },
+    ];
+
+    // New booking request for today (2026-09-07) at 12:05 pm
+    const result = evaluateSlotRules(candidates, {
+      slotKey: "2026-09-07_12:00-13:00",
+      scheduledDate: "2026-09-07",
+      scheduledTime: "12:05 pm",
+      assignedRider: "Thierry",
+      serviceKind: "trip",
+      tripType: "one_way",
+    });
+
+    // Should NOT have a gap violation because the legacy booking was on a different day!
+    assert.equal(result.available, true, "different days must not trigger gap violation");
+    assert.equal(result.reason, undefined);
+  });
+
+  it("verifies Kilo webhook exports maxDuration = 60", async () => {
+    const fs = await import("node:fs");
+    const path = await import("node:path");
+    const routeContent = fs.readFileSync(path.join(process.cwd(), "app/api/kilo/webhook/route.ts"), "utf-8");
+    assert.match(routeContent, /export\s+const\s+maxDuration\s*=\s*60\s*;/);
+    assert.match(routeContent, /export\s+const\s+runtime\s*=\s*["']nodejs["']\s*;/);
+    assert.match(routeContent, /appendTranscriptEntry/);
+  });
+});
+

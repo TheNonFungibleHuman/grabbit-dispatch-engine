@@ -72,3 +72,34 @@ export function mauritiusWeekday(instant: Date = new Date()): number {
   const label = weekdayFmt.format(instant).toUpperCase().replace(/\.$/, "");
   return WEEKDAY_INDEX[label] ?? 0;
 }
+
+export function parseTimeToMinutes(timeStr: string): number | null {
+  if (!timeStr) return null;
+  const clean = timeStr.toLowerCase().trim().replace(/(\d{1,2})\.(\d{2})/, "$1:$2");
+
+  // Match e.g. "6:10 pm", "06:10pm", "6:10", "18:10", "6pm", "6 pm", "12.45 pm", "8.20am"
+  const match = clean.match(/(\d{1,2})(?:[:.](\d{2}))?\s*(am|pm)?/i);
+  if (!match) return null;
+
+  let hours = parseInt(match[1], 10);
+  const minutes = match[2] ? parseInt(match[2], 10) : 0;
+  const meridian = match[3]?.toLowerCase();
+
+  if (meridian === "pm" && hours < 12) {
+    hours += 12;
+  } else if (meridian === "am" && hours === 12) {
+    hours = 0;
+  }
+
+  if (hours < 0 || hours > 23 || minutes < 0 || minutes > 59) return null;
+  return hours * 60 + minutes;
+}
+
+export function formatMinutesToTime(minutes: number): string {
+  const h24 = Math.floor(minutes / 60) % 24;
+  const m = minutes % 60;
+  const meridian = h24 >= 12 ? "pm" : "am";
+  const h12 = h24 % 12 === 0 ? 12 : h24 % 12;
+  const mStr = m.toString().padStart(2, "0");
+  return `${h12}:${mStr} ${meridian}`;
+}
