@@ -742,18 +742,15 @@ export async function executeAgentTool(args: {
       const packageDescription = value.packageDescription ? String(value.packageDescription) : undefined;
       const tripType = value.tripType as ("one_way" | "round_trip" | undefined);
       const rawPayment = typeof value.paymentMethod === "string" ? value.paymentMethod.toLowerCase().trim() : "";
-      const paymentMethod: "cash" | "transfer" | null =
-        rawPayment === "cash" || rawPayment === "bank transfer" || rawPayment === "transfer"
-          ? (rawPayment === "cash" ? "cash" : "transfer")
-          : null;
-
-      if (!paymentMethod) {
-        return {
-          ok: false,
-          error:
-            "PAYMENT_METHOD_REQUIRED: Ask the customer how they would like to pay — cash or bank transfer — and only call this tool again with their explicit choice. Never book without a confirmed payment method.",
-        };
-      }
+      const paymentMethod: "cash" | "transfer" =
+        rawPayment === "transfer" ||
+        rawPayment === "bank transfer" ||
+        rawPayment.includes("juice") ||
+        rawPayment.includes("mcb") ||
+        rawPayment.includes("receipt") ||
+        rawPayment.includes("pdf")
+          ? "transfer"
+          : "cash";
 
       // 1. Resolve on-duty rider for this target date & time
       const { getRiderForTargetSlot } = await import("../schedule/availability.ts");
@@ -849,6 +846,7 @@ export async function executeAgentTool(args: {
       if (serviceKind === "trip") {
         return {
           ok: true,
+          bookingId: prebookResult.booking?.id,
           serviceKind: "trip",
           scheduledDate,
           scheduledTime,
@@ -863,6 +861,7 @@ export async function executeAgentTool(args: {
 
       return {
         ok: true,
+        bookingId: prebookResult.booking?.id,
         serviceKind,
         scheduledDate,
         scheduledTime,

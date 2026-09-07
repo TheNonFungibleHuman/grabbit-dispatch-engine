@@ -121,38 +121,33 @@ export async function processIncomingUserMessage(
     messageId: message.messageId,
   });
 
-  // Handle incoming document attachments (e.g. PDF payment receipts, menus)
+  // Handle incoming document attachments (e.g. PDF payment receipts, menus, invoices)
   if (hasDocumentMessage(message)) {
     const caption = message.text?.trim() || "";
-    const name = message.pushName?.trim();
-    const isPaymentReceipt =
-      caption.toLowerCase().includes("pay") ||
-      caption.toLowerCase().includes("receipt") ||
-      caption.toLowerCase().includes("proof") ||
-      caption.toLowerCase().includes("juice") ||
-      caption.toLowerCase().includes("mcb") ||
-      caption.toLowerCase().includes("absa") ||
-      caption.toLowerCase().includes("here") ||
-      caption.toLowerCase().includes("transfer") ||
-      !caption;
+    const promptText = caption
+      ? `[Attached Document/PDF: "${caption}"]`
+      : `[Attached Document/PDF Payment Receipt]`;
 
-    logInfo("agent", "received document/pdf message", {
+    logInfo("agent", "processing incoming document/pdf message", {
       sender: message.sender,
       caption,
-      isPaymentReceipt,
+      promptText,
     });
 
-    if (isPaymentReceipt) {
-      await sendAndRecord({
-        to,
-        sender: message.sender,
-        text: name
-          ? `Got your document/payment receipt, ${name}! 📄 Our dispatch team has received it to verify the transfer. Your booking is on the schedule!`
-          : `Got your document/payment receipt! 📄 Our dispatch team has received it to verify the transfer. Your booking is on the schedule!`,
-        messageId: message.messageId,
-      });
-      return;
-    }
+    const reply = await generateAgentReply({
+      sender: message.sender,
+      text: promptText,
+      messageId: message.messageId,
+      pushName: message.pushName,
+    });
+
+    await sendAndRecord({
+      to,
+      sender: message.sender,
+      text: reply.text,
+      messageId: message.messageId,
+    });
+    return;
   }
 
   if (hasImageMessage(message) && message.raw?.message) {
@@ -164,42 +159,32 @@ export async function processIncomingUserMessage(
       });
 
       if (imageUrl) {
-        const draft = await addPackageImageToDraft(message.sender, imageUrl);
+        await addPackageImageToDraft(message.sender, imageUrl);
         const caption = message.text?.trim();
+        const promptText = caption
+          ? `[Attached Image: "${caption}"]`
+          : `[Attached Image / Payment Screenshot]`;
 
-        if (caption) {
-          const reply = await generateAgentReply({
-            sender: message.sender,
-            text: caption,
-            messageId: message.messageId,
-            pushName: message.pushName,
-          });
-          await sendAndRecord({
-            to,
-            sender: message.sender,
-            text: reply.text,
-            messageId: message.messageId,
-          });
-        } else {
-          const name = message.pushName?.trim();
-          await sendAndRecord({
-            to,
-            sender: message.sender,
-            text: name
-              ? `Got it ${name}. Photo saved (${draft.packageImages.length}/6). Send another if needed, or tell me pickup and drop-off.`
-              : `Got your photo (${draft.packageImages.length}/6). Send another if needed, or tell me the pickup and drop-off details.`,
-            messageId: message.messageId,
-          });
-        }
+        const reply = await generateAgentReply({
+          sender: message.sender,
+          text: promptText,
+          messageId: message.messageId,
+          pushName: message.pushName,
+        });
 
-        logInfo("agent", "stored package image", {
+        await sendAndRecord({
+          to,
+          sender: message.sender,
+          text: reply.text,
+          messageId: message.messageId,
+        });
+
+        logInfo("agent", "processed incoming image and generated reply", {
           to: message.sender,
           messageId: message.messageId,
-          count: draft.packageImages.length,
         });
         return;
       }
-
       logWarn("agent", "image message had no resolvable url", {
         messageId: message.messageId,
       });
