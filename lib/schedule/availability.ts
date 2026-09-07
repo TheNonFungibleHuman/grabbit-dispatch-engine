@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { memoryClear, readJson, writeJson } from "../blob/json-store.ts";
 import { formatError, logInfo, logWarn } from "../log.ts";
-import { resolveRelativeDateWord } from "../time.ts";
+import { mauritiusDateIso, resolveRelativeDateWord } from "../time.ts";
 import {
   evaluateAvailability,
   parseRiderScheduleCsv,
@@ -298,6 +298,7 @@ export async function getRiderForTargetSlot(args: {
   slotLabel?: string;
   riders: string[];
   slotKey: string;
+  reason?: string;
 }> {
   const { slots } = await loadScheduleSlots();
   
@@ -337,6 +338,43 @@ export async function getRiderForTargetSlot(args: {
   const cellText = matchedSlot?.byDay[weekday] || "";
   const riders = ridersFromCell(cellText);
   const slotKey = `${resolvedDate}_${matchedSlot?.label || "custom"}`;
+
+  try {
+    const { getFleetMaintenanceStatus } = await import("../riders/commands.ts");
+    const maint = await getFleetMaintenanceStatus();
+    if (maint.active && maint.untilTimeStr) {
+      const todayIso = mauritiusDateIso(now);
+      if (resolvedDate === todayIso) {
+        const rawMaint = maint.untilTimeStr.toLowerCase().trim();
+        const mM = rawMaint.match(/^(\d{1,2})(?::(\d{2}))?\s*(am|pm)$/i);
+        const m24 = rawMaint.match(/^(\d{1,2}):(\d{2})$/);
+        let maintUntilMinutes = 0;
+        if (mM) {
+          let h = parseInt(mM[1], 10);
+          const m = parseInt(mM[2] || "0", 10);
+          const pm = mM[3].toLowerCase() === "pm";
+          if (pm && h < 12) h += 12;
+          if (!pm && h === 12) h = 0;
+          maintUntilMinutes = h * 60 + m;
+        } else if (m24) {
+          maintUntilMinutes = parseInt(m24[1], 10) * 60 + parseInt(m24[2], 10);
+        }
+
+        if (timeMinutes < maintUntilMinutes) {
+          return {
+            available: false,
+            weekday,
+            slotLabel: matchedSlot?.label,
+            riders: [],
+            slotKey,
+            reason: `Fleet maintenance is active until ${maint.untilTimeStr} due to ${maint.reason || "maintenance"}. Please choose a slot after ${maint.untilTimeStr}.`,
+          };
+        }
+      }
+    }
+  } catch (maintErr) {
+    // Non-blocking fallback
+  }
 
   return {
     available: riders.length > 0,

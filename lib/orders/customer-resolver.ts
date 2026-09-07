@@ -39,7 +39,14 @@ export function normalizeCustomerPhone(raw: string): string {
 export async function resolveCustomerIdentity(
   query: string,
 ): Promise<ResolvedCustomer | null> {
-  const cleanQuery = query.trim();
+  const rawClean = query.trim();
+  if (!rawClean) return null;
+
+  // Clean quotes, @ handles, and trailing possessives (e.g. "@Customer A" -> "Customer A", "Customer A's" -> "Customer A")
+  const cleanQuery = rawClean
+    .replace(/^[@"']+|["']+$/g, "")
+    .replace(/'s$/i, "")
+    .trim();
   if (!cleanQuery) return null;
 
   const normalizedDigits = normalizeCustomerPhone(cleanQuery);
@@ -61,6 +68,73 @@ export async function resolveCustomerIdentity(
 
   const queryLower = cleanQuery.toLowerCase();
 
+  // 1.5. Search pending escalations (highest priority for admin relay — admin is often replying to an escalated customer)
+  try {
+    const { loadEscalations } = await import("../ops/store.ts");
+    const escalations = await loadEscalations();
+    if (escalations && escalations.length > 0) {
+      // Sort open escalations first, then newest first
+      const sortedEsc = [...escalations].sort((a, b) => {
+        if (a.status === "open" && b.status !== "open") return -1;
+        if (b.status === "open" && a.status !== "open") return 1;
+        return Date.parse(b.createdAt) - Date.parse(a.createdAt);
+      });
+
+      // Special keywords like "customer", "active_customer", "latest", "her", "him", "them"
+      if (
+        queryLower === "active_customer" ||
+        queryLower === "customer" ||
+        queryLower === "the customer" ||
+        queryLower === "latest" ||
+        queryLower === "her" ||
+        queryLower === "him" ||
+        queryLower === "them"
+      ) {
+        const open = sortedEsc.find((e) => e.status === "open") || sortedEsc[0];
+        if (open) {
+          const p = normalizeCustomerPhone(open.customerPhone);
+          if (p.length >= 7) {
+            return {
+              phone: p,
+              formattedPhone: `+${p}`,
+              name: open.customerName || cleanQuery,
+            };
+          }
+        }
+      }
+
+      // Exact name match or phone match in escalations
+      let escMatch = sortedEsc.find(
+        (e) => (e.customerName || "").toLowerCase() === queryLower,
+      );
+
+      // Substring match in customerName
+      if (!escMatch) {
+        escMatch = sortedEsc.find((e) => {
+          const eName = (e.customerName || "").toLowerCase();
+          return (
+            eName.includes(queryLower) ||
+            queryLower.includes(eName) ||
+            eName.split(/\s+/).some((part) => part.length >= 3 && queryLower.includes(part))
+          );
+        });
+      }
+
+      if (escMatch && escMatch.customerPhone) {
+        const p = normalizeCustomerPhone(escMatch.customerPhone);
+        if (p.length >= 7) {
+          return {
+            phone: p,
+            formattedPhone: `+${p}`,
+            name: escMatch.customerName || cleanQuery,
+          };
+        }
+      }
+    }
+  } catch (err) {
+    logWarn("resolver", "escalations search failed", formatError(err));
+  }
+
   // 2. Search all pre-bookings by customerName or phone substring
   try {
     const allBookings = await listAllPreBookings();
@@ -69,6 +143,30 @@ export async function resolveCustomerIdentity(
     const sorted = [...allBookings].sort(
       (a, b) => new Date(b.updatedAt || b.createdAt).getTime() - new Date(a.updatedAt || a.createdAt).getTime(),
     );
+
+    // Support generic customer keywords pointing to the most recent active booking
+    if (
+      queryLower === "active_customer" ||
+      queryLower === "customer" ||
+      queryLower === "the customer" ||
+      queryLower === "latest" ||
+      queryLower === "her" ||
+      queryLower === "him" ||
+      queryLower === "them"
+    ) {
+      const active = sorted.find((b) => b.status === "pending_rider" || b.status === "confirmed" || b.status === "dispatched") || sorted[0];
+      if (active && active.customerPhone) {
+        const p = normalizeCustomerPhone(active.customerPhone);
+        if (p.length >= 7) {
+          return {
+            phone: p,
+            formattedPhone: `+${p}`,
+            name: active.customerName || cleanQuery,
+            activeBooking: active,
+          };
+        }
+      }
+    }
 
     // Exact name match
     let match = sorted.find(
@@ -129,6 +227,82 @@ export async function resolveCustomerIdentity(
     }
   } catch (err) {
     logWarn("resolver", "customer profiles search failed", formatError(err));
+  }
+
+  // 3.5. Search session transcripts in persistent JSON store (grabbit/sessions/.../transcript.json)
+  try {
+    const sessionPaths = await listJsonPaths("grabbit/sessions/");
+    for (const p of sessionPaths) {
+      if (!p.endsWith("/transcript.json")) continue;
+      const transcript = await readJson<{
+        customerName?: string;
+        senderPhone?: string;
+        entries?: Array<{ text?: string }>;
+      }>(p);
+      const phoneFromPath = p.replace("grabbit/sessions/", "").replace("/transcript.json", "");
+      const phone = normalizeCustomerPhone(transcript?.senderPhone || phoneFromPath);
+      if (phone.length < 7) continue;
+
+      // Check customerName on transcript
+      if (transcript?.customerName) {
+        const tNameLower = transcript.customerName.toLowerCase();
+        if (
+          tNameLower.includes(queryLower) ||
+          queryLower.includes(tNameLower) ||
+          tNameLower.split(/\s+/).some((part) => part.length >= 3 && queryLower.includes(part))
+        ) {
+          return {
+            phone,
+            formattedPhone: `+${phone}`,
+            name: transcript.customerName,
+          };
+        }
+      }
+
+      // Check self-identification in transcript entries
+      if (transcript?.entries && Array.isArray(transcript.entries)) {
+        for (const entry of transcript.entries) {
+          if (!entry.text) continue;
+          const textLower = entry.text.toLowerCase();
+          if (
+            textLower.includes(`name is ${queryLower}`) ||
+            textLower.includes(`i'm ${queryLower}`) ||
+            textLower.includes(`i am ${queryLower}`) ||
+            textLower.includes(`this is ${queryLower}`)
+          ) {
+            return {
+              phone,
+              formattedPhone: `+${phone}`,
+              name: cleanQuery,
+            };
+          }
+        }
+      }
+    }
+  } catch (err) {
+    logWarn("resolver", "session transcripts search failed", formatError(err));
+  }
+
+  // 3.8. Search recent chat threads in Ops State
+  try {
+    const { getOpsDashboard } = await import("../ops/store.ts");
+    const ops = await getOpsDashboard();
+    const threads = Object.values(ops.state.threads || {});
+    for (const t of threads) {
+      const recentPreviews = (t.recent || []).map((r) => r.preview || "").join(" ").toLowerCase();
+      if (recentPreviews.includes(queryLower)) {
+        const normPhone = normalizeCustomerPhone(t.phone);
+        if (normPhone.length >= 7) {
+          return {
+            phone: normPhone,
+            formattedPhone: `+${normPhone}`,
+            name: cleanQuery,
+          };
+        }
+      }
+    }
+  } catch {
+    // Non-blocking
   }
 
   // 4. Search Supabase grabbit_documents for transcript matches

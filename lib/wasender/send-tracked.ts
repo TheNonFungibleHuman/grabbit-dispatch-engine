@@ -1,5 +1,5 @@
 import { recordOpsEvent } from "../ops/store.ts";
-import { sendTextMessage, type WasenderSendResult } from "./client.ts";
+import { sendPollMessage, sendTextMessage, type WasenderSendResult } from "./client.ts";
 import {
   isKnownOutboundAiId,
   registerOutboundAiId,
@@ -72,3 +72,57 @@ export async function sendCustomerText(input: {
     throw error;
   }
 }
+
+/**
+ * Dispatch an interactive poll to a rider with ops event tracking.
+ */
+export async function sendCustomerPoll(input: {
+  to: string;
+  question: string;
+  options: string[];
+  messageId?: string;
+}): Promise<WasenderSendResult> {
+  if (input.messageId) {
+    await registerOutboundAiMessage(input.messageId);
+  }
+
+  try {
+    const result = await sendPollMessage({
+      to: input.to,
+      question: input.question,
+      options: input.options,
+      multiSelect: false,
+    });
+
+    if (!result.success) {
+      throw new Error(result.message ?? "Wasender reported unsuccessful poll send");
+    }
+
+    if (result.data && typeof result.data === "object") {
+      const dataObj = result.data as { msgId?: unknown; id?: unknown; keyId?: unknown };
+      for (const key of ["msgId", "id", "keyId"] as const) {
+        if (dataObj[key]) await registerOutboundAiMessage(String(dataObj[key]));
+      }
+    }
+
+    await recordOpsEvent({
+      phone: input.to,
+      type: "outbound_sent",
+      messageId: input.messageId,
+      preview: `[Poll] ${input.question} -> ${input.options.join(" | ")}`,
+    });
+    await noteSendMetrics(true);
+    return result;
+  } catch (error) {
+    await recordOpsEvent({
+      phone: input.to,
+      type: "outbound_failed",
+      messageId: input.messageId,
+      preview: `[Poll] ${input.question}`,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    await noteSendMetrics(false);
+    throw error;
+  }
+}
+

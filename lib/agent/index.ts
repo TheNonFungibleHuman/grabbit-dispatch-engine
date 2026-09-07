@@ -206,14 +206,27 @@ export async function processIncomingUserMessage(
 
   if (!message.text) {
     const name = message.pushName?.trim();
+    const welcomeText = name
+      ? `Hello ${name}! 👋 Welcome to Grabbit Express ⚡ Mauritius' electric rides & delivery service. How can I help you today? (Need a passenger ride, an errand, or a delivery?)`
+      : `Hello! 👋 Welcome to Grabbit Express ⚡ Mauritius' electric rides & delivery service. How can I help you today? (Need a passenger ride, an errand, or a delivery?)`;
     await sendAndRecord({
       to,
       sender: message.sender,
-      text: name
-        ? `Hello ${name}! 👋 Welcome to Grabbit Express ⚡ Mauritius' electric rides & delivery service. How can I help you today? (Need a passenger ride, an errand, or a delivery?)`
-        : `Hello! 👋 Welcome to Grabbit Express ⚡ Mauritius' electric rides & delivery service. How can I help you today? (Need a passenger ride, an errand, or a delivery?)`,
+      text: welcomeText,
       messageId: message.messageId,
     });
+
+    try {
+      const { sendCustomerPoll } = await import("../wasender/send-tracked.ts");
+      await sendCustomerPoll({
+        to,
+        question: "⚡ What would you like to book today?",
+        options: ["🛵 Passenger Ride", "🍔 Food Delivery", "📦 Errand / Package"],
+        messageId: `welcome_poll_${message.messageId}`,
+      });
+    } catch (pollErr) {
+      logWarn("agent", "failed to send welcome interactive poll", formatError(pollErr));
+    }
     return;
   }
 

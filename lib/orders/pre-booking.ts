@@ -921,6 +921,15 @@ export async function createPreBookingRequest(args: {
       slotKey: args.slotKey,
       reason: persistRejected ?? "revision_conflict",
     });
+    if (kiloDeliveryId) {
+      try {
+        const { cancelDelivery } = await import("../kilo/client.ts");
+        await cancelDelivery(kiloDeliveryId, "Auto-rollback: slot conflict in Grabbit database");
+        logInfo("prebooking", "auto-cancelled orphaned kilo delivery after persist conflict", { kiloDeliveryId });
+      } catch (cancelErr) {
+        logWarn("prebooking", "failed to auto-cancel orphaned kilo delivery", formatError(cancelErr));
+      }
+    }
     return {
       ok: false,
       doubleBooked: true,
@@ -952,8 +961,31 @@ export async function createPreBookingRequest(args: {
     trackingUrl,
   });
 
-  // 2. Dispatch notification to assigned rider (queued after customer confirmation)
-  setTimeout(async () => {
+  // Dispatch notification to assigned rider — uses next/server `after()` to guarantee
+  // the async work completes even after the response is sent in a serverless context.
+  // Using setTimeout here would silently drop the notification if the function is frozen.
+  try {
+    const { after } = await import("next/server");
+    after(async () => {
+      try {
+        await notifyRiderForBooking({
+          bookingId,
+          customerName: args.customerName,
+          customerPhone: args.customerPhone,
+          serviceKind: args.serviceKind,
+          pickupAddress: args.pickupAddress,
+          dropoffAddress: args.deliveryAddress,
+          scheduledTime: `${args.scheduledDate} ${args.scheduledTime}`,
+          assignedRider: actualRider.name,
+          trackingUrl,
+        });
+      } catch (notifErr) {
+        logWarn("prebooking", "rider notification warning", formatError(notifErr));
+      }
+    });
+  } catch (afterErr) {
+    // Fallback: if after() is unavailable (e.g. in test context), run inline
+    logWarn("prebooking", "after() not available, running rider notification inline", formatError(afterErr));
     try {
       await notifyRiderForBooking({
         bookingId,
@@ -967,9 +999,9 @@ export async function createPreBookingRequest(args: {
         trackingUrl,
       });
     } catch (notifErr) {
-      logWarn("prebooking", "rider notification warning", formatError(notifErr));
+      logWarn("prebooking", "rider notification warning (inline fallback)", formatError(notifErr));
     }
-  }, 1000);
+  }
 
   return { ok: true, booking, trackingUrl, kiloDeliveryId, assignedRider: actualRider.name };
 }
@@ -980,13 +1012,13 @@ export async function createPreBookingRequest(args: {
 export type RiderReplyDecision = "accept" | "decline";
 
 export function classifyRiderAcceptDecline(text: string): RiderReplyDecision | null {
-  const cleanText = text.trim().toLowerCase().replace(/[^a-z0-9 ]/g, "");
+  const cleanText = text.toLowerCase().replace(/[^a-z0-9 ]/g, "").trim();
   if (!cleanText) return null;
 
-  if (["yes", "y", "ok", "okay", "confirm", "confirmed", "accept", "accepted"].includes(cleanText)) {
+  if (["yes", "y", "ok", "okay", "confirm", "confirmed", "accept", "accepted"].includes(cleanText) || cleanText.startsWith("accept") || cleanText.startsWith("confirm")) {
     return "accept";
   }
-  if (["no", "n", "decline", "declined", "reject", "rejected"].includes(cleanText)) {
+  if (["no", "n", "decline", "declined", "reject", "rejected"].includes(cleanText) || cleanText.startsWith("decline") || cleanText.startsWith("reject")) {
     return "decline";
   }
   return null;
@@ -1025,7 +1057,7 @@ export async function handleRiderReply(args: {
     return { handled: false };
   }
 
-  const cleanText = args.text.trim().toLowerCase().replace(/[^a-z0-9 ]/g, "");
+  const cleanText = args.text.toLowerCase().replace(/[^a-z0-9 ]/g, "").trim();
   const isAccept =
     cleanText === "yes" ||
     cleanText === "confirm" ||
@@ -1035,7 +1067,8 @@ export async function handleRiderReply(args: {
     cleanText === "accept" ||
     cleanText === "accepted" ||
     cleanText.startsWith("yes") ||
-    cleanText.startsWith("confirm");
+    cleanText.startsWith("confirm") ||
+    cleanText.startsWith("accept");
 
   const isDecline =
     cleanText === "no" ||
@@ -1044,7 +1077,8 @@ export async function handleRiderReply(args: {
     cleanText === "n" ||
     cleanText === "reject" ||
     cleanText.startsWith("no") ||
-    cleanText.startsWith("decline");
+    cleanText.startsWith("decline") ||
+    cleanText.startsWith("reject");
 
   if (!isAccept && !isDecline) {
     return { handled: false };
@@ -1062,7 +1096,13 @@ export async function handleRiderReply(args: {
         (s.status === "pending_rider" || s.status === "confirmed") &&
         (isTestMode || s.assignedRider.toLowerCase().includes(rider.name.toLowerCase())),
     )
-  ).sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
+  ).sort((a, b) => {
+    const dComp = (a.scheduledDate || "").localeCompare(b.scheduledDate || "");
+    if (dComp !== 0) return dComp;
+    const tComp = (a.scheduledTime || "").localeCompare(b.scheduledTime || "");
+    if (tComp !== 0) return tComp;
+    return Date.parse(a.createdAt) - Date.parse(b.createdAt);
+  });
 
   let pendingRecord: PreBooking | null = null;
   for (const s of pendingSummaries) {
@@ -1154,13 +1194,67 @@ export async function handleRiderReply(args: {
     };
   }
 
-  // Rider accepted: ensure the run is live on Kilo Fleet & send tracking link!
+  // Rider accepted: handle passenger trips (no Kilo) vs deliveries (Kilo tracking)
   logInfo("prebooking", "rider accepted booking", {
     bookingId: pending.id,
     rider: actualRider.name,
+    serviceKind: pending.serviceKind,
     existingKiloDeliveryId: pending.kiloDeliveryId || "none",
   });
 
+  // PASSENGER TRIPS: Never touch Kilo, share rider's phone directly with customer
+  if (pending.serviceKind === "trip") {
+    pending.status = "confirmed";
+    pending.updatedAt = new Date().toISOString();
+    await savePreBooking(pending);
+
+    const isRoundTrip = pending.tripType === "round_trip";
+    const customerLines = [
+      `🚗 *Your ${isRoundTrip ? "Round Trip" : "Trip"} is confirmed!*`,
+      `Rider *${actualRider.name}* has accepted and is scheduled for *${pending.scheduledTime}*.`,
+      ``,
+      `📍 Pickup: ${pending.pickupAddress}`,
+      `📍 Drop-off: ${pending.deliveryAddress}`,
+      actualRider.phone ? `🛵 Assigned Rider: *${actualRider.name}* (${actualRider.phone})` : `🛵 Assigned Rider: *${actualRider.name}*`,
+      pending.fareAmount ? `💰 Fare: Rs ${pending.fareAmount}` : ``,
+    ];
+
+    if (isRoundTrip) {
+      customerLines.push(
+        ``,
+        `⏱️ *Waiting Policy:*`,
+        `Your round trip includes 15 minutes of free waiting time at destination before the return leg.`,
+      );
+    }
+
+    customerLines.push(
+      ``,
+      `You can contact your rider directly at ${actualRider.phone || "dispatch"} if needed. Have a great ride! 😊`,
+    );
+
+    const customerMsg = customerLines.filter(Boolean).join("\n");
+
+    try {
+      await sendCustomerText({
+        to: pending.customerPhone,
+        text: customerMsg,
+        messageId: `confirm_${pending.id}_${Date.now()}`,
+      });
+      logInfo("prebooking", "passenger notified of trip confirmation", {
+        customer: pending.customerPhone,
+        rider: actualRider.name,
+      });
+    } catch (custSendErr) {
+      logWarn("prebooking", "warning sending passenger confirmation text", formatError(custSendErr));
+    }
+
+    return {
+      handled: true,
+      responseMessage: `👍 Thanks ${actualRider.name}! The trip for ${pending.customerName} at ${pending.scheduledTime} is confirmed. The customer has received your contact details. Have a safe drive! 🛵`,
+    };
+  }
+
+  // DELIVERIES & ERRANDS: Create or sync with Kilo Fleet
   try {
     let deliveryId = pending.kiloDeliveryId;
     let trackingUrl = pending.trackingUrl;
@@ -1183,9 +1277,8 @@ export async function handleRiderReply(args: {
       }
     } else {
       const hasPhotos = Boolean(pending.packageImages && pending.packageImages.length > 0);
-      // For food orders, errands, or passenger trips without package photos, use errand with at_place mode
-      const isTripOrErrand = pending.serviceKind === "trip" || pending.serviceKind === "errand" || !hasPhotos;
-      const serviceKind: KiloServiceKind = isTripOrErrand ? "errand" : toKiloServiceKind(pending.serviceKind);
+      const isErrand = pending.serviceKind === "errand" || !hasPhotos;
+      const serviceKind: KiloServiceKind = isErrand ? "errand" : toKiloServiceKind(pending.serviceKind);
       const errandMode: KiloErrandMode | undefined = serviceKind === "errand" ? "at_place" : undefined;
 
       const kiloPayload: CreateKiloDeliveryInput = {
@@ -1230,31 +1323,19 @@ export async function handleRiderReply(args: {
     pending.updatedAt = new Date().toISOString();
     await savePreBooking(pending);
 
-    // Send tracking link to customer with trip type specifics!
-    const isRoundTrip = pending.serviceKind === "trip" && pending.tripType === "round_trip";
+    // Send tracking link to customer for delivery
     const customerLines = [
-      `✅ *Your ${pending.serviceKind === "trip" ? (isRoundTrip ? "Round Trip" : "Trip") : pending.serviceKind} is confirmed!*`,
+      `🛵 *Your Delivery is confirmed!*`,
       `Rider *${actualRider.name}* has accepted and is scheduled for *${pending.scheduledTime}*.`,
       ``,
       `📍 Pickup: ${pending.pickupAddress}`,
       `📍 Drop-off: ${pending.deliveryAddress}`,
-    ];
-
-    if (isRoundTrip) {
-      customerLines.push(
-        ``,
-        `⏱️ *Waiting Policy:*`,
-        `Your round trip includes 15 minutes of free waiting time after drop-off at your destination before the return leg.`,
-      );
-    }
-
-    customerLines.push(
       ``,
       `🔴 *Live Tracking Link:*`,
       trackingUrl,
       ``,
       `Thank you for choosing Grabbit Express! 🛵⚡`,
-    );
+    ];
 
     const customerMsg = customerLines.join("\n");
 
@@ -1274,7 +1355,7 @@ export async function handleRiderReply(args: {
 
     return {
       handled: true,
-      responseMessage: `👍 Thanks ${actualRider.name}! The trip for ${pending.customerName} at ${pending.scheduledTime} is confirmed.\n\nLive Tracking Link: ${trackingUrl}`,
+      responseMessage: `👍 Thanks ${actualRider.name}! The delivery for ${pending.customerName} at ${pending.scheduledTime} is confirmed.\n\nLive Tracking Link: ${trackingUrl}`,
     };
   } catch (error) {
     logError("prebooking", "failed to create Kilo delivery on rider acceptance", error);

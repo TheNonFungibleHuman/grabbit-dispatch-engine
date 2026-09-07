@@ -110,6 +110,8 @@ export interface PendingEscalation {
   resolvedAt?: string;
   resolvedBy?: string;
   responseMessage?: string;
+  lastHoldingNoticeAt?: number;
+  followUpMessages?: Array<{ text: string; at: string }>;
 }
 
 const ESCALATIONS_STORE_PATH = "grabbit/ops/escalations.json";
@@ -142,6 +144,7 @@ export async function recordPendingEscalation(input: {
     reason: input.reason,
     createdAt: new Date().toISOString(),
     status: "open",
+    followUpMessages: [],
   };
 
   const updated = list.map((e) =>
@@ -158,6 +161,84 @@ export async function recordPendingEscalation(input: {
 export async function listOpenEscalations(): Promise<PendingEscalation[]> {
   const list = await loadEscalations();
   return list.filter((e) => e.status === "open");
+}
+
+export async function getOpenCustomerEscalation(
+  customerPhone: string,
+): Promise<PendingEscalation | null> {
+  const cleanPhone = customerPhone.replace(/\D/g, "");
+  if (!cleanPhone) return null;
+  const list = await loadEscalations();
+  return (
+    list.find(
+      (e) =>
+        e.status === "open" &&
+        (e.customerPhone.includes(cleanPhone) || cleanPhone.includes(e.customerPhone)),
+    ) || null
+  );
+}
+
+export async function recordCustomerFollowUp(
+  customerPhone: string,
+  text: string,
+): Promise<PendingEscalation | null> {
+  const cleanPhone = customerPhone.replace(/\D/g, "");
+  const list = await loadEscalations();
+  let updatedEsc: PendingEscalation | null = null;
+
+  const updated = list.map((e) => {
+    if (
+      e.status === "open" &&
+      (e.customerPhone.includes(cleanPhone) || cleanPhone.includes(e.customerPhone))
+    ) {
+      const messages = e.followUpMessages || [];
+      const followUp = { text, at: new Date().toISOString() };
+      updatedEsc = {
+        ...e,
+        followUpMessages: [...messages.slice(-10), followUp],
+      };
+      return updatedEsc;
+    }
+    return e;
+  });
+
+  if (updatedEsc) {
+    await saveEscalations(updated);
+  }
+  return updatedEsc;
+}
+
+export async function recordHoldingNoticeSent(customerPhone: string): Promise<void> {
+  const cleanPhone = customerPhone.replace(/\D/g, "");
+  const list = await loadEscalations();
+  const now = Date.now();
+
+  const updated = list.map((e) => {
+    if (
+      e.status === "open" &&
+      (e.customerPhone.includes(cleanPhone) || cleanPhone.includes(e.customerPhone))
+    ) {
+      return { ...e, lastHoldingNoticeAt: now };
+    }
+    return e;
+  });
+
+  await saveEscalations(updated);
+}
+
+export async function getLatestResolvedEscalationInstruction(
+  customerPhone: string,
+): Promise<string | null> {
+  const cleanPhone = customerPhone.replace(/\D/g, "");
+  if (!cleanPhone) return null;
+  const list = await loadEscalations();
+  const found = list.find(
+    (e) =>
+      e.status === "resolved" &&
+      e.responseMessage &&
+      (e.customerPhone.includes(cleanPhone) || cleanPhone.includes(e.customerPhone)),
+  );
+  return found?.responseMessage || null;
 }
 
 export async function resolvePendingEscalation(args: {

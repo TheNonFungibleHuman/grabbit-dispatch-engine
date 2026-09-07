@@ -49,4 +49,67 @@ describe("action-gateway", () => {
     const booking = all.find((b) => b.id === "pb_gateway_test_customerb");
     assert.equal(booking?.status, "cancelled");
   });
+
+  it("intercepts when LLM hallucinates and outputs customer greeting directly into admin chat", async () => {
+    await savePreBooking({
+      id: "pb_gateway_test_customerc",
+      customerPhone: "+99900000064",
+      customerName: "Customer C",
+      serviceKind: "trip",
+      pickupAddress: "Mahogany Promenade",
+      deliveryAddress: "ALCHE Campus",
+      scheduledDate: "2026-09-02",
+      scheduledTime: "3:00 pm",
+      slotKey: "2026-09-02_15:00-16:00",
+      assignedRider: "Thierry",
+      status: "confirmed",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+
+    // Admin asks to text Customer C; LLM outputs the customer text directly back to admin without tool call
+    const res = await enforceAdminActionInvariants({
+      senderPhone: "+999000000008",
+      isAdmin: true,
+      incomingText: "Can you text Customer C that her driver Thierry is waiting outside at Mahogany gate?",
+      assistantText: "Hello Customer C! 👋 Your driver Thierry is waiting outside at Mahogany gate. Please meet him when you are ready!",
+      calledTools: new Set<string>(), // Simulated LLM hallucination: printed customer text in admin chat
+      messageId: "test_gateway_msg_2",
+    });
+
+    assert.ok(res.actionsExecuted.some((a) => a.includes("admin_reply_to_customer:99900000064")));
+    assert.match(res.text, /Verified message delivered to Customer C/i);
+
+    const customerTranscript = await loadTranscript("99900000064");
+    const lastMsg = customerTranscript.entries[customerTranscript.entries.length - 1];
+    assert.ok(lastMsg);
+    assert.match(lastMsg.text, /Thierry is waiting outside/i);
+  });
+
+  it("resolves customer from open escalations when admin replies 'Tell customer...'", async () => {
+    const { recordPendingEscalation } = await import("../ops/store.ts");
+    await recordPendingEscalation({
+      customerPhone: "+99900000047",
+      customerName: "Customer A",
+      reason: "Needs custom price quote for Grand Baie trip",
+    });
+
+    const res = await enforceAdminActionInvariants({
+      senderPhone: "+9990000000003",
+      isAdmin: true,
+      incomingText: "Tell customer that the trip to Grand Baie is Rs 100 round trip",
+      assistantText: "I'll let them know right away.",
+      calledTools: new Set<string>(),
+      messageId: "test_gateway_msg_3",
+    });
+
+    assert.ok(res.actionsExecuted.some((a) => a.includes("admin_reply_to_customer:99900000047")));
+    assert.match(res.text, /Verified message delivered to Customer A/i);
+
+    const transcript = await loadTranscript("99900000047");
+    const lastMsg = transcript.entries[transcript.entries.length - 1];
+    assert.ok(lastMsg);
+    assert.match(lastMsg.text, /Rs 100/i);
+  });
 });
+

@@ -1,24 +1,24 @@
-import { processIncomingUserMessage } from "../agent";
-import { isAgentEnabled } from "../admin/agent-switch";
-import { formatError, logError, logInfo, logWarn } from "../log";
-import { recordOpsEvent } from "../ops/store";
-import { appendTranscriptEntry } from "../agent/transcript";
-import { sanitizeWhatsAppText } from "../agent/format";
-import { sendCustomerText } from "./send-tracked";
+import { processIncomingUserMessage } from "../agent/index.ts";
+import { isAgentEnabled } from "../admin/agent-switch.ts";
+import { formatError, logError, logInfo, logWarn } from "../log.ts";
+import { recordOpsEvent } from "../ops/store.ts";
+import { appendTranscriptEntry } from "../agent/transcript.ts";
+import { sanitizeWhatsAppText } from "../agent/format.ts";
+import { sendCustomerText } from "./send-tracked.ts";
 import {
   claimInboundMessageId,
   completeInboundMessageId,
 } from "./message-id-store.ts";
-import { getSenderPhone } from "./parse";
+import { getSenderPhone } from "./parse.ts";
 import type {
   IncomingUserMessage,
   MessagesReceivedEvent,
   WasenderIncomingMessage,
   WasenderWebhookEvent,
-} from "./types";
+} from "./types.ts";
 
-export { getSenderPhone, parseWasenderWebhookPayload } from "./parse";
-export type { IncomingUserMessage } from "./types";
+export { getSenderPhone, parseWasenderWebhookPayload } from "./parse.ts";
+export type { IncomingUserMessage } from "./types.ts";
 
 export async function handleWasenderEvent(
   payload: WasenderWebhookEvent,
@@ -29,11 +29,105 @@ export async function handleWasenderEvent(
     case "messages.received":
       await handleIncomingMessage(payload as MessagesReceivedEvent);
       break;
+    case "poll.results":
+      await handlePollResults(payload);
+      break;
     case "session.status":
       logInfo("wasender", "session.status", payload.data);
       break;
     default:
       logInfo("wasender", `ignored event: ${payload.event}`);
+  }
+}
+
+interface PollResultOption {
+  name: string;
+  voters?: string[];
+}
+
+interface PollResultsData {
+  key?: {
+    id?: string;
+    remoteJid?: string;
+    participant?: string;
+  };
+  pollResult?: PollResultOption[];
+  [key: string]: unknown;
+}
+
+async function handlePollResults(payload: WasenderWebhookEvent): Promise<void> {
+  const data = payload.data as PollResultsData | undefined;
+  if (!data?.pollResult || !Array.isArray(data.pollResult)) {
+    logInfo("wasender", "poll.results with no pollResult options array");
+    return;
+  }
+
+  const pollId = data.key?.id || String(payload.timestamp || Date.now());
+
+  for (const option of data.pollResult) {
+    if (!option.voters || !Array.isArray(option.voters) || option.voters.length === 0) {
+      continue;
+    }
+
+    for (const rawVoter of option.voters) {
+      const voterPhone = String(rawVoter).replace(/@.*$/, "").replace(/\D/g, "");
+      if (!voterPhone) continue;
+
+      const claimKey = `poll_${pollId}_${voterPhone}_${option.name}`;
+      const claim = await claimInboundMessageId(claimKey);
+      if (claim !== "new") {
+        logInfo("wasender", "ignored duplicate poll vote event", { claimKey });
+        continue;
+      }
+
+      try {
+        const { isAuthorizedRiderOrAdmin } = await import("../riders/config.ts");
+        const auth = isAuthorizedRiderOrAdmin(`+${voterPhone}`);
+        if (auth.rider) {
+          logInfo("wasender", "received poll vote from fleet rider", {
+            rider: auth.rider.name,
+            voterPhone,
+            option: option.name,
+            pollId,
+          });
+
+          const { handleRiderReply } = await import("../orders/pre-booking.ts");
+          const replyResult = await handleRiderReply({
+            senderPhone: `+${voterPhone}`,
+            text: option.name,
+          });
+
+          if (replyResult.handled && replyResult.responseMessage) {
+            await sendCustomerText({
+              to: `+${voterPhone}`,
+              text: replyResult.responseMessage,
+              messageId: `reply_poll_${Date.now()}`,
+            });
+          }
+        } else {
+          // Customer poll response (hybrid interactive button tap)
+          logInfo("wasender", "received interactive button/poll vote from customer", {
+            customerPhone: voterPhone,
+            selection: option.name,
+            pollId,
+          });
+
+          const { withPhoneSessionLock } = await import("./session-lock.ts");
+          await withPhoneSessionLock(`+${voterPhone}`, async () => {
+            await onUserMessage({
+              messageId: `poll_${pollId}_${Date.now()}`,
+              sender: `+${voterPhone}`,
+              remoteJid: data.key?.remoteJid || `${voterPhone}@s.whatsapp.net`,
+              text: option.name,
+            });
+          });
+        }
+      } catch (err) {
+        logWarn("wasender", "failed to process poll vote", formatError(err));
+      } finally {
+        await completeInboundMessageId(claimKey);
+      }
+    }
   }
 }
 
@@ -180,6 +274,22 @@ async function onUserMessage(message: IncomingUserMessage): Promise<void> {
     preview: message.text,
   });
 
+  // Automatically index customer pushName/username for effortless admin resolution (e.g. "Tell Customer A...")
+  if (message.pushName?.trim()) {
+    try {
+      const { isAuthorizedRiderOrAdmin } = await import("../riders/config.ts");
+      const auth = isAuthorizedRiderOrAdmin(message.sender);
+      if (!auth.isAuthorized) {
+        const { updateCustomerProfile } = await import("../orders/store.ts");
+        void updateCustomerProfile(message.sender, {
+          name: message.pushName.trim(),
+        });
+      }
+    } catch {
+      // Non-blocking
+    }
+  }
+
   // 0. Compliance opt-out / re-subscribe handling — always wins, even mid-flow
   try {
     const { matchesOptOut, matchesResubscribe, suppressCustomerPhone, unsuppressCustomerPhone } =
@@ -282,9 +392,84 @@ async function onUserMessage(message: IncomingUserMessage): Promise<void> {
             return;
           }
         }
-    }
+      }
   } catch (cmdErr) {
     logWarn("wasender", "rider command check failed", formatError(cmdErr));
+  }
+
+  // 1.5 Check if customer is waiting for admin reply (session frozen due to active escalation)
+  try {
+    const { isAuthorizedRiderOrAdmin } = await import("../riders/config.ts");
+    const auth = isAuthorizedRiderOrAdmin(message.sender);
+    if (!auth.isAdmin && !auth.rider) {
+      const {
+        getOpenCustomerEscalation,
+        recordCustomerFollowUp,
+        recordHoldingNoticeSent,
+      } = await import("../ops/store.ts");
+
+      const openEscalation = await getOpenCustomerEscalation(message.sender);
+      if (openEscalation) {
+        logInfo("wasender", "customer session frozen awaiting admin reply", {
+          sender: message.sender,
+          escalationId: openEscalation.id,
+          reason: openEscalation.reason,
+          textPreview: message.text.slice(0, 100),
+        });
+
+        // 1. Append message to customer transcript so full conversation history is preserved
+        await appendTranscriptEntry(message.sender, {
+          role: "customer",
+          text: message.text || "(media/empty)",
+          messageId: message.messageId,
+        });
+
+        // 2. Record follow-up message into the escalation record
+        await recordCustomerFollowUp(message.sender, message.text);
+
+        // 3. Alert Admin Sherif on WhatsApp about the follow-up
+        try {
+          const { notifyAdminCustomerFollowUp } = await import("../riders/notify-rider.ts");
+          await notifyAdminCustomerFollowUp({
+            customerPhone: message.sender,
+            customerName: openEscalation.customerName || message.pushName || "Customer",
+            escalationReason: openEscalation.reason,
+            followUpText: message.text,
+          });
+        } catch (alertErr) {
+          logWarn("wasender", "failed to alert admin of customer follow-up", formatError(alertErr));
+        }
+
+        // 4. Send rate-limited holding reply (max once every 3 minutes)
+        const now = Date.now();
+        const lastNotice = openEscalation.lastHoldingNoticeAt || 0;
+        if (now - lastNotice > 3 * 60 * 1000) {
+          const holdingText = sanitizeWhatsAppText(
+            "Our dispatch team is currently reviewing your request and will get back to you shortly! 🙏",
+          );
+          try {
+            await sendCustomerText({
+              to: message.sender,
+              text: holdingText,
+              messageId: `holding_${message.messageId}`,
+            });
+          } catch (sendErr) {
+            logWarn("wasender", "holding message network dispatch skipped/failed", formatError(sendErr));
+          }
+          await appendTranscriptEntry(message.sender, {
+            role: "agent",
+            text: holdingText,
+            messageId: `holding_${message.messageId}`,
+          });
+          await recordHoldingNoticeSent(message.sender);
+        }
+
+        // Return immediately — 0 LLM tokens, 0 hallucination!
+        return;
+      }
+    }
+  } catch (escErr) {
+    logWarn("wasender", "customer escalation freeze check failed", formatError(escErr));
   }
 
   const agentOn = await isAgentEnabled();

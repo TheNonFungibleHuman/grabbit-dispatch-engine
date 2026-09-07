@@ -1,5 +1,5 @@
-import { memoryClear, readJson, writeJson } from "../blob/json-store";
-import { logInfo } from "../log";
+import { memoryClear, readJson, writeJson } from "../blob/json-store.ts";
+import { logInfo } from "../log.ts";
 
 export const AGENT_SWITCH_PATH = "grabbit/admin/agent-switch.json";
 

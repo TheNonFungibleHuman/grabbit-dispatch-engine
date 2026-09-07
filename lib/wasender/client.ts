@@ -6,6 +6,13 @@ export interface SendTextMessageInput {
   text: string;
 }
 
+export interface SendPollInput {
+  to: string;
+  question: string;
+  options: string[];
+  multiSelect?: boolean;
+}
+
 export interface WasenderSendResult {
   success: boolean;
   message?: string;
@@ -21,7 +28,7 @@ function sleep(ms: number): Promise<void> {
 }
 
 async function executeSendWithRetry(
-  input: SendTextMessageInput,
+  bodyPayload: Record<string, unknown>,
   maxAttempts = 3,
 ): Promise<WasenderSendResult> {
   const apiKey = process.env.WASENDER_API_KEY?.trim();
@@ -43,10 +50,7 @@ async function executeSendWithRetry(
         Authorization: `Bearer ${apiKey}`,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({
-        to: input.to,
-        text: input.text,
-      }),
+      body: JSON.stringify(bodyPayload),
     });
 
     const payload = (await response.json().catch(() => null)) as {
@@ -77,7 +81,7 @@ async function executeSendWithRetry(
       console.warn(
         `[wasender] rate limit hit (attempt ${attempt}/${maxAttempts}), waiting 5.5s...`,
         {
-          to: input.to,
+          to: bodyPayload.to,
           errorMessage,
         },
       );
@@ -99,7 +103,37 @@ async function executeSendWithRetry(
 export function sendTextMessage(
   input: SendTextMessageInput,
 ): Promise<WasenderSendResult> {
-  const currentSend = sendQueue.then(() => executeSendWithRetry(input));
+  const currentSend = sendQueue.then(() =>
+    executeSendWithRetry({
+      to: input.to,
+      text: input.text,
+    }),
+  );
+  sendQueue = currentSend.then(
+    () => {},
+    () => {},
+  );
+  return currentSend;
+}
+
+/**
+ * Send an interactive poll (single-select button replacement) via Wasender session API key.
+ * Serializes sends and handles 5s account protection backoff.
+ * @see https://wasenderapi.com/api-docs
+ */
+export function sendPollMessage(
+  input: SendPollInput,
+): Promise<WasenderSendResult> {
+  const currentSend = sendQueue.then(() =>
+    executeSendWithRetry({
+      to: input.to,
+      poll: {
+        question: input.question,
+        options: input.options,
+        multiSelect: input.multiSelect ?? false,
+      },
+    }),
+  );
   sendQueue = currentSend.then(
     () => {},
     () => {},

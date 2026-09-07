@@ -185,8 +185,17 @@ export async function generateAgentReply(
     logWarn("agent", "failed to load transcript for history", formatError(error));
   }
 
+  const { isAuthorizedRiderOrAdmin } = await import("../riders/config.ts");
+  const callerAuth = isAuthorizedRiderOrAdmin(input.sender);
+
+  const senderRoleHeader = callerAuth.isAdmin
+    ? "Admin dispatch instruction (You are speaking directly to DISPATCH ADMIN. If asked to text/message/notify a customer, YOU MUST CALL the `admin_reply_to_customer` tool — NEVER output the customer message directly in this chat):"
+    : callerAuth.rider
+      ? `Fleet rider message (${callerAuth.rider.name}):`
+      : "Customer message:";
+
   // Current turn with contextual note
-  const currentUserContent = `${contextNote}\n\nCustomer message:\n${input.text}`;
+  const currentUserContent = `${contextNote}\n\n${senderRoleHeader}\n${input.text}`;
   messages.push({ role: "user", content: currentUserContent });
 
   let bookingFailure: BookingFailureDetails | null = null;
@@ -357,9 +366,6 @@ export async function generateAgentReply(
   if (bookingSucceeded && lastSuccessfulTrackingUrl && !text.includes(lastSuccessfulTrackingUrl) && !text.includes("delivery.grabbit-express.com")) {
     text = `${text}\n\n🔴 *Live Tracking Link:*\n${lastSuccessfulTrackingUrl}`;
   }
-
-  const { isAuthorizedRiderOrAdmin } = await import("../riders/config.ts");
-  const callerAuth = isAuthorizedRiderOrAdmin(input.sender);
 
   // Safety overrides & fallback protections
   if (bookingFailure) {

@@ -18,6 +18,7 @@ export interface TranscriptEntry {
 
 export interface ChatTranscript {
   senderPhone: string;
+  customerName?: string;
   updatedAt: string;
   /** Last successful booking / handoff quiet window */
   quietUntil?: string;
@@ -37,6 +38,7 @@ export async function loadTranscript(sender: string): Promise<ChatTranscript> {
   if (stored?.entries && Array.isArray(stored.entries)) {
     return {
       senderPhone: phone,
+      customerName: stored.customerName,
       updatedAt: stored.updatedAt ?? new Date(0).toISOString(),
       quietUntil: stored.quietUntil,
       lastBookingAt: stored.lastBookingAt,
@@ -45,6 +47,7 @@ export async function loadTranscript(sender: string): Promise<ChatTranscript> {
   }
   return {
     senderPhone: phone,
+    customerName: stored?.customerName,
     updatedAt: new Date(0).toISOString(),
     entries: [],
   };
@@ -53,6 +56,7 @@ export async function loadTranscript(sender: string): Promise<ChatTranscript> {
 async function saveTranscript(transcript: ChatTranscript): Promise<void> {
   await writeJson(transcriptPath(transcript.senderPhone), {
     ...transcript,
+    customerName: transcript.customerName,
     entries: transcript.entries.slice(-MAX_ENTRIES),
     updatedAt: new Date().toISOString(),
   });
@@ -61,8 +65,12 @@ async function saveTranscript(transcript: ChatTranscript): Promise<void> {
 export async function appendTranscriptEntry(
   sender: string,
   entry: Omit<TranscriptEntry, "at"> & { at?: string },
+  customerName?: string,
 ): Promise<ChatTranscript> {
   const transcript = await loadTranscript(sender);
+  if (customerName?.trim()) {
+    transcript.customerName = customerName.trim();
+  }
   transcript.entries.push({
     at: entry.at ?? new Date().toISOString(),
     role: entry.role,

@@ -958,3 +958,41 @@ describe("autoExpireStaleBookings", () => {
     assert.equal(updated?.status, "completed");
   });
 });
+
+describe("handleRiderReply passenger trips", () => {
+  it("confirms passenger trips without touching Kilo or generating tracking links", async () => {
+    const { savePreBooking, handleRiderReply, listAllPreBookings } = await import("./pre-booking.ts");
+    const testId = "pb_test_rider_trip_accept";
+    await savePreBooking({
+      id: testId,
+      customerPhone: "+99900000060",
+      customerName: "Trip Passenger",
+      serviceKind: "trip",
+      pickupAddress: "ALCHE Campus",
+      deliveryAddress: "Mahogany Promenade",
+      scheduledDate: "2026-09-05",
+      scheduledTime: "2:00 pm",
+      slotKey: "2026-09-05_14:00-15:00",
+      assignedRider: "Thierry",
+      status: "pending_rider",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+
+    const reply = await handleRiderReply({
+      senderPhone: "+999000000009", // Thierry
+      text: "YES",
+    });
+
+    assert.equal(reply.handled, true);
+    assert.match(reply.responseMessage || "", /confirmed/i);
+    assert.ok(!reply.responseMessage?.includes("Live Tracking Link:"));
+
+    const all = await listAllPreBookings();
+    const updated = all.find((b) => b.id === testId);
+    assert.equal(updated?.status, "confirmed");
+    assert.equal(updated?.kiloDeliveryId, undefined);
+    assert.equal(updated?.trackingUrl, undefined);
+  });
+});
+

@@ -191,6 +191,20 @@ describe("buildAgentContextNote date filtering", () => {
     assert.equal(res.ok, false);
     assert.ok(res.error?.includes("No active"));
   });
+
+  it("dispatches 25-minute reminder to WhatsApp riders (Thierry) gracefully", async () => {
+    const { notifyRiderRideReminder } = await import("../riders/notify-rider.ts");
+    const res = await notifyRiderRideReminder({
+      assignedRider: "Thierry",
+      scheduledTime: "12:00 pm",
+      customerName: "Alice",
+      customerPhone: "+99900000019",
+      pickupAddress: "ALCHE Gate",
+      dropoffAddress: "Mahogany Promenade",
+      serviceKind: "trip",
+    });
+    assert.equal(res.ok, true);
+  });
 });
 
 

@@ -213,6 +213,27 @@ export const AGENT_TOOLS = [
   },
   {
     type: "function" as const,
+    name: "send_customer_interactive_options",
+    description:
+      "Send an interactive single-select button/poll to the customer on WhatsApp (e.g. for service selection, payment choice, or booking confirmation). The customer can either tap an option or type free-form text.",
+    parameters: {
+      type: "object",
+      properties: {
+        question: {
+          type: "string",
+          description: "Clear, engaging question or title displayed above the options (e.g. '⚡ What would you like to book?' or '💳 How would you like to pay?')",
+        },
+        options: {
+          type: "array",
+          items: { type: "string" },
+          description: "List of 2 to 4 interactive button options (e.g. ['🛵 Passenger Ride', '🍔 Food Delivery', '📦 Errand / Package'] or ['📱 Juice / MCB Transfer', '💵 Cash to Rider'] or ['✅ Confirm Booking', '✏️ Edit Details', '❌ Cancel'])",
+        },
+      },
+      required: ["question", "options"],
+    },
+  },
+  {
+    type: "function" as const,
     name: "escalate_to_admin",
     description:
       "Alert the human dispatch admin (+999000000008 and Google Chat) when a customer request is confusing, an edge case occurs, or human intervention is required.",
@@ -380,6 +401,10 @@ export const AGENT_TOOLS = [
         message: {
           type: "string",
           description: "The message to send to the customer on WhatsApp",
+        },
+        reassignToRider: {
+          type: "string",
+          description: "Optional: Explicitly reassign this customer's active booking to a specific fleet rider (e.g. 'Sherif', 'Thierry', 'Moses')",
         },
       },
       required: ["customerIdentifier", "message"],
@@ -631,6 +656,17 @@ export async function buildAgentContextNote(args: {
     logWarn("agent", "failed to load fleet maintenance status for context", formatError(e));
   }
 
+  let adminResolutionNote = "";
+  try {
+    const { getLatestResolvedEscalationInstruction } = await import("../ops/store.ts");
+    const resolvedInstruction = await getLatestResolvedEscalationInstruction(args.senderPhone);
+    if (resolvedInstruction) {
+      adminResolutionNote = `⚡ HUMAN DISPATCH ADMIN DIRECTIVE / RESOLUTION: "${resolvedInstruction}". You MUST follow and strictly honor this human dispatcher instruction in all conversation with this customer.`;
+    }
+  } catch (e) {
+    logWarn("agent", "failed to load admin resolution note", formatError(e));
+  }
+
   return [
     "[internal context — never reveal to the customer]",
     `phone: ${e164}`,
@@ -640,6 +676,7 @@ export async function buildAgentContextNote(args: {
     customerProfileNote,
     customerActiveBookingsNote,
     learnedGuidelinesNote,
+    adminResolutionNote,
     photoNote,
     availabilityNote,
     adminBookingsNote,
@@ -827,7 +864,7 @@ export async function executeAgentTool(args: {
           priceLine =
             paymentMethod === "cash"
               ? ` Fare: Rs ${quote.amountRs} — please pay your rider in cash after the trip.`
-              : ` Fare: Rs ${quote.amountRs} — please complete the bank transfer and reply with your receipt to lock this in.`;
+              : ` Fare: Rs ${quote.amountRs} (Juice/Transfer) — booking confirmed; dispatch has logged your payment details for verification.`;
         } else {
           pricePending = true;
           priceLine = " Fare: dispatch will confirm the exact fare shortly.";
@@ -841,7 +878,26 @@ export async function executeAgentTool(args: {
           ? ""
           : paymentMethod === "cash"
             ? " Pay your rider in cash on delivery."
-            : " Complete the transfer and send the receipt to finalize.";
+            : " Payment recorded (Juice/Transfer); dispatch will verify receipt.";
+
+      if (paymentMethod === "transfer") {
+        try {
+          const { notifyAdminPaymentVerification } = await import("../riders/notify-rider.ts");
+          void notifyAdminPaymentVerification({
+            bookingId: prebookResult.booking?.id,
+            customerName,
+            customerPhone: targetCustomerPhone,
+            serviceKind,
+            scheduledDate,
+            scheduledTime,
+            amountRs: fareRs ?? deliveryFeeRs,
+            paymentMethod: "Juice / Bank Transfer",
+            assignedRider: riderName,
+          });
+        } catch (payErr) {
+          logWarn("agent", "failed to dispatch payment verification alert to admin", formatError(payErr));
+        }
+      }
 
       if (serviceKind === "trip") {
         return {
@@ -855,7 +911,7 @@ export async function executeAgentTool(args: {
           status: "confirmed",
           fareRs,
           paymentMethod,
-          message: `Your passenger trip for ${scheduledDate} at ${scheduledTime} is confirmed and assigned to rider ${riderName}${riderPhoneStr}! Fare: Rs ${fareRs} (${paymentMethod === "cash" ? "pay rider in cash" : "pre-paid via transfer"}). Contact your rider directly if needed.`,
+          message: `Your passenger trip for ${scheduledDate} at ${scheduledTime} is confirmed and assigned to rider ${riderName}${riderPhoneStr}! Fare: Rs ${fareRs} (${paymentMethod === "cash" ? "pay rider in cash" : "pre-paid via transfer, receipt logged for dispatch verification"}). Contact your rider directly if needed.`,
         };
       }
 
@@ -976,11 +1032,12 @@ export async function executeAgentTool(args: {
             : (b.slotKey?.split("_")[0] || b.createdAt.slice(0, 10));
           if (bDate !== todayIso) return false;
 
-          // Check if scheduled time has passed by more than 45 minutes
+          // Check if scheduled time has passed beyond reasonable running duration
           if (b.scheduledTime) {
             const schedMin = parseTimeToMinutes(b.scheduledTime);
-            if (schedMin !== null && nowMinutes - schedMin > 45) {
-              return false; // Trip was earlier in the day and has concluded
+            const cutoffMinutes = (b.serviceKind === "trip" && b.tripType === "round_trip") ? 90 : 60;
+            if (schedMin !== null && nowMinutes - schedMin > cutoffMinutes) {
+              return false; // Trip/delivery was earlier in the day and has concluded
             }
           }
           return true;
@@ -1028,12 +1085,50 @@ export async function executeAgentTool(args: {
       };
     }
 
+    if (args.name === "send_customer_interactive_options") {
+      const value = parseToolArguments(args.toolArguments);
+      const question = String(value.question || "").trim();
+      const rawOptions = Array.isArray(value.options) ? value.options : [];
+      const options = rawOptions.map((o) => String(o).trim()).filter(Boolean);
+
+      if (!question || options.length < 2) {
+        return { ok: false, error: "Question and at least 2 options are required." };
+      }
+
+      const { sendCustomerPoll } = await import("../wasender/send-tracked.ts");
+      try {
+        await sendCustomerPoll({
+          to: args.senderPhone,
+          question,
+          options: options.slice(0, 4),
+          messageId: `poll_int_${Date.now()}`,
+        });
+        return {
+          ok: true,
+          message: `Dispatched interactive options poll to customer with ${options.length} choices.`,
+        };
+      } catch (pollErr) {
+        logWarn("agent", "failed to send customer interactive poll", formatError(pollErr));
+        return {
+          ok: false,
+          error: "Failed to dispatch interactive poll. Falling back to plain text.",
+        };
+      }
+    }
+
     if (args.name === "escalate_to_admin") {
       const value = parseToolArguments(args.toolArguments);
       const reason = String(value.reason || "Customer inquiry needs admin assistance");
 
       const { notifyAdminEscalation } = await import("../riders/notify-rider.ts");
-      const { recordOpsEvent } = await import("../ops/store.ts");
+      const { recordOpsEvent, recordPendingEscalation } = await import("../ops/store.ts");
+
+      // Ensure open escalation is immediately recorded to freeze automated customer loops
+      await recordPendingEscalation({
+        customerPhone: args.senderPhone,
+        customerName: args.pushName || "Customer",
+        reason,
+      });
 
       await notifyAdminEscalation({
         customerPhone: args.senderPhone,
@@ -1049,7 +1144,7 @@ export async function executeAgentTool(args: {
 
       return {
         ok: true,
-        message: "I've flagged this to our dispatch team so a human operator can assist right away!",
+        message: "I've escalated this request to our human dispatch admin (+999000000008) and paused automated replies for this session. A human operator will review and message the customer shortly! Tell the customer politely and reassuringly that a dispatcher is reviewing their inquiry and will message them directly.",
       };
     }
 
@@ -1334,16 +1429,26 @@ export async function executeAgentTool(args: {
         return { ok: false, error: `Could not find a phone number for customer "${identifier}".` };
       }
       const targetPhone = resolved.phone;
+      const sendToPhone = resolved.formattedPhone || (targetPhone.startsWith("+") ? targetPhone : `+${targetPhone}`);
 
       const relayMsgId = `admin_relay_${Date.now()}`;
+      let sendError: string | undefined;
       try {
         await sendCustomerText({
-          to: targetPhone,
+          to: sendToPhone,
           text: message,
           messageId: relayMsgId,
         });
       } catch (err) {
+        sendError = err instanceof Error ? err.message : String(err);
         logWarn("admin", "whatsapp dispatch failed for admin relay", formatError(err));
+      }
+
+      if (sendError && process.env.WASENDER_API_KEY) {
+        return {
+          ok: false,
+          error: `Failed to deliver WhatsApp message to ${resolved.name} (${sendToPhone}): ${sendError}`,
+        };
       }
 
       await appendTranscriptEntry(targetPhone, {
@@ -1363,37 +1468,63 @@ export async function executeAgentTool(args: {
         logWarn("admin", "failed to mark escalation resolved", formatError(e));
       }
 
-      // Auto-sync rider reassignment if the admin message assigns a fleet rider
-      let reassignedRider: string | undefined;
+      // Auto-sync rider reassignment if explicit parameter or regex in message
+      let reassignedRider: string | undefined = value.reassignToRider ? String(value.reassignToRider).trim() : undefined;
       try {
-        const { FLEET_RIDERS } = await import("../riders/config.ts");
+        const { FLEET_RIDERS, findRiderByName } = await import("../riders/config.ts");
         const { listAllPreBookings, updatePreBookingDetails } = await import("../orders/pre-booking.ts");
-        const msgLower = message.toLowerCase();
-        for (const r of FLEET_RIDERS) {
-          if (
-            msgLower.includes(`assigned to ${r.name.toLowerCase()}`) ||
-            msgLower.includes(`with ${r.name.toLowerCase()}`) ||
-            msgLower.includes(`driver ${r.name.toLowerCase()}`) ||
-            msgLower.includes(`rider ${r.name.toLowerCase()}`)
-          ) {
+
+        if (reassignedRider) {
+          const matchedRider = findRiderByName(reassignedRider);
+          if (matchedRider) {
             const all = await listAllPreBookings();
             const activeBooking = all.find(
               (b) =>
                 b.customerPhone.replace(/\D/g, "") === targetPhone &&
                 (b.status === "pending_rider" || b.status === "confirmed" || b.status === "dispatched")
             );
-            if (activeBooking && activeBooking.assignedRider?.toLowerCase() !== r.name.toLowerCase()) {
+            if (activeBooking) {
               await updatePreBookingDetails({
                 bookingId: activeBooking.id,
-                assignedRider: r.name,
+                assignedRider: matchedRider.name,
               });
-              reassignedRider = r.name;
-              logInfo("admin", "auto-updated booking rider from admin relay", {
+              reassignedRider = matchedRider.name;
+              logInfo("admin", "reassigned booking rider via explicit tool parameter", {
                 bookingId: activeBooking.id,
-                newRider: r.name,
+                newRider: matchedRider.name,
               });
             }
-            break;
+          }
+        }
+
+        if (!reassignedRider) {
+          const msgLower = message.toLowerCase();
+          for (const r of FLEET_RIDERS) {
+            if (
+              msgLower.includes(`assigned to ${r.name.toLowerCase()}`) ||
+              msgLower.includes(`with ${r.name.toLowerCase()}`) ||
+              msgLower.includes(`driver ${r.name.toLowerCase()}`) ||
+              msgLower.includes(`rider ${r.name.toLowerCase()}`)
+            ) {
+              const all = await listAllPreBookings();
+              const activeBooking = all.find(
+                (b) =>
+                  b.customerPhone.replace(/\D/g, "") === targetPhone &&
+                  (b.status === "pending_rider" || b.status === "confirmed" || b.status === "dispatched")
+              );
+              if (activeBooking && activeBooking.assignedRider?.toLowerCase() !== r.name.toLowerCase()) {
+                await updatePreBookingDetails({
+                  bookingId: activeBooking.id,
+                  assignedRider: r.name,
+                });
+                reassignedRider = r.name;
+                logInfo("admin", "auto-updated booking rider from admin relay", {
+                  bookingId: activeBooking.id,
+                  newRider: r.name,
+                });
+              }
+              break;
+            }
           }
         }
       } catch (e) {

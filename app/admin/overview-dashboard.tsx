@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
 import { AdminNav } from "@/app/admin/admin-nav";
 import type { PreBooking } from "@/lib/orders/pre-booking";
@@ -13,7 +14,38 @@ export function OverviewDashboard(props: {
   totalInbound: number;
   totalOutbound: number;
   needsTakeoverCount: number;
+  maintenance?: { active: boolean; untilTimeStr?: string; reason?: string };
 }) {
+  const [maintenance, setMaintenance] = useState(props.maintenance || { active: false });
+  const [showPauseModal, setShowPauseModal] = useState(false);
+  const [pauseUntil, setPauseUntil] = useState("18:00");
+  const [pauseReason, setPauseReason] = useState("Fleet maintenance");
+  const [isUpdatingMaint, setIsUpdatingMaint] = useState(false);
+
+  async function handleToggleMaintenance(active: boolean) {
+    setIsUpdatingMaint(true);
+    try {
+      const res = await fetch("/api/maintenance", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          active,
+          untilTimeStr: pauseUntil,
+          reason: pauseReason,
+        }),
+      });
+      const data = await res.json();
+      if (data.ok && data.maintenance) {
+        setMaintenance(data.maintenance);
+        setShowPauseModal(false);
+      }
+    } catch (err) {
+      console.error("Failed to update maintenance", err);
+    } finally {
+      setIsUpdatingMaint(false);
+    }
+  }
+
   const activeBookings = props.bookings.filter(
     (b) => b.status === "pending_rider" || b.status === "confirmed" || b.status === "dispatched",
   );
@@ -57,6 +89,99 @@ export function OverviewDashboard(props: {
         agentEnabled={props.agentEnabled}
         mauritiusNow={props.schedule.mauritiusNowLabel}
       />
+
+      {/* Fleet Maintenance Status & Emergency Pause Banner */}
+      {maintenance.active ? (
+        <div className="rounded-[20px] bg-amber-500/10 border border-amber-500/30 p-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 shadow-sm">
+          <div className="flex items-center gap-3">
+            <span className="text-2xl">⚠️</span>
+            <div>
+              <div className="text-sm font-bold text-amber-700 dark:text-amber-400">
+                Fleet Maintenance Active — On-Demand Bookings Paused
+              </div>
+              <div className="text-xs text-amber-800/80 dark:text-amber-300/80">
+                Paused until <strong>{maintenance.untilTimeStr}</strong> • Reason: {maintenance.reason || "Scheduled maintenance"}
+              </div>
+            </div>
+          </div>
+          <button
+            onClick={() => handleToggleMaintenance(false)}
+            disabled={isUpdatingMaint}
+            className="px-4 py-2 rounded-xl text-xs font-bold bg-amber-600 hover:bg-amber-700 text-white shadow transition-all disabled:opacity-50 flex items-center gap-2 shrink-0"
+          >
+            {isUpdatingMaint ? "Resuming..." : "Resume Normal Operations 🛵"}
+          </button>
+        </div>
+      ) : (
+        <div className="flex flex-col gap-3">
+          <div className="rounded-[20px] bg-[var(--bg-card)] border border-[#E8E5DC] dark:border-[#1D2620] p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-sm">
+            <div className="flex items-center gap-2.5">
+              <span className="relative flex h-3 w-3">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#7ed957] opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-3 w-3 bg-[#7ed957]"></span>
+              </span>
+              <span className="text-xs font-semibold text-[#101412] dark:text-[#F6F3EC]">
+                Fleet Active & Dispatching
+              </span>
+            </div>
+            <button
+              onClick={() => setShowPauseModal((prev) => !prev)}
+              className="px-3 py-1.5 rounded-lg text-xs font-medium border border-amber-500/40 text-amber-700 dark:text-amber-400 hover:bg-amber-500/10 transition-colors"
+            >
+              {showPauseModal ? "Cancel" : "⏸️ Emergency Fleet Pause"}
+            </button>
+          </div>
+
+          {showPauseModal && (
+            <div className="rounded-[20px] bg-amber-500/5 border border-amber-500/30 p-5 space-y-4 shadow-sm">
+              <div className="text-xs font-bold text-amber-800 dark:text-amber-300 uppercase tracking-wide">
+                Pause Fleet On-Demand Bookings
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-medium text-[#6C746E] dark:text-[#8E9690] mb-1">
+                    Pause Until (Time):
+                  </label>
+                  <input
+                    type="text"
+                    value={pauseUntil}
+                    onChange={(e) => setPauseUntil(e.target.value)}
+                    placeholder="e.g. 5:00 pm, 18:00"
+                    className="w-full text-xs rounded-xl border border-[#E8E5DC] dark:border-[#1D2620] bg-white dark:bg-[#151C17] px-3 py-2 text-[#101412] dark:text-[#F6F3EC]"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-[#6C746E] dark:text-[#8E9690] mb-1">
+                    Reason:
+                  </label>
+                  <input
+                    type="text"
+                    value={pauseReason}
+                    onChange={(e) => setPauseReason(e.target.value)}
+                    placeholder="e.g. Heavy rain, Bike repair"
+                    className="w-full text-xs rounded-xl border border-[#E8E5DC] dark:border-[#1D2620] bg-white dark:bg-[#151C17] px-3 py-2 text-[#101412] dark:text-[#F6F3EC]"
+                  />
+                </div>
+              </div>
+              <div className="flex justify-end gap-2">
+                <button
+                  onClick={() => setShowPauseModal(false)}
+                  className="px-3 py-1.5 rounded-xl text-xs border border-gray-300 dark:border-gray-700 text-gray-700 dark:text-gray-300"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => handleToggleMaintenance(true)}
+                  disabled={isUpdatingMaint || !pauseUntil.trim()}
+                  className="px-4 py-1.5 rounded-xl text-xs font-bold bg-amber-600 hover:bg-amber-700 text-white shadow disabled:opacity-50"
+                >
+                  {isUpdatingMaint ? "Pausing..." : "Confirm Fleet Pause"}
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Main Bento Layout (4 Key Metrics) */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">

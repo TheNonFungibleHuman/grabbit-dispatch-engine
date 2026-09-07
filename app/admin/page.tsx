@@ -4,6 +4,7 @@ import { isAdminAuthed } from "@/lib/admin/auth";
 import { getOpsDashboard } from "@/lib/ops/store";
 import { listAllPreBookings } from "@/lib/orders/pre-booking";
 import { getAvailabilitySnapshot } from "@/lib/schedule/availability";
+import { getFleetMaintenanceStatus } from "@/lib/riders/commands";
 import { mauritiusDateIso } from "@/lib/time";
 import { OverviewDashboard } from "./overview-dashboard";
 
@@ -12,11 +13,12 @@ export default async function AdminIndexPage() {
     redirect("/admin/login");
   }
 
-  const [rawBookings, schedule, agentSwitch, ops] = await Promise.all([
+  const [rawBookings, schedule, agentSwitch, ops, maintenance] = await Promise.all([
     listAllPreBookings(),
     getAvailabilitySnapshot(),
     getAgentSwitchState({ bypassMemory: true }),
     getOpsDashboard(),
+    getFleetMaintenanceStatus(),
   ]);
 
   const todayIso = mauritiusDateIso(new Date());
@@ -47,6 +49,7 @@ export default async function AdminIndexPage() {
       totalInbound={ops.state.stats.inbound}
       totalOutbound={ops.state.stats.outboundSuccess}
       needsTakeoverCount={ops.takeovers.length}
+      maintenance={maintenance}
     />
   );
 }

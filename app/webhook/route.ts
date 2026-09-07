@@ -10,6 +10,7 @@ import {
 import { formatError, logError, logInfo, logWarn } from "@/lib/log";
 
 export const runtime = "nodejs";
+export const maxDuration = 60;
 
 /**
  * Health check so you can confirm the public URL is reachable before
