@@ -234,3 +234,99 @@ export function isRepetitivePolicyLoop(reply: string, recentHistory: Array<{ rol
 
   return null;
 }
+
+export function isRepetitiveQuestionLoop(
+  reply: string,
+  recentHistory: Array<{ role: string; content?: string | null }>,
+): string | null {
+  if (!reply || !recentHistory || recentHistory.length < 2) return null;
+
+  const normalize = (s: string) =>
+    s
+      .toLowerCase()
+      .replace(/[^\w\s]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+
+  const currentNorm = normalize(reply);
+  if (!currentNorm) return null;
+
+  const previousAssistant = recentHistory
+    .filter((m) => m.role === "assistant" && typeof m.content === "string")
+    .map((m) => normalize(m.content as string));
+
+  if (previousAssistant.length === 0) return null;
+
+  // Check if current reply is asking for location/gate/residence
+  const isLocationOrResidenceQuery =
+    (currentNorm.includes("gate") ||
+      currentNorm.includes("hostel") ||
+      currentNorm.includes("residence") ||
+      currentNorm.includes("drop off location") ||
+      currentNorm.includes("drop off spot") ||
+      currentNorm.includes("deliver to")) &&
+    (currentNorm.includes("exact") || currentNorm.includes("confirm") || currentNorm.includes("share"));
+
+  // Check against the last 3 assistant replies
+  const recentAssistant = previousAssistant.slice(-3);
+
+  const isDirectDuplicate = recentAssistant.some((prev) => {
+    if (prev === currentNorm) return true;
+    if (
+      isLocationOrResidenceQuery &&
+      (prev.includes("hostel") ||
+        prev.includes("residence") ||
+        prev.includes("gate") ||
+        prev.includes("exact drop off"))
+    ) {
+      return true;
+    }
+    // High word similarity check (> 75% word overlap)
+    const currentWords = new Set(currentNorm.split(" ").filter((w) => w.length > 3));
+    const prevWords = new Set(prev.split(" ").filter((w) => w.length > 3));
+    if (currentWords.size >= 5 && prevWords.size >= 5) {
+      let shared = 0;
+      for (const w of currentWords) {
+        if (prevWords.has(w)) shared++;
+      }
+      const overlap = shared / Math.max(currentWords.size, prevWords.size);
+      if (overlap >= 0.75) return true;
+    }
+    return false;
+  });
+
+  if (isDirectDuplicate) {
+    // Find the latest user input
+    const userMsgs = recentHistory.filter((m) => m.role === "user" && typeof m.content === "string");
+    const lastUserText = userMsgs[userMsgs.length - 1]?.content || "";
+    const lastUserLower = lastUserText.toLowerCase();
+
+    // Check if customer provided a residence or affirmative confirmation
+    const knownLocations = [
+      "aksum",
+      "songhai",
+      "songai",
+      "timbuktu",
+      "kilwa",
+      "zimbabwe",
+      "gate",
+      "cafeteria",
+      "library",
+      "commons",
+      "alche",
+    ];
+    const matchedLocation = knownLocations.find((loc) => lastUserLower.includes(loc));
+
+    if (matchedLocation || /^(?:yes|yep|yeah|correct|that's right|exactly)\b/i.test(lastUserLower.trim())) {
+      const displayLoc = matchedLocation
+        ? matchedLocation.charAt(0).toUpperCase() + matchedLocation.slice(1)
+        : "ALCHE";
+      return `Got it! I've noted ${displayLoc} at ALCHE as your drop-off. Our dispatch team is locking in your order right now and will confirm in just a moment! 😊`;
+    }
+
+    return "Got your details! I've escalated this directly to our dispatch operations team so we can confirm your request right away. A dispatcher will be with you in a moment! 👍";
+  }
+
+  return null;
+}
+

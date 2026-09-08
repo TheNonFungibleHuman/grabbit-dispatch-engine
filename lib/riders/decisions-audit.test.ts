@@ -507,17 +507,17 @@ describe("Customer +99900000055 Incident: Poll Messaging & Non-Text Webhook Safe
     });
 
     const transcript = await loadTranscript(newCustomerPhone);
-    assert.equal(transcript.entries.length, 2, "must record customer hello and welcome poll");
+    assert.equal(transcript.entries.length, 2, "must record customer hello and welcome greeting");
     assert.equal(transcript.entries[0].role, "customer");
     assert.equal(transcript.entries[0].text, "Hello");
 
     assert.equal(transcript.entries[1].role, "agent");
     assert.match(transcript.entries[1].text, /Welcome to Grabbit Express Sarah!/);
-    assert.match(transcript.entries[1].text, /🛵 Passenger Ride/);
-    assert.match(transcript.entries[1].text, /🍔 Food Delivery/);
+    assert.match(transcript.entries[1].text, /passenger ride/i);
+    assert.match(transcript.entries[1].text, /food delivery/i);
   });
 
-  it("does not re-send welcome poll if customer has an active in-flight conversation", async () => {
+  it("does not re-send welcome greeting if customer has an active in-flight conversation", async () => {
     const { isBareGreeting } = await import("../agent/format.ts");
     const { loadTranscript, appendTranscriptEntry } = await import("../agent/transcript.ts");
 
@@ -693,5 +693,34 @@ describe("Daily Escalation Scoping & End of Day Purge", () => {
   });
 });
 
+describe("Poll Eradication & Repetitive Question Loop Breaker", () => {
+  it("verifies interactive poll tools are completely removed from AGENT_TOOLS", async () => {
+    const { AGENT_TOOLS, DEEPSEEK_AGENT_TOOLS } = await import("../agent/tools.ts");
+    const hasPollTool = AGENT_TOOLS.some((t) => t.name.includes("poll") || t.name.includes("interactive"));
+    assert.equal(hasPollTool, false, "no interactive poll tools may exist in AGENT_TOOLS");
 
+    const hasDeepSeekPollTool = DEEPSEEK_AGENT_TOOLS.some(
+      (t) => t.function.name.includes("poll") || t.function.name.includes("interactive"),
+    );
+    assert.equal(hasDeepSeekPollTool, false, "no interactive poll tools may exist in DEEPSEEK_AGENT_TOOLS");
+  });
 
+  it("breaks repetitive question loop when assistant asks the same location question repeatedly", async () => {
+    const { isRepetitiveQuestionLoop } = await import("../agent/booking-guard.ts");
+
+    const repeatedQuestion =
+      "Let me confirm the exact drop-off location at ALCHE for your KFC delivery. Could you share the specific gate, hostel, or residence name so the rider knows exactly where to go 😊";
+
+    const historyWithLoop = [
+      { role: "assistant", content: repeatedQuestion },
+      { role: "user", content: "Aksum" },
+      { role: "assistant", content: "I see you mentioned Aksum, is that correct?" },
+      { role: "user", content: "Yes" },
+    ];
+
+    const loopFix = isRepetitiveQuestionLoop(repeatedQuestion, historyWithLoop);
+    assert.ok(loopFix, "must detect repetitive question loop and return circuit breaker fix");
+    assert.match(loopFix, /Aksum|drop-off/i);
+    assert.doesNotMatch(loopFix, /could you share the specific gate/i);
+  });
+});

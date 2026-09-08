@@ -213,27 +213,6 @@ export const AGENT_TOOLS = [
   },
   {
     type: "function" as const,
-    name: "send_customer_interactive_options",
-    description:
-      "Send an interactive single-select button/poll to the customer on WhatsApp (e.g. for service selection, payment choice, or booking confirmation). The customer can either tap an option or type free-form text.",
-    parameters: {
-      type: "object",
-      properties: {
-        question: {
-          type: "string",
-          description: "Clear, engaging question or title displayed above the options (e.g. '⚡ What would you like to book?' or '💳 How would you like to pay?')",
-        },
-        options: {
-          type: "array",
-          items: { type: "string" },
-          description: "List of 2 to 4 interactive button options (e.g. ['🛵 Passenger Ride', '🍔 Food Delivery', '📦 Errand / Package'] or ['📱 Juice / MCB Transfer', '💵 Cash to Rider'] or ['✅ Confirm Booking', '✏️ Edit Details', '❌ Cancel'])",
-        },
-      },
-      required: ["question", "options"],
-    },
-  },
-  {
-    type: "function" as const,
     name: "escalate_to_admin",
     description:
       "Alert the human dispatch admin (+999000000008 and Google Chat) when a customer request is confusing, an edge case occurs, or human intervention is required.",
@@ -1098,37 +1077,6 @@ export async function executeAgentTool(args: {
         trackingUrl: activeBooking.trackingUrl,
         message: `I've sent an alert to rider ${activeBooking.assignedRider}. You can also follow their real-time map location here: ${activeBooking.trackingUrl || 'https://delivery.grabbit-express.com'}`,
       };
-    }
-
-    if (args.name === "send_customer_interactive_options") {
-      const value = parseToolArguments(args.toolArguments);
-      const question = String(value.question || "").trim();
-      const rawOptions = Array.isArray(value.options) ? value.options : [];
-      const options = rawOptions.map((o) => String(o).trim()).filter(Boolean);
-
-      if (!question || options.length < 2) {
-        return { ok: false, error: "Question and at least 2 options are required." };
-      }
-
-      const { sendCustomerPoll } = await import("../wasender/send-tracked.ts");
-      try {
-        await sendCustomerPoll({
-          to: args.senderPhone,
-          question,
-          options: options.slice(0, 4),
-          messageId: `poll_int_${Date.now()}`,
-        });
-        return {
-          ok: true,
-          message: `Dispatched interactive options poll to customer with ${options.length} choices.`,
-        };
-      } catch (pollErr) {
-        logWarn("agent", "failed to send customer interactive poll", formatError(pollErr));
-        return {
-          ok: false,
-          error: "Failed to dispatch interactive poll. Falling back to plain text.",
-        };
-      }
     }
 
     if (args.name === "escalate_to_admin") {

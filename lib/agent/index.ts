@@ -215,7 +215,7 @@ export async function processIncomingUserMessage(
   const { isAuthorizedRiderOrAdmin } = await import("../riders/config.ts");
   const auth = isAuthorizedRiderOrAdmin(message.sender);
 
-  // Opening bare greeting: present the 1-tap interactive welcome poll
+  // Opening bare greeting: present a fast, warm, natural text welcome (0 LLM tokens, pure WhatsApp text)
   if (!auth.isAdmin && !auth.rider && isBareGreeting(message.text)) {
     try {
       const transcript = await loadTranscript(message.sender);
@@ -228,14 +228,13 @@ export async function processIncomingUserMessage(
         : Infinity;
 
       // If customer had an active exchange in the last 15 minutes that wasn't just a greeting,
-      // let DeepSeek handle it in conversational context rather than repeating the welcome poll.
+      // let DeepSeek handle it in conversational context rather than repeating the welcome greeting.
       const hasRecentActiveFlow =
         timeSinceLastTurn < 15 * 60 * 1000 && !isBareGreeting(lastPriorCustomerEntry.text);
 
       if (!hasRecentActiveFlow) {
-        const { sendCustomerPoll } = await import("../wasender/send-tracked.ts");
         const namePart = message.pushName?.trim() ? ` ${message.pushName.trim()}` : "";
-        const pollQuestion = `👋 Welcome to Grabbit Express${namePart}! ⚡\nMauritius' on-demand electric delivery & passenger ride service.\n\nWhat would you like to book today?`;
+        const greetingText = `👋 Welcome to Grabbit Express${namePart}! ⚡\nMauritius' on-demand electric delivery & passenger ride service.\n\nHow can we help you today? Let us know if you need a passenger ride, food delivery, or errand/package pickup! 😊`;
 
         // Record customer message if not already recorded by webhook handler
         const alreadyRecorded = transcript.entries.some(
@@ -249,33 +248,27 @@ export async function processIncomingUserMessage(
           });
         }
 
-        // Dispatch single native WhatsApp poll (greeting + options in 1 message, 0s delay)
-        let pollSent = false;
         try {
-          await sendCustomerPoll({
+          await sendCustomerText({
             to,
-            question: pollQuestion,
-            options: ["🛵 Passenger Ride", "🍔 Food Delivery", "📦 Errand / Package"],
-            messageId: `welcome_poll_${message.messageId}`,
+            text: greetingText,
+            messageId: `welcome_${message.messageId}`,
           });
-          pollSent = true;
-        } catch (pollErr) {
-          logWarn("agent", "failed to send welcome interactive poll via WhatsApp API", formatError(pollErr));
+        } catch (sendErr) {
+          logWarn("agent", "failed to send welcome text via WhatsApp API", formatError(sendErr));
         }
 
-        if (!pollSent) {
-          try {
-            await appendTranscriptEntry(to, {
-              role: "agent",
-              text: `${pollQuestion}\n[Options: 🛵 Passenger Ride | 🍔 Food Delivery | 📦 Errand / Package]`,
-              messageId: `welcome_poll_${message.messageId}`,
-            });
-          } catch {
-            // ignore transcript errors
-          }
+        try {
+          await appendTranscriptEntry(to, {
+            role: "agent",
+            text: greetingText,
+            messageId: `welcome_${message.messageId}`,
+          });
+        } catch {
+          // ignore transcript errors
         }
 
-        logInfo("agent", "sent interactive welcome poll on greeting", {
+        logInfo("agent", "sent pure text welcome greeting", {
           to,
           sender: message.sender,
           messageId: message.messageId,
@@ -283,8 +276,8 @@ export async function processIncomingUserMessage(
         });
         return;
       }
-    } catch (pollErr) {
-      logWarn("agent", "failed in greeting poll check, falling back to LLM", formatError(pollErr));
+    } catch (greetErr) {
+      logWarn("agent", "failed in greeting check, falling back to LLM", formatError(greetErr));
     }
   }
 

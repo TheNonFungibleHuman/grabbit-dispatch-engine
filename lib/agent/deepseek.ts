@@ -411,12 +411,12 @@ export async function generateAgentReply(
     }
   }
 
-  // Repetition guard on customer policy loops
+  // Repetition guard on customer policy and question loops
   if (!callerAuth.isAdmin && !callerAuth.rider && text) {
-    const { isRepetitivePolicyLoop } = await import("./booking-guard.ts");
-    const repetitiveFix = isRepetitivePolicyLoop(text, messages as any);
+    const { isRepetitivePolicyLoop, isRepetitiveQuestionLoop } = await import("./booking-guard.ts");
+    const repetitiveFix = isRepetitivePolicyLoop(text, messages as any) || isRepetitiveQuestionLoop(text, messages as any);
     if (repetitiveFix) {
-      logInfo("agent", "suppressing repetitive payment policy loop for customer", {
+      logInfo("agent", "suppressing repetitive loop for customer", {
         messageId: input.messageId,
       });
       text = repetitiveFix;

@@ -1,4 +1,4 @@
-import { sendCustomerPoll, sendCustomerText } from "../wasender/send-tracked.ts";
+import { sendCustomerText } from "../wasender/send-tracked.ts";
 import { formatError, logError, logInfo, logWarn } from "../log.ts";
 import { FLEET_RIDERS, findRiderByName, type RiderProfile } from "./config.ts";
 
@@ -60,18 +60,6 @@ export async function notifyRiderForBooking(
         phone: targetPhone,
       });
       channelUsed = "whatsapp";
-
-      // Also dispatch interactive WhatsApp poll buttons for 1-tap accept/decline
-      try {
-        await sendCustomerPoll({
-          to: targetPhone,
-          question: `Accept ${payload.serviceKind} for ${payload.customerName} at ${payload.scheduledTime}?`,
-          options: ["Accept 🛵", "Decline ❌"],
-          messageId: `rider_poll_${payload.bookingId}_${Date.now()}`,
-        });
-      } catch (pollErr) {
-        logWarn("riders", "failed to send interactive poll to rider (text fallback already sent)", formatError(pollErr));
-      }
     } catch (err) {
       logError("riders", "failed to send whatsapp to rider", err);
     }
