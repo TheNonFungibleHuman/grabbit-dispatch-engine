@@ -75,3 +75,48 @@ export function isShortAcknowledgement(text: string): boolean {
     ) || /^(thanks|thank you|thx|ty)\b/.test(cleaned)
   );
 }
+
+/**
+ * Detects general opening greetings with no specific service, location, or destination details.
+ * Used to immediately present the 1-tap interactive welcome poll on first contact.
+ */
+export function isBareGreeting(text: string): boolean {
+  if (!text) return false;
+  const cleaned = text
+    .trim()
+    .toLowerCase()
+    .replace(/[!?.,👋✨⚡😊🛵☀🙏]+/gu, "")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (!cleaned || cleaned.length > 50) return false;
+
+  // Specific booking/errand/food keywords mean the customer is already stating their intent
+  const intentKeywords = [
+    "ride", "trip", "delivery", "order", "book", "booking", "package",
+    "errand", "pickup", "dropoff", "food", "pizza", "kfc", "pan asian",
+    "mahogany", "alche", "grand baie", "pamplemousses", "price", "fare",
+    "cost", "menu", "decathlon", "super u", "ready", "outside", "car"
+  ];
+  if (intentKeywords.some((kw) => cleaned.includes(kw))) {
+    return false;
+  }
+
+  const commonGreetings = new Set([
+    "hello", "hi", "hey", "good morning", "good afternoon", "good evening",
+    "grabbit", "grabbit express", "start", "bonjour", "bonsoir", "salut",
+    "ola", "yo", "morning", "afternoon", "evening"
+  ]);
+
+  if (commonGreetings.has(cleaned)) {
+    return true;
+  }
+
+  const tokens = cleaned.split(/\s+/);
+  if (tokens.length <= 3 && tokens.some((t) => commonGreetings.has(t))) {
+    return true;
+  }
+
+  return false;
+}
+

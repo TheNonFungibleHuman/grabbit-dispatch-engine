@@ -111,6 +111,21 @@ export async function sendCustomerPoll(input: {
       messageId: input.messageId,
       preview: `[Poll] ${input.question} -> ${input.options.join(" | ")}`,
     });
+
+    try {
+      const { findRiderByPhone } = await import("../riders/config.ts");
+      if (!findRiderByPhone(input.to)) {
+        const { appendTranscriptEntry } = await import("../agent/transcript.ts");
+        await appendTranscriptEntry(input.to, {
+          role: "agent",
+          text: `${input.question}\n[Options: ${input.options.join(" | ")}]`,
+          messageId: input.messageId,
+        });
+      }
+    } catch {
+      // ignore transcript errors
+    }
+
     await noteSendMetrics(true);
     return result;
   } catch (error) {

@@ -430,3 +430,112 @@ describe("Second-Round Audit Hardening & Regressions", () => {
   });
 });
 
+describe("Customer +99900000055 Incident: Poll Messaging & Non-Text Webhook Safety", () => {
+  it("accurately identifies bare greetings vs specific booking intent with isBareGreeting", async () => {
+    const { isBareGreeting } = await import("../agent/format.ts");
+
+    // Pure greetings should return true
+    assert.equal(isBareGreeting("Hello"), true);
+    assert.equal(isBareGreeting("Hi"), true);
+    assert.equal(isBareGreeting("Hey"), true);
+    assert.equal(isBareGreeting("Good morning"), true);
+    assert.equal(isBareGreeting("Good afternoon"), true);
+    assert.equal(isBareGreeting("Good evening"), true);
+    assert.equal(isBareGreeting("Grabbit"), true);
+    assert.equal(isBareGreeting("Grabbit express"), true);
+    assert.equal(isBareGreeting("bonjour"), true);
+    assert.equal(isBareGreeting("salut"), true);
+    assert.equal(isBareGreeting("Hey there!"), true);
+
+    // Messages with actual booking content or times should return false
+    assert.equal(isBareGreeting("I want to book a trip"), false);
+    assert.equal(isBareGreeting("For 11:45"), false);
+    assert.equal(isBareGreeting("Hello, I want to book a ride to Grand Baie"), false);
+    assert.equal(isBareGreeting("Can you deliver food from mahogany?"), false);
+    assert.equal(isBareGreeting("12:00 pm"), false);
+    assert.equal(isBareGreeting(""), false);
+    assert.equal(isBareGreeting("   "), false);
+  });
+
+  it("discards non-text, non-media events early without creating transcript or triggering replies", async () => {
+    const { handleWasenderEvent } = await import("../wasender/handlers.ts");
+    const { loadTranscript } = await import("../agent/transcript.ts");
+
+    const customerPhone = "99900000055";
+    // Simulate the exact empty reaction / protocol message that arrived at 04:07:46
+    await handleWasenderEvent({
+      event: "messages.received",
+      timestamp: Date.now(),
+      data: {
+        messages: {
+          key: {
+            id: "A540C60B9D9892D8D6C5A5B4DDCE9CFD",
+            remoteJid: `${customerPhone}@s.whatsapp.net`,
+          },
+          pushName: ".o",
+          messageBody: "", // Empty reaction / protocol event
+        },
+      },
+    });
+
+    const transcript = await loadTranscript(customerPhone);
+    assert.equal(
+      transcript.entries.length,
+      0,
+      "empty non-text/non-media events must be ignored and not recorded in transcript",
+    );
+  });
+
+  it("dispatches single combined interactive welcome poll immediately on clean session greeting", async () => {
+    const { handleWasenderEvent } = await import("../wasender/handlers.ts");
+    const { loadTranscript } = await import("../agent/transcript.ts");
+
+    const newCustomerPhone = "99900000056";
+    await handleWasenderEvent({
+      event: "messages.received",
+      timestamp: Date.now(),
+      data: {
+        messages: {
+          key: {
+            id: `msg_hello_${Date.now()}`,
+            remoteJid: `${newCustomerPhone}@s.whatsapp.net`,
+          },
+          pushName: "Sarah",
+          messageBody: "Hello",
+        },
+      },
+    });
+
+    const transcript = await loadTranscript(newCustomerPhone);
+    assert.equal(transcript.entries.length, 2, "must record customer hello and welcome poll");
+    assert.equal(transcript.entries[0].role, "customer");
+    assert.equal(transcript.entries[0].text, "Hello");
+
+    assert.equal(transcript.entries[1].role, "agent");
+    assert.match(transcript.entries[1].text, /Welcome to Grabbit Express Sarah!/);
+    assert.match(transcript.entries[1].text, /🛵 Passenger Ride/);
+    assert.match(transcript.entries[1].text, /🍔 Food Delivery/);
+  });
+
+  it("does not re-send welcome poll if customer has an active in-flight conversation", async () => {
+    const { isBareGreeting } = await import("../agent/format.ts");
+    const { loadTranscript, appendTranscriptEntry } = await import("../agent/transcript.ts");
+
+    const activeCustomerPhone = "99900000053";
+
+    // 1. Customer previously requested a trip 2 minutes ago
+    await appendTranscriptEntry(activeCustomerPhone, {
+      role: "customer",
+      text: "I need a ride to Grand Baie at 2pm",
+      at: new Date(Date.now() - 2 * 60 * 1000).toISOString(),
+    });
+
+    // 2. Customer follows up with "Hello"
+    const transcript = await loadTranscript(activeCustomerPhone);
+    const lastCustomer = transcript.entries.findLast((e) => e.role === "customer");
+    assert.ok(lastCustomer);
+    assert.equal(isBareGreeting(lastCustomer.text), false, "last customer message was a real booking request");
+  });
+});
+
+

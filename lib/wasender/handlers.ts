@@ -259,6 +259,24 @@ async function processClaimedIncomingMessage(
   const sender = getSenderPhone(message);
   const text = extractMessageBody(message);
 
+  const msgObj = message.message as Record<string, unknown> | undefined;
+  const hasImageOrDoc = Boolean(
+    msgObj &&
+      (msgObj.imageMessage ||
+        msgObj.documentMessage ||
+        msgObj.documentWithCaptionMessage),
+  );
+
+  // Wasender API guidance: ignore webhook events that carry no text or media payload
+  // (e.g. WhatsApp emoji reactions, protocol/ack messages, stickers, ephemeral syncs).
+  if (!text.trim() && !hasImageOrDoc) {
+    logInfo("wasender", "ignored empty non-text/non-media message event", {
+      messageId: message.key.id,
+      from: sender,
+    });
+    return;
+  }
+
   logInfo("wasender", "message received", {
     messageId: message.key.id,
     from: sender,
@@ -266,13 +284,7 @@ async function processClaimedIncomingMessage(
     pushName: message.pushName,
     textPreview: text.slice(0, 120),
     textLength: text.length,
-    hasMedia: Boolean(
-      message.message &&
-        Object.keys(message.message).some((key) =>
-          key.toLowerCase().includes("message"),
-        ) &&
-        !("conversation" in (message.message ?? {})),
-    ),
+    hasMedia: hasImageOrDoc,
   });
 
   const { withPhoneSessionLock } = await import("./session-lock.ts");
