@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { memoryClear, readJson, writeJson } from "../blob/json-store.ts";
 import { formatError, logInfo, logWarn } from "../log.ts";
-import { mauritiusDateIso, resolveRelativeDateWord, parseTimeToMinutes } from "../time.ts";
+import { mauritiusDateIso, resolveRelativeDateWord, parseTimeToMinutes, mauritiusWeekday } from "../time.ts";
 import {
   evaluateAvailability,
   parseRiderScheduleCsv,
@@ -309,7 +309,7 @@ export async function getRiderForTargetSlot(args: {
 
   const dateObj = new Date(resolvedDate + "T12:00:00Z");
   const weekdayKeys: WeekdayKey[] = ["SUN", "MON", "TUES", "WED", "THURS", "FRI", "SAT"];
-  const weekday = weekdayKeys[isNaN(dateObj.getTime()) ? now.getDay() : dateObj.getUTCDay()] || "MON";
+  const weekday = (weekdayKeys[isNaN(dateObj.getTime()) ? mauritiusWeekday(now) : mauritiusWeekday(dateObj)] || "MON") as WeekdayKey;
 
   // Parse time to minutes
   const parsedMins = parseTimeToMinutes(args.targetTime);

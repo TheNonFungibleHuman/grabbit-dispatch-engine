@@ -14,7 +14,10 @@ export interface TranscriptEntry {
   /** True when AI kill switch was off (human covering WhatsApp). */
   whileAgentDisabled?: boolean;
   messageId?: string;
+  /** True when message was sent by admin via admin_reply_to_customer or manual human takeover */
+  adminInjected?: boolean;
 }
+
 
 export interface ChatTranscript {
   senderPhone: string;
@@ -77,11 +80,13 @@ export async function appendTranscriptEntry(
     text: String(entry.text || "").slice(0, 2000),
     whileAgentDisabled: entry.whileAgentDisabled,
     messageId: entry.messageId,
+    adminInjected: entry.adminInjected,
   });
   transcript.updatedAt = new Date().toISOString();
   await saveTranscript(transcript);
   return transcript;
 }
+
 
 export async function markTranscriptBookingQuiet(
   sender: string,

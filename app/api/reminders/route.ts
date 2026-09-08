@@ -11,10 +11,20 @@ export async function GET(req: Request) {
 
   try {
     const res = await processUpcomingBookingReminders();
-    return NextResponse.json({ ok: true, ...res });
+
+    let broadcastDrain = null;
+    try {
+      const { drainBroadcastIfPending } = await import("@/lib/admin/broadcast");
+      broadcastDrain = await drainBroadcastIfPending();
+    } catch {
+      // Non-blocking: failure in broadcast drain does not fail reminder run
+    }
+
+    return NextResponse.json({ ok: true, ...res, broadcastDrain });
   } catch (error) {
     return NextResponse.json({ ok: false, error: error instanceof Error ? error.message : "Reminder check failed" }, { status: 500 });
   }
+
 }
 
 export async function POST(req: Request) {

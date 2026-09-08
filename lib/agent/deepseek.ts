@@ -100,7 +100,7 @@ async function callDeepSeekChat(args: {
   const body: Record<string, unknown> = {
     model: args.model,
     messages: args.messages,
-    temperature: 0.3,
+    temperature: 0.7,
   };
 
   if (args.tools && args.tools.length > 0) {
@@ -178,7 +178,7 @@ export async function generateAgentReply(
   try {
     const { loadTranscript, formatTranscriptMessagesForModel } = await import("./transcript.ts");
     const transcript = await loadTranscript(input.sender);
-    const recentEntries = transcript.entries.slice(-12);
+    const recentEntries = transcript.entries.slice(-20);
     const formattedHistory = formatTranscriptMessagesForModel(recentEntries, { maxHoursOld: 36 });
     messages.push(...formattedHistory);
   } catch (error) {

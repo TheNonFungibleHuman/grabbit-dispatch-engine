@@ -188,7 +188,9 @@ export async function enforceAdminActionInvariants(
             role: "agent",
             text: sanitizeWhatsAppText(messageToSend),
             messageId: relayMsgId,
+            adminInjected: true,
           });
+
 
           actions.push(`admin_reply_to_customer:${resolved.phone}`);
           logInfo("gateway", "enforced customer message dispatch", {

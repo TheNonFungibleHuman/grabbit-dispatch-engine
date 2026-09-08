@@ -17,4 +17,24 @@ describe("chat transcript memory ceiling", () => {
     assert.equal(transcript.entries[0].text, "msg 6");
     assert.equal(transcript.entries[39].text, "msg 45");
   });
+
+  it("persists adminInjected flag and context reflection", async () => {
+    const phone = "+99900000064";
+    await appendTranscriptEntry(phone, {
+      role: "agent",
+      text: "Sorry we cannot take your trip right now because you owe Rs 150 from yesterday.",
+      adminInjected: true,
+    });
+
+    const transcript = await loadTranscript(phone);
+    const last = transcript.entries[transcript.entries.length - 1];
+    assert.equal(last.adminInjected, true);
+    assert.match(last.text, /owe Rs 150/);
+
+    const { buildAgentContextNote } = await import("./tools.ts");
+    const note = await buildAgentContextNote({ senderPhone: phone });
+    assert.match(note, /RECENT ADMIN DIRECTIVE/);
+    assert.match(note, /owe Rs 150/);
+  });
 });
+

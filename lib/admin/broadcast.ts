@@ -14,9 +14,11 @@ export interface BroadcastRecord {
   status: "draft" | "sending" | "completed" | "cancelled";
   createdAt: string;
   sentAt?: string;
+  sentIndex?: number;
   sentCount?: number;
   failedCount?: number;
 }
+
 
 const BROADCAST_LATEST_KEY = "grabbit/admin/broadcasts/latest.json";
 
@@ -153,6 +155,9 @@ export async function executeCustomerBroadcast(args: {
 
   record.status = "sending";
   record.sentAt = new Date().toISOString();
+  record.sentIndex = 0;
+  record.sentCount = 0;
+  record.failedCount = 0;
   await writeJson(broadcastPath(targetId), record);
 
   logInfo("broadcast", "starting customer broadcast execution", {
@@ -160,10 +165,13 @@ export async function executeCustomerBroadcast(args: {
     recipients: record.recipients.length,
   });
 
+  // Process initial batch of up to 20 recipients (~25s) to stay comfortably under Vercel's 60s maxDuration
+  const INITIAL_BATCH_SIZE = 20;
+  const batch = record.recipients.slice(0, INITIAL_BATCH_SIZE);
   let sentCount = 0;
   let failedCount = 0;
 
-  for (const phone of record.recipients) {
+  for (const phone of batch) {
     try {
       if (await isCustomerSuppressed(phone)) {
         logInfo("broadcast", "skipped suppressed recipient", { phone });
@@ -186,20 +194,109 @@ export async function executeCustomerBroadcast(args: {
     }
   }
 
-  record.status = "completed";
+  const nextIndex = batch.length;
+  const isComplete = nextIndex >= record.recipients.length;
+
+  record.status = isComplete ? "completed" : "sending";
+  record.sentIndex = nextIndex;
   record.sentCount = sentCount;
   record.failedCount = failedCount;
   await writeJson(broadcastPath(targetId), record);
 
-  logInfo("broadcast", "completed customer broadcast execution", {
+  logInfo("broadcast", "initial customer broadcast batch completed", {
     broadcastId: targetId,
     sentCount,
     failedCount,
+    remaining: record.recipients.length - nextIndex,
+    isComplete,
   });
+
+  if (isComplete) {
+    return {
+      ok: true,
+      sentCount,
+      message: `🚀 *Broadcast Dispatched!*\nSuccessfully delivered message to all *${sentCount} customers* (${failedCount} failed).`,
+    };
+  }
 
   return {
     ok: true,
     sentCount,
-    message: `🚀 *Broadcast Dispatched!*\nSuccessfully delivered message to *${sentCount} customers* (${failedCount} failed).`,
+    message: `🚀 *Broadcast Dispatched in Batches!*\nDelivered to the first *${sentCount} of ${record.recipients.length} customers*.\nThe remaining ${record.recipients.length - nextIndex} recipients will be safely drained in background batches via our dispatch heartbeat.`,
   };
 }
+
+/**
+ * Background drain worker called by /api/reminders cron heartbeat.
+ * Sends up to batchSize messages per tick so large audiences never exceed serverless timeouts.
+ */
+export async function drainBroadcastIfPending(batchSize = 25): Promise<{
+  active: boolean;
+  drainedCount: number;
+  completed: boolean;
+}> {
+  const latest = await readJson<{ broadcastId: string }>(BROADCAST_LATEST_KEY);
+  if (!latest?.broadcastId) {
+    return { active: false, drainedCount: 0, completed: false };
+  }
+
+  const record = await readJson<BroadcastRecord>(broadcastPath(latest.broadcastId));
+  if (!record || record.status !== "sending") {
+    return { active: false, drainedCount: 0, completed: false };
+  }
+
+  const start = record.sentIndex ?? 0;
+  const batch = record.recipients.slice(start, start + batchSize);
+  if (batch.length === 0) {
+    record.status = "completed";
+    await writeJson(broadcastPath(latest.broadcastId), record);
+    return { active: false, drainedCount: 0, completed: true };
+  }
+
+  let sent = record.sentCount ?? 0;
+  let failed = record.failedCount ?? 0;
+  let drained = 0;
+
+  for (const phone of batch) {
+    try {
+      if (await isCustomerSuppressed(phone)) {
+        continue;
+      }
+      const e164 = phone.startsWith("+") ? phone : `+${phone}`;
+      await sendCustomerText({
+        to: e164,
+        text: record.messageText,
+      });
+      sent++;
+      drained++;
+      await new Promise((r) => setTimeout(r, 1200));
+    } catch (err) {
+      logWarn("broadcast", "cron drain failed to send message to recipient", {
+        phone,
+        error: formatError(err),
+      });
+      failed++;
+    }
+  }
+
+  const nextIndex = start + batch.length;
+  const isComplete = nextIndex >= record.recipients.length;
+
+  record.status = isComplete ? "completed" : "sending";
+  record.sentIndex = nextIndex;
+  record.sentCount = sent;
+  record.failedCount = failed;
+  await writeJson(broadcastPath(latest.broadcastId), record);
+
+  logInfo("broadcast", "drained broadcast batch via cron", {
+    broadcastId: latest.broadcastId,
+    drained,
+    totalSent: sent,
+    totalFailed: failed,
+    remaining: record.recipients.length - nextIndex,
+    isComplete,
+  });
+
+  return { active: true, drainedCount: drained, completed: isComplete };
+}
+

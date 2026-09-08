@@ -12,6 +12,9 @@ export interface RiderNotificationPayload {
   scheduledTime: string;
   assignedRider: string;
   trackingUrl?: string;
+  packageDescription?: string;
+  fareAmount?: number | string;
+  notes?: string;
 }
 
 export async function notifyRiderForBooking(
@@ -33,10 +36,14 @@ export async function notifyRiderForBooking(
     `⏰ Time: *${payload.scheduledTime}*`,
     `📍 Pickup: ${payload.pickupAddress}`,
     `📍 Drop-off: ${payload.dropoffAddress}`,
+    payload.packageDescription ? `📦 Order: ${payload.packageDescription}` : ``,
+    payload.fareAmount !== undefined && payload.fareAmount !== null ? `💰 Fare/Fee: Rs ${payload.fareAmount}` : ``,
+    payload.notes ? `📝 Note: ${payload.notes}` : ``,
     payload.trackingUrl ? `🔴 Live Tracking: ${payload.trackingUrl}` : ``,
     ``,
     `Grabbit Express 🛵⚡`,
   ].filter(Boolean).join("\n");
+
 
   logInfo("riders", "dispatching rider notification", {
     rider: rider.name,
@@ -267,7 +274,25 @@ export async function notifyRiderCustomerInquiry(args: {
     }
   }
 
+  if (rider.channel === "whatsapp") {
+    const targetPhone = process.env.TEST_RIDER_PHONE?.trim() || rider.phone;
+    if (targetPhone) {
+      try {
+        await sendCustomerText({
+          to: targetPhone,
+          text: messageText,
+          messageId: `inquiry_${args.bookingId || Date.now()}`,
+        });
+        logInfo("riders", "whatsapp customer-inquiry ping sent to rider", { rider: rider.name });
+        return { ok: true, channel: "whatsapp" };
+      } catch (err) {
+        logError("riders", "failed to send inquiry ping to whatsapp rider", err);
+      }
+    }
+  }
+
   return { ok: true, channel: "logged" };
+
 }
 
 export async function notifyAdminEscalation(args: {

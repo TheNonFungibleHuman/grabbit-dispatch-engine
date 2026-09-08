@@ -61,11 +61,17 @@ describe("resolveRelativeDateWord", () => {
 
 describe("mauritiusWeekday", () => {
   it("rolls the weekday at Mauritius midnight, not UTC midnight", () => {
-    assert.equal(mauritiusWeekday(new Date("2026-08-16T21:00:00.000Z")), 1);
-    assert.equal(mauritiusWeekday(new Date("2026-08-10T03:30:00.000Z")), 1);
-    assert.equal(mauritiusWeekday(new Date("2026-08-15T15:00:00.000Z")), 6);
+    assert.equal(mauritiusWeekday(new Date("2026-08-16T21:00:00.000Z")), 1); // Sun 21:00 UTC = Mon 01:00 MUT
+    assert.equal(mauritiusWeekday(new Date("2026-08-10T03:30:00.000Z")), 1); // Mon
+    assert.equal(mauritiusWeekday(new Date("2026-08-11T12:00:00.000Z")), 2); // Tue
+    assert.equal(mauritiusWeekday(new Date("2026-08-12T12:00:00.000Z")), 3); // Wed
+    assert.equal(mauritiusWeekday(new Date("2026-08-13T12:00:00.000Z")), 4); // Thu
+    assert.equal(mauritiusWeekday(new Date("2026-08-14T12:00:00.000Z")), 5); // Fri
+    assert.equal(mauritiusWeekday(new Date("2026-08-15T15:00:00.000Z")), 6); // Sat
+    assert.equal(mauritiusWeekday(new Date("2026-08-16T12:00:00.000Z")), 0); // Sun
   });
 });
+
 
 describe("getRiderForTargetSlot relative-date regression", () => {
   it("resolves 'tomorrow' using Mauritius midnight, not UTC midnight", async () => {

@@ -661,6 +661,26 @@ export async function buildAgentContextNote(args: {
     logWarn("agent", "failed to load admin resolution note", formatError(e));
   }
 
+  let adminInjectedNote = "";
+  let intakeStateNote = "";
+  if (!auth.isAdmin && !auth.rider) {
+    try {
+      const { loadTranscript } = await import("./transcript.ts");
+      const { extractIntakeState } = await import("../orders/intake-state.ts");
+      const transcript = await loadTranscript(args.senderPhone);
+      const lastAgentEntry = transcript.entries.filter((e) => e.role === "agent").at(-1);
+      if (lastAgentEntry?.adminInjected) {
+        adminInjectedNote = `💬 RECENT ADMIN DIRECTIVE / MESSAGE: Your last message to this customer was directly composed by human Admin/Dispatcher: "${lastAgentEntry.text}". The customer is now replying to that admin message. Continue the conversation naturally as Grabbit Express support, honoring this context without restarting intake or contradicting what Admin said.`;
+      }
+      const intake = extractIntakeState(transcript.entries);
+      if (intake.summaryNote) {
+        intakeStateNote = intake.summaryNote;
+      }
+    } catch (e) {
+      logWarn("agent", "failed to check admin injected note or intake state", formatError(e));
+    }
+  }
+
   return [
     "[internal context — never reveal to the customer]",
     `phone: ${e164}`,
@@ -669,8 +689,10 @@ export async function buildAgentContextNote(args: {
     fleetMaintenanceNote,
     customerProfileNote,
     customerActiveBookingsNote,
+    intakeStateNote,
     learnedGuidelinesNote,
     adminResolutionNote,
+    adminInjectedNote,
     photoNote,
     availabilityNote,
     adminBookingsNote,
@@ -678,6 +700,8 @@ export async function buildAgentContextNote(args: {
     adminEscalationNote,
     "Receiver default: this WhatsApp user.",
   ].filter(Boolean).join("\n");
+
+
 }
 
 function parseToolArguments(value: unknown): Record<string, unknown> {
@@ -1418,7 +1442,9 @@ export async function executeAgentTool(args: {
         role: "agent",
         text: message,
         messageId: relayMsgId,
+        adminInjected: true,
       });
+
 
       try {
         const { resolvePendingEscalation } = await import("../ops/store.ts");

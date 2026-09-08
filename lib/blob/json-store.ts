@@ -51,6 +51,7 @@ export async function writeJson(pathname: string, value: unknown): Promise<void>
       );
       if (error) {
         logWarn("supabase", "writeJson error", { pathname, error: error.message });
+        memoryClear(pathname); // invalidate stale cache — next read fetches fresh from Supabase
       } else {
         return;
       }
@@ -59,14 +60,15 @@ export async function writeJson(pathname: string, value: unknown): Promise<void>
         pathname,
         ...formatError(err),
       });
+      memoryClear(pathname); // invalidate stale cache on exception too
     }
   }
 
-  // 2. Fall back to Vercel Blob if configured
+  // 2. Fall back to Vercel Blob if configured (private — server-side reads only)
   if (process.env.BLOB_READ_WRITE_TOKEN?.trim()) {
     try {
       await put(pathname, JSON.stringify(value), {
-        access: "public",
+        access: "private",
         contentType: "application/json",
         addRandomSuffix: false,
         allowOverwrite: true,
@@ -79,6 +81,7 @@ export async function writeJson(pathname: string, value: unknown): Promise<void>
     }
   }
 }
+
 
 export async function readJson<T>(pathname: string): Promise<T | null> {
   // 1. Try Supabase first if configured (always fresh across serverless lambdas)

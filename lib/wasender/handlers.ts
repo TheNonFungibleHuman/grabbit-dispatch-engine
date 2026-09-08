@@ -244,7 +244,9 @@ async function processClaimedIncomingMessage(
         text,
         at: new Date().toISOString(),
         messageId: message.key.id,
+        adminInjected: true,
       });
+
 
       await recordOpsEvent({
         phone: targetPhone,

@@ -228,9 +228,14 @@ export async function processIncomingUserMessage(
         : Infinity;
 
       // If customer had an active exchange in the last 15 minutes that wasn't just a greeting,
+      // or if an admin recently sent an injected message/relay,
       // let DeepSeek handle it in conversational context rather than repeating the welcome greeting.
+      const lastAgentEntry = transcript.entries.filter((e) => e.role === "agent").at(-1);
+      const hasRecentAdminRelay = Boolean(lastAgentEntry?.adminInjected);
       const hasRecentActiveFlow =
-        timeSinceLastTurn < 15 * 60 * 1000 && !isBareGreeting(lastPriorCustomerEntry.text);
+        hasRecentAdminRelay ||
+        (timeSinceLastTurn < 15 * 60 * 1000 && !isBareGreeting(lastPriorCustomerEntry.text));
+
 
       if (!hasRecentActiveFlow) {
         const namePart = message.pushName?.trim() ? ` ${message.pushName.trim()}` : "";

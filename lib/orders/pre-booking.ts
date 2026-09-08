@@ -702,8 +702,18 @@ export async function createPreBookingRequest(args: {
 }> {
   const targetIsoDate = resolveIsoDate(args.scheduledDate);
 
-  // 0. Idempotency Check: prevent duplicate bookings for same customer within 2 minutes
+  // 0. Idempotency Check: prevent duplicate bookings for same customer, date, and time within 2 minutes
   const activeStatuses = ACTIVE_BOOKING_STATUSES;
+  const targetMinutes = parseTimeToMinutes(args.scheduledTime);
+  const isSameTime = (timeStr?: string): boolean => {
+    if (!timeStr) return false;
+    if (targetMinutes !== null) {
+      const mins = parseTimeToMinutes(timeStr);
+      return mins !== null && mins === targetMinutes;
+    }
+    return timeStr.trim().toLowerCase() === args.scheduledTime.trim().toLowerCase();
+  };
+
   const recentDuplicateSummary = (
     await querySummaries(
       (s) =>
@@ -711,10 +721,12 @@ export async function createPreBookingRequest(args: {
         s.status !== "cancelled" &&
         s.status !== "declined" &&
         s.scheduledDate === targetIsoDate &&
+        isSameTime(s.scheduledTime) &&
         Date.now() - Date.parse(s.createdAt) < 120_000 &&
         activeStatuses.includes(s.status as (typeof activeStatuses)[number]),
     )
   )[0];
+
 
   if (recentDuplicateSummary) {
     const recentDuplicate = await readBookingFile<PreBooking>(recentDuplicateSummary.id);
@@ -953,6 +965,8 @@ export async function createPreBookingRequest(args: {
           scheduledTime: `${args.scheduledDate} ${args.scheduledTime}`,
           assignedRider: actualRider.name,
           trackingUrl,
+          packageDescription: args.packageDescription,
+          fareAmount: booking.fareAmount,
         });
       } catch (notifErr) {
         logWarn("prebooking", "rider notification warning", formatError(notifErr));
@@ -972,6 +986,8 @@ export async function createPreBookingRequest(args: {
         scheduledTime: `${args.scheduledDate} ${args.scheduledTime}`,
         assignedRider: actualRider.name,
         trackingUrl,
+        packageDescription: args.packageDescription,
+        fareAmount: booking.fareAmount,
       });
     } catch (notifErr) {
       logWarn("prebooking", "rider notification warning (inline fallback)", formatError(notifErr));
@@ -1139,6 +1155,8 @@ export async function handleRiderReply(args: {
         dropoffAddress: pending.deliveryAddress,
         scheduledTime: `${pending.scheduledDate} ${pending.scheduledTime}`,
         assignedRider: nextRider.name,
+        packageDescription: pending.packageDescription,
+        fareAmount: pending.fareAmount,
       });
 
       return {
