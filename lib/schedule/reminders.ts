@@ -30,6 +30,14 @@ export async function processUpcomingBookingReminders(now = new Date()): Promise
     logWarn("reminders", "autoExpireStaleBookings error", formatError(expireErr));
   }
 
+  // Auto-clear stale past-day escalations and clear all at End of Day
+  try {
+    const { autoClearDailyEscalations } = await import("../ops/store.ts");
+    await autoClearDailyEscalations(now);
+  } catch (escExpireErr) {
+    logWarn("reminders", "autoClearDailyEscalations error", formatError(escExpireErr));
+  }
+
   const active = (await listActiveBookingsOnDate(todayMauritiusIso)).filter(
     (b) => !b.reminderSent,
   );

@@ -62,6 +62,15 @@ export async function enforceAdminActionInvariants(
   const adminText = ctx.incomingText.trim();
   const modelText = ctx.assistantText.trim();
 
+  // Pattern 0: Admin asks to clear / reset escalations
+  if (/\b(?:clear|reset|dismiss|delete|wipe)\s+(?:all\s+)?escalations?\b/i.test(adminText)) {
+    const { clearAllEscalations } = await import("../ops/store.ts");
+    const cleared = await clearAllEscalations(`Admin command: "${adminText}"`);
+    actions.push("clear_all_escalations");
+    finalReply = `✅ *Escalations Cleared!* All active customer escalations (${cleared.clearedCount}) have been wiped from the queue. Future requests will start with a fresh slate.`;
+    return { text: finalReply, actionsExecuted: actions };
+  }
+
   // Pattern 1: Admin asks to message a customer (with flexible prefixes and verbs)
   let tellTarget = "";
   let tellMessage = "";

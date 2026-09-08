@@ -412,6 +412,21 @@ export const AGENT_TOOLS = [
   },
   {
     type: "function" as const,
+    name: "clear_all_escalations",
+    description:
+      "ADMIN ONLY: Clear and reset all pending/open customer escalations. Purges the escalation queue for a fresh slate. Only authorized for admins (+999000000008, +9990000000003).",
+    parameters: {
+      type: "object",
+      properties: {
+        reason: {
+          type: "string",
+          description: "Optional reason for clearing escalations (e.g. 'End of day reset', 'Resolved offline')",
+        },
+      },
+    },
+  },
+  {
+    type: "function" as const,
     name: "admin_view_customer_chat",
     description:
       "ADMIN ONLY: Inspect and read the recent live WhatsApp conversation history with any customer by phone number or name (e.g. 'see messages with Customer B', 'show chat with Customer D'). Only authorized for admins (+999000000008, +9990000000003).",
@@ -529,8 +544,8 @@ export async function buildAgentContextNote(args: {
   let adminBookingsNote = "";
   if (auth.isAdmin) {
     callerRoleNote = "role: AUTHORIZED DISPATCH ADMIN (+999000000008 / +9990000000003)";
+    const todayIso = mauritiusDateIso(new Date());
     try {
-      const todayIso = mauritiusDateIso(new Date());
       const { listAllPreBookings } = await import("../orders/pre-booking.ts");
       const all = await listAllPreBookings();
       const upcomingBookings = all.filter((b) => {
@@ -558,9 +573,9 @@ export async function buildAgentContextNote(args: {
       const openEscalations = await listOpenEscalations();
       if (openEscalations.length > 0) {
         adminEscalationNote = [
-          "🚨 ACTIVE ESCALATIONS AWAITING ADMIN FEEDBACK:",
+          `🚨 ACTIVE ESCALATIONS AWAITING ADMIN FEEDBACK TODAY (${todayIso}) [Auto-cleared at End of Day]:`,
           ...openEscalations.map(
-            (e) => `• Customer: ${e.customerName} (+${e.customerPhone})\n  Request: "${e.reason}" (Escalated: ${e.createdAt.slice(11, 16)} UTC)`,
+            (e) => `• Customer: ${e.customerName} (+${e.customerPhone})\n  Request: "${e.reason}" (Escalated: ${e.createdAt.slice(0, 10)} ${e.createdAt.slice(11, 16)} UTC)`,
           ),
           "CRITICAL ADMIN DISPATCH RULE: If the admin provides a decision, instruction, price, or refusal for any customer above (e.g. 'refuse order', 'tell Hanif Rs 150', 'not in our coverage'), YOU MUST CALL `admin_reply_to_customer` with their customerIdentifier (+phone or name) to message the customer directly and resolve the escalation.",
         ].join("\n");
@@ -1536,6 +1551,28 @@ export async function executeAgentTool(args: {
         targetPhone,
         reassignedRider,
         message: `Message dispatched to customer (+${targetPhone}): "${message}"${reassignedRider ? ` (Booking automatically reassigned to ${reassignedRider})` : ""}`,
+      };
+    }
+
+    if (args.name === "clear_all_escalations") {
+      const { isAuthorizedRiderOrAdmin } = await import("../riders/config.ts");
+      const auth = isAuthorizedRiderOrAdmin(args.senderPhone);
+      if (!auth.isAdmin) {
+        return {
+          ok: false,
+          error: "Access Denied: Only authorized Grabbit admins (+999000000008, +9990000000003) can clear escalations.",
+        };
+      }
+
+      const value = parseToolArguments(args.toolArguments);
+      const reason = value.reason ? String(value.reason).trim() : "Admin manual reset";
+
+      const { clearAllEscalations } = await import("../ops/store.ts");
+      const res = await clearAllEscalations(reason);
+      return {
+        ok: true,
+        clearedCount: res.clearedCount,
+        message: `Successfully cleared ${res.clearedCount} escalation(s) from the queue. The active escalation queue is now completely empty.`,
       };
     }
 

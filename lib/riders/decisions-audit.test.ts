@@ -538,4 +538,160 @@ describe("Customer +99900000055 Incident: Poll Messaging & Non-Text Webhook Safe
   });
 });
 
+describe("Daily Escalation Scoping & End of Day Purge", () => {
+  it("loadEscalations automatically purges past-day escalations and retains only today's records", async () => {
+    const { loadEscalations, saveEscalations } = await import("../ops/store.ts");
+
+    // Populate with 1 past-day escalation (2 weeks ago) and 1 today escalation
+    await saveEscalations([
+      {
+        id: "esc_old_from_weeks_ago",
+        customerPhone: "99900000062",
+        customerName: "Old Customer",
+        reason: "Old query from 2 weeks ago",
+        createdAt: "2026-08-20T10:00:00.000Z",
+        status: "open",
+      },
+      {
+        id: "esc_today_active",
+        customerPhone: "99900000063",
+        customerName: "Today Customer",
+        reason: "Asking for airport trip today",
+        createdAt: new Date().toISOString(),
+        status: "open",
+      },
+    ]);
+
+    // loadEscalations() should strictly filter out the past-day escalation
+    const active = await loadEscalations();
+    assert.equal(active.length, 1, "must only return today's escalation");
+    assert.equal(active[0].id, "esc_today_active");
+
+    // Re-reading directly with allowPastDays should verify that the stale record was pruned from the persistent store
+    const persisted = await loadEscalations({ allowPastDays: true });
+    assert.equal(persisted.length, 1, "stale record must be pruned from store");
+    assert.equal(persisted[0].id, "esc_today_active");
+  });
+
+  it("clearAllEscalations wipes all escalations resolved or not", async () => {
+    const { clearAllEscalations, loadEscalations, saveEscalations } = await import("../ops/store.ts");
+
+    await saveEscalations([
+      {
+        id: "esc_1",
+        customerPhone: "99900000018",
+        customerName: "Customer 1",
+        reason: "Reason 1",
+        createdAt: new Date().toISOString(),
+        status: "open",
+      },
+      {
+        id: "esc_2",
+        customerPhone: "99900000023",
+        customerName: "Customer 2",
+        reason: "Reason 2",
+        createdAt: new Date().toISOString(),
+        status: "resolved",
+      },
+    ]);
+
+    const res = await clearAllEscalations("Test wipe");
+    assert.equal(res.clearedCount, 2);
+
+    const remaining = await loadEscalations({ allowPastDays: true });
+    assert.equal(remaining.length, 0, "all escalations must be cleared");
+  });
+
+  it("autoClearDailyEscalations clears all escalations at End of Day (20:30 Mauritius time)", async () => {
+    const { autoClearDailyEscalations, loadEscalations, saveEscalations } = await import("../ops/store.ts");
+
+    await saveEscalations([
+      {
+        id: "esc_today_eod",
+        customerPhone: "99900000024",
+        customerName: "Customer EOD",
+        reason: "EOD inquiry",
+        createdAt: new Date().toISOString(),
+        status: "open",
+      },
+    ]);
+
+    // Simulate 8:45 PM Mauritius time (20:45)
+    // Mauritius is UTC+4, so 20:45 Mauritius = 16:45 UTC
+    const eodInstant = new Date("2026-09-08T16:45:00.000Z");
+    const res = await autoClearDailyEscalations(eodInstant);
+
+    assert.equal(res.clearedCount, 1);
+    assert.match(res.reason, /End of Day/i);
+
+    const afterEod = await loadEscalations({ allowPastDays: true });
+    assert.equal(afterEod.length, 0, "must be empty after End of Day clear");
+  });
+
+  it("admin invariant executes clear_all_escalations when admin texts 'Clear all escalations'", async () => {
+    const { enforceAdminActionInvariants } = await import("../agent/action-gateway.ts");
+    const { saveEscalations, loadEscalations } = await import("../ops/store.ts");
+
+    await saveEscalations([
+      {
+        id: "esc_admin_test",
+        customerPhone: "99900000025",
+        customerName: "Customer Admin",
+        reason: "Test inquiry",
+        createdAt: new Date().toISOString(),
+        status: "open",
+      },
+    ]);
+
+    const result = await enforceAdminActionInvariants({
+      senderPhone: "+999000000008", // Admin Sherif
+      isAdmin: true,
+      incomingText: "Please clear all escalations",
+      assistantText: "Sure, let me check.",
+      calledTools: new Set(),
+      messageId: `msg_clear_${Date.now()}`,
+    });
+
+    assert.ok(result.actionsExecuted.includes("clear_all_escalations"));
+    assert.match(result.text, /Escalations Cleared/i);
+
+    const remaining = await loadEscalations({ allowPastDays: true });
+    assert.equal(remaining.length, 0, "queue must be empty after admin clear command");
+  });
+
+  it("buildAgentContextNote reflects only today's escalations and labels with today's date", async () => {
+    const { buildAgentContextNote } = await import("../agent/tools.ts");
+    const { saveEscalations } = await import("../ops/store.ts");
+    const { mauritiusDateIso } = await import("../time.ts");
+
+    const todayIso = mauritiusDateIso(new Date());
+
+    // 1 old escalation from yesterday and 1 from today
+    await saveEscalations([
+      {
+        id: "esc_yesterday",
+        customerPhone: "99900000050",
+        customerName: "Yesterday Customer",
+        reason: "Yesterday issue",
+        createdAt: "2026-09-01T12:00:00.000Z",
+        status: "open",
+      },
+      {
+        id: "esc_today_note",
+        customerPhone: "99900000052",
+        customerName: "Today Note Customer",
+        reason: "Needs quote for SSRN Hospital",
+        createdAt: new Date().toISOString(),
+        status: "open",
+      },
+    ]);
+
+    const note = await buildAgentContextNote({ senderPhone: "+999000000008" }); // Admin Sherif
+    assert.match(note, new RegExp(`ACTIVE ESCALATIONS AWAITING ADMIN FEEDBACK TODAY \\(${todayIso}\\)`));
+    assert.match(note, /Today Note Customer/);
+    assert.doesNotMatch(note, /Yesterday Customer/, "past-day escalations must not appear in context note");
+  });
+});
+
+
 

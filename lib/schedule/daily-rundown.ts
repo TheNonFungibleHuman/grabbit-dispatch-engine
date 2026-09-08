@@ -138,6 +138,14 @@ export async function sendDailyRundownDraftToSherif(targetDateIso?: string): Pro
     recipients,
   });
 
+  // End of Day: clear all daily escalations (resolved or not)
+  try {
+    const { clearAllEscalations } = await import("../ops/store.ts");
+    await clearAllEscalations(`8:30 PM Mauritius Daily Rundown (${rundown.dateStr})`);
+  } catch (escErr) {
+    logWarn("rundown", "failed to clear daily escalations during rundown", formatError(escErr));
+  }
+
   return {
     ok: true,
     sentDate: rundown.dateStr,

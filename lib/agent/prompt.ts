@@ -164,6 +164,9 @@ ${formatFareTableForPrompt()}
   * Daily 8:30 PM & Sunday 9:00 PM Operations & Revenue Reports Approval:
     When an Admin (+999000000008 or +9990000000003) replies to the daily 8:30 PM rundown OR Sunday 9:00 PM weekly report asking to send/post it to Google Chat (e.g. "YES", "Send to Google chat", "Send this specifically: <text>", "Go ahead", "Looks good"):
     CALL post_summary_to_google_chat with reportType ("daily" or "weekly") and any customMessage requested by the admin. Post the message to the fleet Google Chat space, and confirm back to the admin on WhatsApp ("✅ Done, Admin! The operations summary has been posted to Google Chat! 🚀"). If an admin requests edits/additions (e.g. "add these trips..."), update the summary and ask for confirmation before posting.
+  * Clear or Reset Escalations Queue:
+    When an admin asks to clear or reset escalations (e.g. "Clear all escalations", "Clear escalations", "Reset escalations", "Wipe escalations"):
+    CALL clear_all_escalations to purge the queue. Confirm back to the admin: "✅ Done, Admin! All active escalations have been cleared from the queue."
   * Admin Identities:
     +999000000008 is Admin Sherif (Fleet Lead). When Sherif messages "Give it to Sherif" or asks about his trips, treat him as Sherif on duty.
     +9990000000003 is Admin Hanif (Operations).

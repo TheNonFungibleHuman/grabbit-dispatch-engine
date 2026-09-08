@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { readJson, writeJson } from "../blob/json-store.ts";
-import { formatError, logWarn } from "../log.ts";
+import { formatError, logInfo, logWarn } from "../log.ts";
+import { mauritiusDateIso, mauritiusMinutesOfDay } from "../time.ts";
 import {
   applyOpsEvent,
   emptyOpsState,
@@ -116,10 +117,31 @@ export interface PendingEscalation {
 
 const ESCALATIONS_STORE_PATH = "grabbit/ops/escalations.json";
 
-export async function loadEscalations(): Promise<PendingEscalation[]> {
+export async function loadEscalations(opts?: {
+  allowPastDays?: boolean;
+  now?: Date;
+}): Promise<PendingEscalation[]> {
   try {
     const list = await readJson<PendingEscalation[]>(ESCALATIONS_STORE_PATH);
-    return Array.isArray(list) ? list : [];
+    if (!Array.isArray(list)) return [];
+    if (opts?.allowPastDays) return list;
+
+    const todayIso = mauritiusDateIso(opts?.now ?? new Date());
+    // Strictly scope escalations to current Mauritius day
+    const activeToday = list.filter((e) => {
+      if (!e.createdAt) return false;
+      const createdDate = mauritiusDateIso(new Date(e.createdAt));
+      return createdDate === todayIso;
+    });
+
+    // If past-day records were present, prune them from persistent store asynchronously
+    if (activeToday.length !== list.length) {
+      writeJson(ESCALATIONS_STORE_PATH, activeToday).catch((err) => {
+        logWarn("ops", "failed to prune stale past-day escalations", formatError(err));
+      });
+    }
+
+    return activeToday;
   } catch {
     return [];
   }
@@ -127,6 +149,71 @@ export async function loadEscalations(): Promise<PendingEscalation[]> {
 
 export async function saveEscalations(list: PendingEscalation[]): Promise<void> {
   await writeJson(ESCALATIONS_STORE_PATH, list);
+}
+
+/**
+ * Completely wipe the escalation queue (e.g. at End of Day or via Admin command).
+ */
+export async function clearAllEscalations(reason = "End of day reset"): Promise<{ clearedCount: number }> {
+  try {
+    const list = await readJson<PendingEscalation[]>(ESCALATIONS_STORE_PATH);
+    const count = Array.isArray(list) ? list.length : 0;
+    await writeJson(ESCALATIONS_STORE_PATH, []);
+    logInfo("ops", "cleared all escalations", { count, reason });
+    return { clearedCount: count };
+  } catch (err) {
+    logWarn("ops", "failed to clear escalations", formatError(err));
+    return { clearedCount: 0 };
+  }
+}
+
+/**
+ * Checks and clears escalations at End of Day daily (resolved or not),
+ * and purges any past-day records.
+ */
+export async function autoClearDailyEscalations(now = new Date()): Promise<{
+  clearedCount: number;
+  reason: string;
+}> {
+  const todayIso = mauritiusDateIso(now);
+  const minutesOfDay = mauritiusMinutesOfDay(now);
+  const list = await readJson<PendingEscalation[]>(ESCALATIONS_STORE_PATH);
+  if (!Array.isArray(list) || list.length === 0) {
+    return { clearedCount: 0, reason: "Queue already empty" };
+  }
+
+  // If after 8:30 PM (20:30) Mauritius time or before 6:00 AM, it is End of Day / off-shift:
+  // Clear ALL escalations resolved or not.
+  const isEndOfDay = minutesOfDay >= 20 * 60 + 30 || minutesOfDay <= 6 * 60;
+  if (isEndOfDay) {
+    await clearAllEscalations(`End of day automatic clear (${todayIso})`);
+    return {
+      clearedCount: list.length,
+      reason: `Cleared all ${list.length} escalations at End of Day (${todayIso})`,
+    };
+  }
+
+  // During operating day: purge any past-day escalations
+  const activeToday = list.filter((e) => {
+    if (!e.createdAt) return false;
+    const createdDate = mauritiusDateIso(new Date(e.createdAt));
+    return createdDate === todayIso;
+  });
+
+  if (activeToday.length !== list.length) {
+    const prunedCount = list.length - activeToday.length;
+    await writeJson(ESCALATIONS_STORE_PATH, activeToday);
+    logInfo("ops", "auto-cleared stale past-day escalations", {
+      prunedCount,
+      remaining: activeToday.length,
+    });
+    return {
+      clearedCount: prunedCount,
+      reason: `Purged ${prunedCount} past-day escalations`,
+    };
+  }
+
+  return { clearedCount: 0, reason: "No stale past-day escalations found" };
 }
 
 export async function recordPendingEscalation(input: {
