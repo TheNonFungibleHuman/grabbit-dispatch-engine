@@ -21,6 +21,7 @@ export interface BookingSummary {
   tripType?: string;
   pickupAddress?: string;
   deliveryAddress?: string;
+  packageDescription?: string;
   kiloDeliveryId?: string;
   fareAmount?: number | string;
   paymentMethod?: string;
@@ -103,6 +104,7 @@ function summarizeFromRecord(record: Partial<BookingSummary> & { id: string }): 
     tripType: record.tripType,
     pickupAddress: record.pickupAddress,
     deliveryAddress: record.deliveryAddress,
+    packageDescription: record.packageDescription,
     kiloDeliveryId: record.kiloDeliveryId,
     fareAmount: record.fareAmount,
     paymentMethod: record.paymentMethod,

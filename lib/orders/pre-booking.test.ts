@@ -996,3 +996,110 @@ describe("handleRiderReply passenger trips", () => {
   });
 });
 
+describe("Goodie Incident Regressions: addItemToActiveBooking, recordPaymentProofReceived, token lean prompt", () => {
+  it("addItemToActiveBooking appends item to active booking and notifies rider", async () => {
+    const { savePreBooking, addItemToActiveBooking, listAllPreBookings } = await import("./pre-booking.ts");
+    const { clearBookingIndexCache } = await import("./booking-store.ts");
+
+    const testId = "pb_test_goodie_add_item_01";
+    await savePreBooking({
+      id: testId,
+      customerPhone: "+9990000000004",
+      customerName: "Goodie",
+      serviceKind: "pickup_delivery",
+      pickupAddress: "Mahogany Promenade",
+      deliveryAddress: "Songhai, ALCHE",
+      scheduledDate: "2026-09-08",
+      scheduledTime: "6:00 pm",
+      slotKey: "2026-09-08_18:00-19:00",
+      assignedRider: "Thierry",
+      packageDescription: "KFC order",
+      status: "confirmed",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+    clearBookingIndexCache();
+
+    const res = await addItemToActiveBooking({
+      customerPhone: "+9990000000004",
+      addedItem: "Semoule de blé / Semolina powder",
+    });
+
+    assert.equal(res.ok, true);
+    assert.ok(res.booking);
+    assert.match(res.booking?.packageDescription || "", /Semoule de blé \/ Semolina powder/);
+    assert.match(res.message, /Added "Semoule de blé \/ Semolina powder"/);
+
+    clearBookingIndexCache();
+    const all = await listAllPreBookings();
+    const updated = all.find((b) => b.id === testId);
+    assert.match(updated?.packageDescription || "", /KFC order/);
+    assert.match(updated?.packageDescription || "", /Semoule de blé \/ Semolina powder/);
+  });
+
+  it("recordPaymentProofReceived ends strictly at screenshot and does NOT mention rider name", async () => {
+    const { savePreBooking, recordPaymentProofReceived, listAllPreBookings } = await import("./pre-booking.ts");
+    const { clearBookingIndexCache } = await import("./booking-store.ts");
+
+    const testId = "pb_test_goodie_receipt_02";
+    await savePreBooking({
+      id: testId,
+      customerPhone: "+9990000000005",
+      customerName: "Goodie",
+      serviceKind: "pickup_delivery",
+      pickupAddress: "Mahogany Promenade",
+      deliveryAddress: "Songhai, ALCHE",
+      scheduledDate: "2026-09-08",
+      scheduledTime: "6:00 pm",
+      slotKey: "2026-09-08_18:00-19:00",
+      assignedRider: "Thierry",
+      status: "confirmed",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+    clearBookingIndexCache();
+
+    const res = await recordPaymentProofReceived({
+      customerPhone: "+9990000000005",
+    });
+
+    assert.equal(res.ok, true);
+    assert.equal(res.message, "Thank you! 📄 We've received your payment screenshot.");
+    assert.ok(!res.message.includes("Thierry"));
+    assert.ok(!res.message.includes("Sherif"));
+
+    clearBookingIndexCache();
+    const all = await listAllPreBookings();
+    const updated = all.find((b) => b.id === testId);
+    assert.equal(updated?.paymentMethod, "transfer");
+  });
+
+  it("buildGrabbitSystemInstruction is token lean: omits admin section for regular customers", async () => {
+    const { buildGrabbitSystemInstruction } = await import("../agent/prompt.ts");
+
+    const customerPrompt = await buildGrabbitSystemInstruction();
+    assert.ok(!customerPrompt.includes("## Admin Privileges"));
+    assert.ok(!customerPrompt.includes("admin_reply_to_customer"));
+
+    const explicitCustomerPrompt = await buildGrabbitSystemInstruction({ isAdmin: false });
+    assert.ok(!explicitCustomerPrompt.includes("## Admin Privileges"));
+
+    const adminPrompt = await buildGrabbitSystemInstruction({ isAdmin: true });
+    assert.ok(adminPrompt.includes("## Admin Privileges"));
+    assert.ok(adminPrompt.includes("admin_reply_to_customer"));
+    assert.ok(adminPrompt.length > customerPrompt.length + 3000);
+  });
+
+  it("AGENT_TOOLS contains add_item_to_active_booking and confirm_payment_receipt", async () => {
+    const { AGENT_TOOLS } = await import("../agent/tools.ts");
+
+    const addTool = AGENT_TOOLS.find((t) => t.name === "add_item_to_active_booking");
+    assert.ok(addTool, "add_item_to_active_booking must be registered");
+    assert.ok(addTool.parameters.properties.addedItem);
+
+    const receiptTool = AGENT_TOOLS.find((t) => t.name === "confirm_payment_receipt");
+    assert.ok(receiptTool, "confirm_payment_receipt must be registered");
+  });
+});
+
+

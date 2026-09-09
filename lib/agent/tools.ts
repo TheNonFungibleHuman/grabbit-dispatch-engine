@@ -197,6 +197,45 @@ export const AGENT_TOOLS = [
   },
   {
     type: "function" as const,
+    name: "add_item_to_active_booking",
+    description:
+      "Add additional items, groceries, or instructions to an existing scheduled delivery or errand for the customer. Automatically updates the booking and alerts the assigned rider via WhatsApp and Google Chat.",
+    parameters: {
+      type: "object",
+      properties: {
+        addedItem: {
+          type: "string",
+          description: "The item(s) or grocery list to add to the order (e.g. 'Semolina powder', '1 bottle of water', 'paracetamol')",
+        },
+        bookingId: {
+          type: "string",
+          description: "Optional specific booking ID if customer has multiple bookings. Defaults to active upcoming booking.",
+        },
+      },
+      required: ["addedItem"],
+    },
+  },
+  {
+    type: "function" as const,
+    name: "confirm_payment_receipt",
+    description:
+      "Confirm receipt of a customer's payment screenshot or bank/Juice transfer receipt for an existing active booking. Records payment proof and notifies dispatch admin to verify. Replies thanking the customer.",
+    parameters: {
+      type: "object",
+      properties: {
+        bookingId: {
+          type: "string",
+          description: "Optional booking ID. Defaults to the customer's active upcoming booking.",
+        },
+        notes: {
+          type: "string",
+          description: "Optional payment details noted from customer or screenshot (e.g. 'Juice transfer Rs 100')",
+        },
+      },
+    },
+  },
+  {
+    type: "function" as const,
     name: "check_with_rider",
     description:
       "Send a real-time status inquiry to the assigned rider when a customer asks for a live update, where their driver is, or reports an in-flight delay. Returns active delivery info and live map link.",
@@ -621,9 +660,9 @@ export async function buildAgentContextNote(args: {
         customerActiveBookingsNote = [
           `📅 CUSTOMER'S UPCOMING & ADVANCE BOOKINGS (already confirmed on file):`,
           ...customerBookings.map(
-            (b) => `• Date: ${b.scheduledDate || "Today"} | Time: ${b.scheduledTime} | Route: ${b.pickupAddress} → ${b.deliveryAddress} | Rider: ${b.assignedRider} | Service: ${b.serviceKind} | Status: ${b.status}`
+            (b) => `• ID: ${b.id} | Date: ${b.scheduledDate || "Today"} | Time: ${b.scheduledTime} | Route: ${b.pickupAddress} → ${b.deliveryAddress} | Rider: ${b.assignedRider} | Items: ${b.packageDescription || "General order"} | Status: ${b.status}`
           ),
-          `NOTE: When customer asks about their upcoming ride or schedule, confirm these exact details!`,
+          `NOTE: When customer asks about their upcoming ride or schedule, confirm these exact details! If customer asks to add an item/grocery to their active order, call \`add_item_to_active_booking\`. If customer sends a payment receipt or screenshot for their active booking, call \`confirm_payment_receipt\`. DO NOT call booking tools for already confirmed trips!`,
         ].join("\n");
       }
     } catch (e) {
@@ -1023,6 +1062,30 @@ export async function executeAgentTool(args: {
         trackingUrl,
         message: `Your booking is now rescheduled to ${newScheduledDate} at ${newScheduledTime} with rider ${result.booking?.assignedRider || assignedRider}! Live Tracking Link: ${trackingUrl}`,
       };
+    }
+
+    if (args.name === "add_item_to_active_booking") {
+      const value = parseToolArguments(args.toolArguments);
+      const addedItem = String(value.addedItem || "").trim();
+      if (!addedItem) {
+        return { ok: false, error: "addedItem is required." };
+      }
+      const { addItemToActiveBooking } = await import("../orders/pre-booking.ts");
+      return await addItemToActiveBooking({
+        customerPhone: args.senderPhone,
+        addedItem,
+        bookingId: value.bookingId ? String(value.bookingId) : undefined,
+      });
+    }
+
+    if (args.name === "confirm_payment_receipt") {
+      const value = parseToolArguments(args.toolArguments);
+      const { recordPaymentProofReceived } = await import("../orders/pre-booking.ts");
+      return await recordPaymentProofReceived({
+        customerPhone: args.senderPhone,
+        bookingId: value.bookingId ? String(value.bookingId) : undefined,
+        notes: value.notes ? String(value.notes) : undefined,
+      });
     }
 
     if (args.name === "check_with_rider") {

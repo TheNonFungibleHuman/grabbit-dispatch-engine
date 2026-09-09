@@ -124,14 +124,34 @@ export async function processIncomingUserMessage(
   // Handle incoming document attachments (e.g. PDF payment receipts, menus, invoices)
   if (hasDocumentMessage(message)) {
     const caption = message.text?.trim() || "";
-    const promptText = caption
-      ? `[Attached Document/PDF: "${caption}"]`
-      : `[Attached Document/PDF Payment Receipt]`;
+    let hasUpcoming = false;
+    try {
+      const { listAllPreBookings } = await import("../orders/pre-booking.ts");
+      const { mauritiusDateIso } = await import("../time.ts");
+      const all = await listAllPreBookings();
+      const phoneDigits = message.sender.replace(/\D/g, "");
+      const todayIso = mauritiusDateIso(new Date());
+      hasUpcoming = all.some((b) => {
+        if (b.customerPhone.replace(/\D/g, "") !== phoneDigits) return false;
+        if (b.status !== "confirmed" && b.status !== "pending_rider" && b.status !== "dispatched") return false;
+        const bDate = (b.scheduledDate && b.scheduledDate !== "today" && b.scheduledDate !== "tomorrow")
+          ? b.scheduledDate
+          : (b.slotKey?.split("_")[0] || b.createdAt.slice(0, 10));
+        return bDate >= todayIso;
+      });
+    } catch {
+      // Non-blocking
+    }
+
+    const promptText = hasUpcoming
+      ? (caption ? `[Attached Document/Receipt for active booking: "${caption}"]` : `[Attached Document / Payment Receipt for active booking]`)
+      : (caption ? `[Attached Document/PDF: "${caption}"]` : `[Attached Document/PDF Payment Receipt]`);
 
     logInfo("agent", "processing incoming document/pdf message", {
       sender: message.sender,
       caption,
       promptText,
+      hasUpcoming,
     });
 
     const reply = await generateAgentReply({
@@ -161,9 +181,29 @@ export async function processIncomingUserMessage(
       if (imageUrl) {
         await addPackageImageToDraft(message.sender, imageUrl);
         const caption = message.text?.trim();
-        const promptText = caption
-          ? `[Attached Image: "${caption}"]`
-          : `[Attached Image / Payment Screenshot]`;
+
+        let hasUpcoming = false;
+        try {
+          const { listAllPreBookings } = await import("../orders/pre-booking.ts");
+          const { mauritiusDateIso } = await import("../time.ts");
+          const all = await listAllPreBookings();
+          const phoneDigits = message.sender.replace(/\D/g, "");
+          const todayIso = mauritiusDateIso(new Date());
+          hasUpcoming = all.some((b) => {
+            if (b.customerPhone.replace(/\D/g, "") !== phoneDigits) return false;
+            if (b.status !== "confirmed" && b.status !== "pending_rider" && b.status !== "dispatched") return false;
+            const bDate = (b.scheduledDate && b.scheduledDate !== "today" && b.scheduledDate !== "tomorrow")
+              ? b.scheduledDate
+              : (b.slotKey?.split("_")[0] || b.createdAt.slice(0, 10));
+            return bDate >= todayIso;
+          });
+        } catch {
+          // Non-blocking
+        }
+
+        const promptText = hasUpcoming
+          ? (caption ? `[Customer sent Payment Screenshot for active booking: "${caption}"]` : `[Customer sent Payment Screenshot / Transfer Receipt for active booking]`)
+          : (caption ? `[Attached Image: "${caption}"]` : `[Attached Image / Payment Screenshot]`);
 
         const reply = await generateAgentReply({
           sender: message.sender,

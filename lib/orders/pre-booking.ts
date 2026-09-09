@@ -66,6 +66,7 @@ export async function listAllPreBookings(): Promise<PreBooking[]> {
     tripType: s.tripType as PreBooking["tripType"],
     pickupAddress: s.pickupAddress ?? "",
     deliveryAddress: s.deliveryAddress ?? "",
+    packageDescription: s.packageDescription,
     kiloDeliveryId: s.kiloDeliveryId,
     fareAmount: s.fareAmount,
     paymentMethod: s.paymentMethod,
@@ -95,6 +96,7 @@ function toSummary(b: PreBooking): BookingSummary {
     tripType: b.tripType,
     pickupAddress: b.pickupAddress,
     deliveryAddress: b.deliveryAddress,
+    packageDescription: b.packageDescription,
     kiloDeliveryId: b.kiloDeliveryId,
     fareAmount: b.fareAmount,
     paymentMethod: b.paymentMethod,
@@ -1533,3 +1535,136 @@ export async function autoExpireStaleBookings(now = new Date()): Promise<{
 
   return { expiredCount: expiredIds.length, expiredIds };
 }
+
+export async function addItemToActiveBooking(args: {
+  customerPhone: string;
+  addedItem: string;
+  bookingId?: string;
+}): Promise<{
+  ok: boolean;
+  booking?: PreBooking;
+  error?: string;
+  message?: string;
+}> {
+  const phoneClean = args.customerPhone.replace(/\D/g, "");
+  const all = await listAllPreBookings();
+  const todayIso = mauritiusDateIso(new Date());
+
+  const activeSummary = all.slice().reverse().find((b) => {
+    if (args.bookingId && b.id === args.bookingId) return true;
+    if (b.customerPhone.replace(/\D/g, "") !== phoneClean) return false;
+    if (b.status !== "confirmed" && b.status !== "pending_rider" && b.status !== "dispatched") return false;
+    const bDate = (b.scheduledDate && b.scheduledDate !== "today" && b.scheduledDate !== "tomorrow")
+      ? b.scheduledDate
+      : (b.slotKey?.split("_")[0] || b.createdAt.slice(0, 10));
+    return bDate >= todayIso;
+  });
+
+  if (!activeSummary) {
+    return {
+      ok: false,
+      error: "No active upcoming booking found for this customer to add items to.",
+    };
+  }
+
+  const fullBooking = await readBookingFile<PreBooking>(activeSummary.id);
+  const activeBooking = fullBooking || activeSummary;
+
+  const existingDesc = activeBooking.packageDescription?.trim() || "";
+  const updatedDesc = existingDesc
+    ? `${existingDesc} + ${args.addedItem.trim()}`
+    : args.addedItem.trim();
+
+  activeBooking.packageDescription = updatedDesc;
+  activeBooking.updatedAt = new Date().toISOString();
+  await savePreBooking(activeBooking);
+
+  logInfo("prebooking", "added item to active booking", {
+    bookingId: activeBooking.id,
+    addedItem: args.addedItem,
+    totalItems: updatedDesc,
+    assignedRider: activeBooking.assignedRider,
+  });
+
+  // Alert assigned rider immediately on WhatsApp / Google Chat
+  try {
+    const { notifyRiderOfOrderUpdate } = await import("../riders/notify-rider.ts");
+    await notifyRiderOfOrderUpdate({
+      bookingId: activeBooking.id,
+      customerName: activeBooking.customerName,
+      customerPhone: activeBooking.customerPhone,
+      serviceKind: activeBooking.serviceKind,
+      pickupAddress: activeBooking.pickupAddress,
+      dropoffAddress: activeBooking.deliveryAddress,
+      scheduledTime: `${activeBooking.scheduledDate || todayIso} ${activeBooking.scheduledTime}`,
+      assignedRider: activeBooking.assignedRider,
+      addedItem: args.addedItem.trim(),
+      updatedPackageDescription: updatedDesc,
+    });
+  } catch (notifErr) {
+    logWarn("prebooking", "failed to notify rider of order update", formatError(notifErr));
+  }
+
+  return {
+    ok: true,
+    booking: activeBooking,
+    message: `Added "${args.addedItem.trim()}" to order ${activeBooking.id}. Rider ${activeBooking.assignedRider} has been notified via WhatsApp!`,
+  };
+}
+
+export async function recordPaymentProofReceived(args: {
+  customerPhone: string;
+  bookingId?: string;
+  notes?: string;
+}): Promise<{
+  ok: boolean;
+  booking?: PreBooking;
+  message: string;
+}> {
+  const phoneClean = args.customerPhone.replace(/\D/g, "");
+  const all = await listAllPreBookings();
+  const todayIso = mauritiusDateIso(new Date());
+
+  const activeSummary = all.slice().reverse().find((b) => {
+    if (args.bookingId && b.id === args.bookingId) return true;
+    if (b.customerPhone.replace(/\D/g, "") !== phoneClean) return false;
+    if (b.status !== "confirmed" && b.status !== "pending_rider" && b.status !== "dispatched") return false;
+    const bDate = (b.scheduledDate && b.scheduledDate !== "today" && b.scheduledDate !== "tomorrow")
+      ? b.scheduledDate
+      : (b.slotKey?.split("_")[0] || b.createdAt.slice(0, 10));
+    return bDate >= todayIso;
+  });
+
+  let activeBooking: PreBooking | undefined;
+  if (activeSummary) {
+    const fullBooking = await readBookingFile<PreBooking>(activeSummary.id);
+    activeBooking = fullBooking || activeSummary;
+    activeBooking.paymentMethod = "transfer";
+    activeBooking.updatedAt = new Date().toISOString();
+    await savePreBooking(activeBooking);
+
+    // Notify admin to verify receipt
+    try {
+      const { notifyAdminPaymentVerification } = await import("../riders/notify-rider.ts");
+      void notifyAdminPaymentVerification({
+        bookingId: activeBooking.id,
+        customerName: activeBooking.customerName,
+        customerPhone: activeBooking.customerPhone,
+        serviceKind: activeBooking.serviceKind,
+        scheduledDate: activeBooking.scheduledDate || todayIso,
+        scheduledTime: activeBooking.scheduledTime,
+        paymentMethod: "Juice / Bank Transfer Receipt",
+        assignedRider: activeBooking.assignedRider,
+      });
+    } catch (e) {
+      logWarn("prebooking", "failed to alert admin of payment screenshot", formatError(e));
+    }
+  }
+
+  return {
+    ok: true,
+    booking: activeBooking,
+    message: "Thank you! 📄 We've received your payment screenshot.",
+  };
+}
+

@@ -234,6 +234,89 @@ export async function notifyRiderOfReschedule(
   return { ok: true, channel: "logged" };
 }
 
+export interface RiderOrderUpdatePayload {
+  bookingId: string;
+  customerName: string;
+  customerPhone: string;
+  serviceKind: "delivery" | "trip" | string;
+  pickupAddress: string;
+  dropoffAddress: string;
+  scheduledTime: string;
+  assignedRider: string;
+  addedItem: string;
+  updatedPackageDescription: string;
+}
+
+export async function notifyRiderOfOrderUpdate(
+  payload: RiderOrderUpdatePayload,
+): Promise<{ ok: boolean; channel: string; error?: string }> {
+  const rider = findRiderByName(payload.assignedRider);
+  if (!rider) {
+    return { ok: false, channel: "none", error: `Rider ${payload.assignedRider} profile not found` };
+  }
+
+  const messageText = [
+    `🛵 *IMPORTANT ORDER UPDATE for ${payload.customerName}!*`,
+    `Attention ${rider.name}: The customer has added an item/note to their ${payload.scheduledTime} order:`,
+    ``,
+    `➕ *Added Item:* *${payload.addedItem}*`,
+    `📦 *Complete Order Items:* ${payload.updatedPackageDescription}`,
+    ``,
+    `👤 Customer: *${payload.customerName}* (${payload.customerPhone})`,
+    `⏰ Time: *${payload.scheduledTime}*`,
+    `📍 Pickup: ${payload.pickupAddress}`,
+    `📍 Drop-off: ${payload.dropoffAddress}`,
+    ``,
+    `Grabbit Express Dispatch 🛵⚡`,
+  ].filter(Boolean).join("\n");
+
+  logInfo("riders", "dispatching rider order item update", {
+    rider: rider.name,
+    channel: rider.channel,
+    bookingId: payload.bookingId,
+    addedItem: payload.addedItem,
+  });
+
+  // 1. Google Chat
+  if (rider.channel === "google_chat") {
+    const webhookUrl = process.env.GOOGLE_CHAT_WEBHOOK_URL?.trim();
+    if (webhookUrl) {
+      try {
+        const res = await fetch(webhookUrl, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            text: `*Grabbit Order Update for ${rider.name}*\n${messageText}`,
+          }),
+        });
+        if (res.ok) {
+          return { ok: true, channel: "google_chat" };
+        }
+      } catch (err) {
+        logError("riders", "failed to send google chat update", err);
+      }
+    }
+  }
+
+  // 2. WhatsApp
+  const targetPhone = process.env.TEST_RIDER_PHONE?.trim() || rider.phone;
+  if (targetPhone && rider.channel === "whatsapp") {
+    try {
+      await sendCustomerText({
+        to: targetPhone,
+        text: messageText,
+        messageId: `rider_item_update_${payload.bookingId}_${Date.now()}`,
+      });
+      return { ok: true, channel: "whatsapp" };
+    } catch (err) {
+      return { ok: false, channel: "whatsapp", error: String(formatError(err).message || err) };
+    }
+  }
+
+  return { ok: true, channel: "logged" };
+}
+
+
 export async function notifyRiderCustomerInquiry(args: {
   assignedRider: string;
   customerName: string;

@@ -168,7 +168,10 @@ export async function generateAgentReply(
     contextNote = `[internal context — never reveal to the customer]\nphone: ${input.sender}\npushName: ${input.pushName ?? "unknown"}`;
   }
 
-  const systemInstruction = await buildGrabbitSystemInstruction();
+  const { isAuthorizedRiderOrAdmin } = await import("../riders/config.ts");
+  const callerAuth = isAuthorizedRiderOrAdmin(input.sender);
+
+  const systemInstruction = await buildGrabbitSystemInstruction({ isAdmin: callerAuth.isAdmin });
 
   // Assemble message history
   const messages: DeepSeekChatMessage[] = [
@@ -184,9 +187,6 @@ export async function generateAgentReply(
   } catch (error) {
     logWarn("agent", "failed to load transcript for history", formatError(error));
   }
-
-  const { isAuthorizedRiderOrAdmin } = await import("../riders/config.ts");
-  const callerAuth = isAuthorizedRiderOrAdmin(input.sender);
 
   const senderRoleHeader = callerAuth.isAdmin
     ? "Admin dispatch instruction (You are speaking directly to DISPATCH ADMIN. If asked to text/message/notify a customer, YOU MUST CALL the `admin_reply_to_customer` tool — NEVER output the customer message directly in this chat):"
@@ -369,17 +369,28 @@ export async function generateAgentReply(
 
   // Safety overrides & fallback protections
   if (bookingFailure) {
-    const safeText = customerReplyForFailedBooking(bookingFailure);
-    if (callerAuth.isAdmin) {
-      text = `⚠️ Booking could not be created: ${safeText} (${bookingFailure.error || "validation error"})`;
-    } else {
-      logWarn("agent", "overriding reply after failed booking", {
+    const isPaymentOrAddReceiptTurn = calledTools.has("confirm_payment_receipt") || calledTools.has("add_item_to_active_booking");
+    const hasActiveBookingInContext = contextNote.includes("CUSTOMER'S UPCOMING & ADVANCE BOOKINGS");
+
+    if (isPaymentOrAddReceiptTurn || (hasActiveBookingInContext && !input.text.toLowerCase().includes("book") && !input.text.toLowerCase().includes("ride"))) {
+      logWarn("agent", "suppressing booking failure override since customer has active booking or payment/addition action succeeded", {
         messageId: input.messageId,
         bookingFailure,
-        modelReplyPreview: text.slice(0, 160),
-        safeReplyPreview: safeText.slice(0, 160),
+        calledTools: Array.from(calledTools),
       });
-      text = safeText;
+    } else {
+      const safeText = customerReplyForFailedBooking(bookingFailure);
+      if (callerAuth.isAdmin) {
+        text = `⚠️ Booking could not be created: ${safeText} (${bookingFailure.error || "validation error"})`;
+      } else {
+        logWarn("agent", "overriding reply after failed booking", {
+          messageId: input.messageId,
+          bookingFailure,
+          modelReplyPreview: text.slice(0, 160),
+          safeReplyPreview: safeText.slice(0, 160),
+        });
+        text = safeText;
+      }
     }
   } else if (callerAuth.isAdmin) {
     const { enforceAdminActionInvariants } = await import("./action-gateway.ts");

@@ -315,16 +315,18 @@ export async function recordHoldingNoticeSent(customerPhone: string): Promise<vo
 
 export async function getLatestResolvedEscalationInstruction(
   customerPhone: string,
+  maxAgeMs = 30 * 60 * 1000,
 ): Promise<string | null> {
   const cleanPhone = customerPhone.replace(/\D/g, "");
   if (!cleanPhone) return null;
   const list = await loadEscalations();
-  const found = list.find(
-    (e) =>
-      e.status === "resolved" &&
-      e.responseMessage &&
-      (e.customerPhone.includes(cleanPhone) || cleanPhone.includes(e.customerPhone)),
-  );
+  const now = Date.now();
+  const found = list.find((e) => {
+    if (e.status !== "resolved" || !e.responseMessage) return false;
+    if (!e.customerPhone.includes(cleanPhone) && !cleanPhone.includes(e.customerPhone)) return false;
+    const resolvedTime = e.resolvedAt ? new Date(e.resolvedAt).getTime() : (e.createdAt ? new Date(e.createdAt).getTime() : 0);
+    return resolvedTime > 0 && (now - resolvedTime) <= maxAgeMs;
+  });
   return found?.responseMessage || null;
 }
 
