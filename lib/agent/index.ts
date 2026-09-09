@@ -124,68 +124,64 @@ export async function processIncomingUserMessage(
   // Handle incoming document attachments (e.g. PDF payment receipts, menus, invoices)
   if (hasDocumentMessage(message)) {
     const caption = message.text?.trim() || "";
-    let hasUpcoming = false;
     try {
-      const { listAllPreBookings } = await import("../orders/pre-booking.ts");
-      const { mauritiusDateIso } = await import("../time.ts");
-      const all = await listAllPreBookings();
-      const phoneDigits = message.sender.replace(/\D/g, "");
-      const todayIso = mauritiusDateIso(new Date());
-      hasUpcoming = all.some((b) => {
-        if (b.customerPhone.replace(/\D/g, "") !== phoneDigits) return false;
-        if (b.status !== "confirmed" && b.status !== "pending_rider" && b.status !== "dispatched") return false;
-        const bDate = (b.scheduledDate && b.scheduledDate !== "today" && b.scheduledDate !== "tomorrow")
-          ? b.scheduledDate
-          : (b.slotKey?.split("_")[0] || b.createdAt.slice(0, 10));
-        return bDate >= todayIso;
-      });
-    } catch {
-      // Non-blocking
-    }
-
-    if (hasUpcoming) {
-      const { recordPaymentProofReceived } = await import("../orders/pre-booking.ts");
-      const proofRes = await recordPaymentProofReceived({
-        customerPhone: message.sender,
-        notes: caption || "Document/PDF payment proof",
-      });
-
-      await sendAndRecord({
-        to,
-        sender: message.sender,
-        text: proofRes.message,
+      const { persistIncomingDocument } = await import("../media/wasender.ts");
+      const doc = await persistIncomingDocument({
+        senderPhone: message.sender,
         messageId: message.messageId,
+        message: message.raw?.message as Record<string, unknown> | undefined,
       });
 
-      logInfo("agent", "deterministically processed document payment receipt with 0 tokens", {
-        sender: message.sender,
-        bookingId: proofRes.booking?.id,
-      });
-      return;
+      if (doc) {
+        const { inspectPdfDocument } = await import("../media/pdf-inspector.ts");
+        const pdfAnalysis = await inspectPdfDocument(doc.buffer, doc.url);
+
+        if (pdfAnalysis.isPaymentReceipt) {
+          if (pdfAnalysis.paymentDetails?.status === "failed") {
+            const warnText =
+              "It looks like this bank transfer did not complete successfully. Could you please check with your bank or try again? 🙏";
+            await sendAndRecord({ to, sender: message.sender, text: warnText, messageId: message.messageId });
+            return;
+          }
+
+          const { recordPaymentProofReceived } = await import("../orders/pre-booking.ts");
+          const bank = pdfAnalysis.paymentDetails?.bank || "Bank Transfer";
+          const amountPart = pdfAnalysis.paymentDetails?.amount ? ` of Rs ${pdfAnalysis.paymentDetails.amount}` : "";
+          const refPart = pdfAnalysis.paymentDetails?.referenceId ? ` (Ref: ${pdfAnalysis.paymentDetails.referenceId})` : "";
+
+          await recordPaymentProofReceived({
+            customerPhone: message.sender,
+            notes: `${pdfAnalysis.summary} (File: ${doc.fileName || "receipt.pdf"})`,
+          });
+
+          const confirmText = `Thank you! 📄 We've received and verified your ${bank} payment receipt${amountPart}${refPart}.`;
+          await sendAndRecord({ to, sender: message.sender, text: confirmText, messageId: message.messageId });
+          return;
+        }
+
+        // If not a receipt, it's a menu or general document - pass extracted text to agent
+        const promptText = `[Customer sent PDF document (${doc.fileName || "document.pdf"}): "${pdfAnalysis.extractedText.slice(0, 500)}"]`;
+        const reply = await generateAgentReply({
+          sender: message.sender,
+          text: promptText,
+          messageId: message.messageId,
+          pushName: message.pushName,
+        });
+        await sendAndRecord({ to, sender: message.sender, text: reply.text, messageId: message.messageId });
+        return;
+      }
+    } catch (docErr) {
+      logWarn("agent", "failed to inspect incoming document, falling back", formatError(docErr));
     }
 
     const promptText = caption ? `[Attached Document/PDF: "${caption}"]` : `[Attached Document/PDF Payment Receipt]`;
-
-    logInfo("agent", "processing incoming document/pdf message", {
-      sender: message.sender,
-      caption,
-      promptText,
-      hasUpcoming,
-    });
-
     const reply = await generateAgentReply({
       sender: message.sender,
       text: promptText,
       messageId: message.messageId,
       pushName: message.pushName,
     });
-
-    await sendAndRecord({
-      to,
-      sender: message.sender,
-      text: reply.text,
-      messageId: message.messageId,
-    });
+    await sendAndRecord({ to, sender: message.sender, text: reply.text, messageId: message.messageId });
     return;
   }
 
@@ -199,50 +195,56 @@ export async function processIncomingUserMessage(
 
       if (imageUrl) {
         await addPackageImageToDraft(message.sender, imageUrl);
-        const caption = message.text?.trim();
+        const caption = message.text?.trim() || "";
 
-        let hasUpcoming = false;
         try {
-          const { listAllPreBookings } = await import("../orders/pre-booking.ts");
-          const { mauritiusDateIso } = await import("../time.ts");
-          const all = await listAllPreBookings();
-          const phoneDigits = message.sender.replace(/\D/g, "");
-          const todayIso = mauritiusDateIso(new Date());
-          hasUpcoming = all.some((b) => {
-            if (b.customerPhone.replace(/\D/g, "") !== phoneDigits) return false;
-            if (b.status !== "confirmed" && b.status !== "pending_rider" && b.status !== "dispatched") return false;
-            const bDate = (b.scheduledDate && b.scheduledDate !== "today" && b.scheduledDate !== "tomorrow")
-              ? b.scheduledDate
-              : (b.slotKey?.split("_")[0] || b.createdAt.slice(0, 10));
-            return bDate >= todayIso;
-          });
-        } catch {
-          // Non-blocking
-        }
+          const { inspectImageWithDeepSeekVision } = await import("../media/vision-inspector.ts");
+          const vision = await inspectImageWithDeepSeekVision({ imageUrl });
 
-        if (hasUpcoming) {
-          const { recordPaymentProofReceived } = await import("../orders/pre-booking.ts");
-          const proofRes = await recordPaymentProofReceived({
-            customerPhone: message.sender,
-            notes: caption || "Image payment proof",
-          });
+          if (vision.isPaymentReceipt) {
+            if (vision.paymentDetails?.status === "failed") {
+              const failText =
+                "It looks like this transfer did not complete successfully. Could you please check with your bank or try again? 🙏";
+              await sendAndRecord({ to, sender: message.sender, text: failText, messageId: message.messageId });
+              return;
+            }
 
-          await sendAndRecord({
-            to,
+            const { recordPaymentProofReceived } = await import("../orders/pre-booking.ts");
+            const bank = vision.paymentDetails?.bank || "Payment";
+            const amountPart = vision.paymentDetails?.amount ? ` of Rs ${vision.paymentDetails.amount}` : "";
+            const refPart = vision.paymentDetails?.referenceId ? ` (Ref: ${vision.paymentDetails.referenceId})` : "";
+
+            await recordPaymentProofReceived({
+              customerPhone: message.sender,
+              notes: vision.summary,
+            });
+
+            const confirmText = `Thank you! 📄 We've received your ${bank} payment screenshot${amountPart}${refPart}.`;
+            await sendAndRecord({ to, sender: message.sender, text: confirmText, messageId: message.messageId });
+            return;
+          }
+
+          // If food menu or list, pass items directly to agent
+          let promptText = caption ? `[Attached Image: "${caption}"]` : `[Attached Image]`;
+          if (vision.category === "food_menu" && vision.extractedItems?.length) {
+            promptText = `[Customer sent Menu/Food items photo: ${vision.extractedItems.join(", ")}${caption ? `. Caption: "${caption}"` : ""}]`;
+          } else if (vision.summary) {
+            promptText = `[Customer sent photo: "${vision.summary}"${caption ? `. Caption: "${caption}"` : ""}]`;
+          }
+
+          const reply = await generateAgentReply({
             sender: message.sender,
-            text: proofRes.message,
+            text: promptText,
             messageId: message.messageId,
+            pushName: message.pushName,
           });
-
-          logInfo("agent", "deterministically processed image payment receipt with 0 tokens", {
-            sender: message.sender,
-            bookingId: proofRes.booking?.id,
-          });
+          await sendAndRecord({ to, sender: message.sender, text: reply.text, messageId: message.messageId });
           return;
+        } catch (visionErr) {
+          logWarn("agent", "vision inspection failed, falling back to standard prompt", formatError(visionErr));
         }
 
         const promptText = caption ? `[Attached Image: "${caption}"]` : `[Attached Image / Payment Screenshot]`;
-
         const reply = await generateAgentReply({
           sender: message.sender,
           text: promptText,
