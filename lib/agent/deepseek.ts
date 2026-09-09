@@ -173,9 +173,19 @@ export async function generateAgentReply(
 
   const systemInstruction = await buildGrabbitSystemInstruction({ isAdmin: callerAuth.isAdmin });
 
+  const senderRoleHeader = callerAuth.isAdmin
+    ? "Admin dispatch instruction (You are speaking directly to DISPATCH ADMIN. If asked to text/message/notify a customer, YOU MUST CALL the `admin_reply_to_customer` tool — NEVER output the customer message directly in this chat):"
+    : callerAuth.rider
+      ? `Fleet rider message (${callerAuth.rider.name}):`
+      : "Customer message:";
+
+  const fullSystemInstruction = contextNote
+    ? `${systemInstruction}\n\n--- OPERATIONAL CONTEXT ---\n${contextNote}\n\n${senderRoleHeader}`
+    : `${systemInstruction}\n\n${senderRoleHeader}`;
+
   // Assemble message history
   const messages: DeepSeekChatMessage[] = [
-    { role: "system", content: systemInstruction },
+    { role: "system", content: fullSystemInstruction },
   ];
 
   try {
@@ -188,15 +198,8 @@ export async function generateAgentReply(
     logWarn("agent", "failed to load transcript for history", formatError(error));
   }
 
-  const senderRoleHeader = callerAuth.isAdmin
-    ? "Admin dispatch instruction (You are speaking directly to DISPATCH ADMIN. If asked to text/message/notify a customer, YOU MUST CALL the `admin_reply_to_customer` tool — NEVER output the customer message directly in this chat):"
-    : callerAuth.rider
-      ? `Fleet rider message (${callerAuth.rider.name}):`
-      : "Customer message:";
-
-  // Current turn with contextual note
-  const currentUserContent = `${contextNote}\n\n${senderRoleHeader}\n${input.text}`;
-  messages.push({ role: "user", content: currentUserContent });
+  // Current turn with strictly pure user input
+  messages.push({ role: "user", content: input.text });
 
   let bookingFailure: BookingFailureDetails | null = null;
   let bookingSucceeded = false;

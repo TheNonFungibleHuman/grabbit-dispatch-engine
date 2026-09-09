@@ -131,6 +131,18 @@ export async function sendDailyRundownDraftToSherif(targetDateIso?: string): Pro
   state.lastDraftMessage = rundown.googleChatText;
   await writeJson(DAILY_RUNDOWN_PATH, state);
 
+  try {
+    const { setPendingAdminAction } = await import("../admin/admin-actions.ts");
+    for (const phone of recipients) {
+      await setPendingAdminAction(phone, "daily_rundown", {
+        googleChatText: rundown.googleChatText,
+        dateStr: rundown.dateStr,
+      });
+    }
+  } catch (actErr) {
+    logWarn("rundown", "failed to register pending admin action for rundown", formatError(actErr));
+  }
+
   logInfo("rundown", "sent 8:30pm daily rundown draft to Admins on WhatsApp", {
     date: rundown.dateStr,
     totalBookings: rundown.totalBookings,

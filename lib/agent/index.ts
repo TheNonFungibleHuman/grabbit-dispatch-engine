@@ -143,9 +143,28 @@ export async function processIncomingUserMessage(
       // Non-blocking
     }
 
-    const promptText = hasUpcoming
-      ? (caption ? `[Attached Document/Receipt for active booking: "${caption}"]` : `[Attached Document / Payment Receipt for active booking]`)
-      : (caption ? `[Attached Document/PDF: "${caption}"]` : `[Attached Document/PDF Payment Receipt]`);
+    if (hasUpcoming) {
+      const { recordPaymentProofReceived } = await import("../orders/pre-booking.ts");
+      const proofRes = await recordPaymentProofReceived({
+        customerPhone: message.sender,
+        notes: caption || "Document/PDF payment proof",
+      });
+
+      await sendAndRecord({
+        to,
+        sender: message.sender,
+        text: proofRes.message,
+        messageId: message.messageId,
+      });
+
+      logInfo("agent", "deterministically processed document payment receipt with 0 tokens", {
+        sender: message.sender,
+        bookingId: proofRes.booking?.id,
+      });
+      return;
+    }
+
+    const promptText = caption ? `[Attached Document/PDF: "${caption}"]` : `[Attached Document/PDF Payment Receipt]`;
 
     logInfo("agent", "processing incoming document/pdf message", {
       sender: message.sender,
@@ -201,9 +220,28 @@ export async function processIncomingUserMessage(
           // Non-blocking
         }
 
-        const promptText = hasUpcoming
-          ? (caption ? `[Customer sent Payment Screenshot for active booking: "${caption}"]` : `[Customer sent Payment Screenshot / Transfer Receipt for active booking]`)
-          : (caption ? `[Attached Image: "${caption}"]` : `[Attached Image / Payment Screenshot]`);
+        if (hasUpcoming) {
+          const { recordPaymentProofReceived } = await import("../orders/pre-booking.ts");
+          const proofRes = await recordPaymentProofReceived({
+            customerPhone: message.sender,
+            notes: caption || "Image payment proof",
+          });
+
+          await sendAndRecord({
+            to,
+            sender: message.sender,
+            text: proofRes.message,
+            messageId: message.messageId,
+          });
+
+          logInfo("agent", "deterministically processed image payment receipt with 0 tokens", {
+            sender: message.sender,
+            bookingId: proofRes.booking?.id,
+          });
+          return;
+        }
+
+        const promptText = caption ? `[Attached Image: "${caption}"]` : `[Attached Image / Payment Screenshot]`;
 
         const reply = await generateAgentReply({
           sender: message.sender,

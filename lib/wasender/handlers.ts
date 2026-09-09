@@ -363,6 +363,39 @@ async function onUserMessage(message: IncomingUserMessage): Promise<void> {
     logWarn("wasender", "opt-out check failed", formatError(optErr));
   }
 
+  // 0.5. Check if incoming message is an Admin Action confirmation (e.g. daily rundown, weekly report, broadcast approval) (0 LLM tokens)
+  try {
+    const { isAuthorizedRiderOrAdmin } = await import("../riders/config.ts");
+    const auth = isAuthorizedRiderOrAdmin(message.sender);
+    if (auth.isAdmin) {
+      const { consumePendingAdminAction } = await import("../admin/admin-actions.ts");
+      const pendingRes = await consumePendingAdminAction(message.sender, message.text);
+      if (pendingRes.handled && pendingRes.responseMessage) {
+        await sendCustomerText({
+          to: message.sender,
+          text: pendingRes.responseMessage,
+          messageId: `admin_action_${message.messageId}`,
+        });
+        await appendTranscriptEntry(message.sender, {
+          role: "customer",
+          text: message.text,
+          messageId: message.messageId,
+        });
+        await appendTranscriptEntry(message.sender, {
+          role: "agent",
+          text: pendingRes.responseMessage,
+          messageId: `admin_action_${message.messageId}`,
+        });
+        logInfo("wasender", "handled pending admin action with zero LLM tokens", {
+          sender: message.sender,
+        });
+        return;
+      }
+    }
+  } catch (actErr) {
+    logWarn("wasender", "pending admin action check failed", formatError(actErr));
+  }
+
   // 1. Check if incoming message is a 1-word command from a Fleet Rider (0 LLM tokens)
   try {
     const { isAuthorizedRiderOrAdmin } = await import("../riders/config.ts");

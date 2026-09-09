@@ -217,6 +217,17 @@ export async function processWeeklyReportCron(now = new Date()): Promise<{ trigg
     state.lastSummaryText = report.summaryText;
     await writeJson(WEEKLY_REPORT_STATE_PATH, state);
 
+    try {
+      const { setPendingAdminAction } = await import("../admin/admin-actions.ts");
+      for (const phone of recipients) {
+        await setPendingAdminAction(phone, "weekly_report", {
+          summaryText: report.summaryText,
+        });
+      }
+    } catch (actErr) {
+      logWarn("weekly_report", "failed to register pending admin action for weekly report", formatError(actErr));
+    }
+
     logInfo("weekly_report", "dispatched Sunday weekly report to Admins on WhatsApp", {
       weekEnding: todayIso,
       totalRevenue: report.totalRevenue,
