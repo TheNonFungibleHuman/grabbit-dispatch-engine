@@ -940,6 +940,17 @@ export async function createPreBookingRequest(args: {
     logWarn("prebooking", "draft reset or profile update failed after booking", formatError(draftErr));
   }
 
+  try {
+    const { resolvePendingEscalation } = await import("../ops/store.ts");
+    await resolvePendingEscalation({
+      customerPhone: args.customerPhone,
+      resolvedBy: "system_booking",
+      responseMessage: `Auto-resolved upon booking ${booking.id}`,
+    });
+  } catch (escErr) {
+    logWarn("prebooking", "failed to auto-resolve escalation on booking", formatError(escErr));
+  }
+
   logInfo("prebooking", "created & confirmed pre-booking record", {
     bookingId,
     customer: args.customerPhone,
@@ -1116,8 +1127,7 @@ export async function handleRiderReply(args: {
       reply: args.text,
     });
     return {
-      handled: true,
-      responseMessage: `Hi ${actualRider.name}, you have no pending trip requests right now.`,
+      handled: false,
     };
   }
 
@@ -1658,6 +1668,17 @@ export async function recordPaymentProofReceived(args: {
       });
     } catch (e) {
       logWarn("prebooking", "failed to alert admin of payment screenshot", formatError(e));
+    }
+
+    try {
+      const { resolvePendingEscalation } = await import("../ops/store.ts");
+      await resolvePendingEscalation({
+        customerPhone: args.customerPhone,
+        resolvedBy: "system_payment",
+        responseMessage: "Auto-resolved upon payment proof receipt",
+      });
+    } catch {
+      // Non-blocking
     }
   }
 

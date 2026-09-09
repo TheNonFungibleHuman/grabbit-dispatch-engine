@@ -397,14 +397,15 @@ async function onUserMessage(message: IncomingUserMessage): Promise<void> {
         return;
       }
 
-      const { shouldInterceptRiderDecision, handleRiderReply, riderHasActiveBooking } =
-        await import("../orders/pre-booking.ts");
-      if (
-        shouldInterceptRiderDecision({
-          text: message.text,
-          hasActiveBooking: await riderHasActiveBooking(auth.rider.name),
-        })
-      ) {
+      if (!auth.isAdmin) {
+        const { shouldInterceptRiderDecision, handleRiderReply, riderHasActiveBooking } =
+          await import("../orders/pre-booking.ts");
+        if (
+          shouldInterceptRiderDecision({
+            text: message.text,
+            hasActiveBooking: await riderHasActiveBooking(auth.rider.name),
+          })
+        ) {
           const replyResult = await handleRiderReply({
             senderPhone: message.sender,
             text: message.text,
@@ -432,6 +433,7 @@ async function onUserMessage(message: IncomingUserMessage): Promise<void> {
           }
         }
       }
+    }
   } catch (cmdErr) {
     logWarn("wasender", "rider command check failed", formatError(cmdErr));
   }

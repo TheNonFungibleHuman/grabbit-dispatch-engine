@@ -1000,6 +1000,8 @@ describe("Goodie Incident Regressions: addItemToActiveBooking, recordPaymentProo
   it("addItemToActiveBooking appends item to active booking and notifies rider", async () => {
     const { savePreBooking, addItemToActiveBooking, listAllPreBookings } = await import("./pre-booking.ts");
     const { clearBookingIndexCache } = await import("./booking-store.ts");
+    const { mauritiusDateIso } = await import("../time.ts");
+    const today = mauritiusDateIso(new Date());
 
     const testId = "pb_test_goodie_add_item_01";
     await savePreBooking({
@@ -1009,9 +1011,9 @@ describe("Goodie Incident Regressions: addItemToActiveBooking, recordPaymentProo
       serviceKind: "pickup_delivery",
       pickupAddress: "Mahogany Promenade",
       deliveryAddress: "Songhai, ALCHE",
-      scheduledDate: "2026-09-08",
+      scheduledDate: today,
       scheduledTime: "6:00 pm",
-      slotKey: "2026-09-08_18:00-19:00",
+      slotKey: `${today}_18:00-19:00`,
       assignedRider: "Thierry",
       packageDescription: "KFC order",
       status: "confirmed",
@@ -1040,6 +1042,8 @@ describe("Goodie Incident Regressions: addItemToActiveBooking, recordPaymentProo
   it("recordPaymentProofReceived ends strictly at screenshot and does NOT mention rider name", async () => {
     const { savePreBooking, recordPaymentProofReceived, listAllPreBookings } = await import("./pre-booking.ts");
     const { clearBookingIndexCache } = await import("./booking-store.ts");
+    const { mauritiusDateIso } = await import("../time.ts");
+    const today = mauritiusDateIso(new Date());
 
     const testId = "pb_test_goodie_receipt_02";
     await savePreBooking({
@@ -1049,9 +1053,9 @@ describe("Goodie Incident Regressions: addItemToActiveBooking, recordPaymentProo
       serviceKind: "pickup_delivery",
       pickupAddress: "Mahogany Promenade",
       deliveryAddress: "Songhai, ALCHE",
-      scheduledDate: "2026-09-08",
+      scheduledDate: today,
       scheduledTime: "6:00 pm",
-      slotKey: "2026-09-08_18:00-19:00",
+      slotKey: `${today}_18:00-19:00`,
       assignedRider: "Thierry",
       status: "confirmed",
       createdAt: new Date().toISOString(),

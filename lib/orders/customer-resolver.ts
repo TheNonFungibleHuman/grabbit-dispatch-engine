@@ -67,6 +67,10 @@ export async function resolveCustomerIdentity(
   }
 
   const queryLower = cleanQuery.toLowerCase();
+  const FORBIDDEN_QUERIES = new Set(["me", "us", "myself", "i", "we", "you", "bot", "assistant", "dispatch", "grabbit"]);
+  if (FORBIDDEN_QUERIES.has(queryLower)) {
+    return null;
+  }
 
   // 1.5. Search pending escalations (highest priority for admin relay — admin is often replying to an escalated customer)
   try {
@@ -108,14 +112,14 @@ export async function resolveCustomerIdentity(
         (e) => (e.customerName || "").toLowerCase() === queryLower,
       );
 
-      // Substring match in customerName
-      if (!escMatch) {
+      // Substring / word match in customerName (requires query length >= 3 and word-boundary/prefix match)
+      if (!escMatch && queryLower.length >= 3) {
         escMatch = sortedEsc.find((e) => {
           const eName = (e.customerName || "").toLowerCase();
+          const words = eName.split(/\s+/);
           return (
-            eName.includes(queryLower) ||
-            queryLower.includes(eName) ||
-            eName.split(/\s+/).some((part) => part.length >= 3 && queryLower.includes(part))
+            words.some((w) => w === queryLower || w.startsWith(queryLower) || (queryLower.length >= 4 && w.includes(queryLower))) ||
+            (queryLower.length >= 5 && eName.includes(queryLower))
           );
         });
       }
@@ -174,13 +178,13 @@ export async function resolveCustomerIdentity(
     );
 
     // Substring / word match (e.g. "Customer B", "Customer D", "Customer A", "Customer F")
-    if (!match) {
+    if (!match && queryLower.length >= 3) {
       match = sorted.find((b) => {
         const cName = (b.customerName || "").toLowerCase();
+        const words = cName.split(/\s+/);
         return (
-          cName.includes(queryLower) ||
-          queryLower.includes(cName) ||
-          (cName.split(/\s+/).some((part) => part.length >= 3 && queryLower.includes(part)))
+          words.some((w) => w === queryLower || w.startsWith(queryLower) || (queryLower.length >= 4 && w.includes(queryLower))) ||
+          (queryLower.length >= 5 && cName.includes(queryLower))
         );
       });
     }

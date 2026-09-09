@@ -40,4 +40,36 @@ describe("customer-resolver", () => {
     assert.ok(resolved);
     assert.equal(resolved.phone, "99900000054");
   });
+
+  it("never resolves pronouns like 'me', 'us', 'bot' to a customer", async () => {
+    await savePreBooking({
+      id: "pb_test_resolver_james",
+      customerPhone: "+99900000070",
+      customerName: "James Sanga",
+      serviceKind: "trip",
+      pickupAddress: "ALCHE Campus",
+      deliveryAddress: "Mahogany Promenade",
+      scheduledDate: "2026-09-09",
+      scheduledTime: "5:00 pm",
+      slotKey: "2026-09-09_17:00-18:00",
+      assignedRider: "Sherif",
+      status: "confirmed",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+
+    const forMe = await resolveCustomerIdentity("me");
+    assert.equal(forMe, null, "query 'me' must never resolve to James Sanga");
+
+    const forUs = await resolveCustomerIdentity("us");
+    assert.equal(forUs, null, "query 'us' must never resolve to any customer");
+
+    const forBot = await resolveCustomerIdentity("bot");
+    assert.equal(forBot, null, "query 'bot' must never resolve to any customer");
+
+    // But searching for "James" directly still resolves James Sanga
+    const forJames = await resolveCustomerIdentity("James");
+    assert.ok(forJames);
+    assert.equal(forJames.name, "James Sanga");
+  });
 });

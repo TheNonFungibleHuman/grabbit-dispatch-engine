@@ -86,18 +86,29 @@ export async function enforceAdminActionInvariants(
   // Case 4: Named target directly followed by message: "tell Customer C driver is here"
   const mNamedDirect = adminText.match(new RegExp(`${prefixPattern}([A-Za-zÀ-ÿ0-9_@.+]+)\\s+(.+)$`, "i"));
 
-  if (mGeneric) {
-    tellTarget = "ACTIVE_CUSTOMER";
-    tellMessage = mGeneric[1].trim();
-  } else if (mNamedConnector) {
-    tellTarget = mNamedConnector[1].trim();
-    tellMessage = mNamedConnector[2].trim();
-  } else if (mNamedDelim) {
-    tellTarget = mNamedDelim[1].trim();
-    tellMessage = mNamedDelim[2].trim();
-  } else if (mNamedDirect) {
-    tellTarget = mNamedDirect[1].trim();
-    tellMessage = mNamedDirect[2].trim();
+  // Disallow admin inquiry questions to the bot: "tell me...", "can you tell me...", "tell us..."
+  const isQuestionToBot = /\b(?:tell|inform)\s+(?:me|us)\b/i.test(adminText) || /^(?:please\s+|can you\s+|could you\s+|kindly\s+)?tell\s+(?:me|us)\b/i.test(adminText);
+
+  if (!isQuestionToBot) {
+    if (mGeneric) {
+      tellTarget = "ACTIVE_CUSTOMER";
+      tellMessage = mGeneric[1].trim();
+    } else if (mNamedConnector) {
+      tellTarget = mNamedConnector[1].trim();
+      tellMessage = mNamedConnector[2].trim();
+    } else if (mNamedDelim) {
+      tellTarget = mNamedDelim[1].trim();
+      tellMessage = mNamedDelim[2].trim();
+    } else if (mNamedDirect) {
+      tellTarget = mNamedDirect[1].trim();
+      tellMessage = mNamedDirect[2].trim();
+    }
+  }
+
+  const FORBIDDEN_TARGETS = new Set(["me", "us", "myself", "i", "we", "you", "bot", "assistant", "dispatch", "grabbit"]);
+  if (tellTarget && FORBIDDEN_TARGETS.has(tellTarget.toLowerCase())) {
+    tellTarget = "";
+    tellMessage = "";
   }
 
   // Check if model hallucinated and generated a customer greeting/message directly back to the admin!

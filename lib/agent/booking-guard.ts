@@ -296,12 +296,20 @@ export function isRepetitiveQuestionLoop(
   });
 
   if (isDirectDuplicate) {
-    // Find the latest user input
+    // Find the latest user input, stripping any internal context notes injected into user messages
     const userMsgs = recentHistory.filter((m) => m.role === "user" && typeof m.content === "string");
-    const lastUserText = userMsgs[userMsgs.length - 1]?.content || "";
-    const lastUserLower = lastUserText.toLowerCase();
+    const rawLastUser = userMsgs[userMsgs.length - 1]?.content || "";
+    let cleanLastUser = rawLastUser;
+    if (cleanLastUser.includes("Customer message:\n")) {
+      cleanLastUser = cleanLastUser.split("Customer message:\n").pop() || "";
+    } else if (cleanLastUser.includes("Customer message:")) {
+      cleanLastUser = cleanLastUser.split("Customer message:").pop() || "";
+    } else {
+      cleanLastUser = cleanLastUser.replace(/\[internal context[\s\S]*?\]/gi, "").trim();
+    }
+    const lastUserLower = cleanLastUser.toLowerCase();
 
-    // Check if customer provided a residence or affirmative confirmation
+    // Check if customer provided a specific campus residence or affirmative confirmation
     const knownLocations = [
       "aksum",
       "songhai",
@@ -313,15 +321,25 @@ export function isRepetitiveQuestionLoop(
       "cafeteria",
       "library",
       "commons",
-      "alche",
     ];
-    const matchedLocation = knownLocations.find((loc) => lastUserLower.includes(loc));
+    let matchedLocation = knownLocations.find((loc) => new RegExp(`\\b${loc}\\b`, "i").test(lastUserLower));
 
-    if (matchedLocation || /^(?:yes|yep|yeah|correct|that's right|exactly)\b/i.test(lastUserLower.trim())) {
-      const displayLoc = matchedLocation
-        ? matchedLocation.charAt(0).toUpperCase() + matchedLocation.slice(1)
-        : "ALCHE";
+    // Also check prior user message if the last one was just an affirmative like "yes"
+    if (!matchedLocation && /^(?:yes|yep|yeah|correct|that's right|exactly)\b/i.test(lastUserLower.trim())) {
+      const prevUser = userMsgs[userMsgs.length - 2]?.content || "";
+      const prevClean = prevUser.includes("Customer message:\n")
+        ? prevUser.split("Customer message:\n").pop() || ""
+        : prevUser.replace(/\[internal context[\s\S]*?\]/gi, "").trim();
+      matchedLocation = knownLocations.find((loc) => new RegExp(`\\b${loc}\\b`, "i").test(prevClean.toLowerCase()));
+    }
+
+    if (matchedLocation) {
+      const displayLoc = matchedLocation.charAt(0).toUpperCase() + matchedLocation.slice(1);
       return `Got it! I've noted ${displayLoc} at ALCHE as your drop-off. Our dispatch team is locking in your order right now and will confirm in just a moment! 😊`;
+    }
+
+    if (/^(?:yes|yep|yeah|correct|that's right|exactly)\b/i.test(lastUserLower.trim())) {
+      return "Got it! I've noted your drop-off at ALCHE. Our dispatch team is locking in your order right now and will confirm in just a moment! 😊";
     }
 
     return "Got your details! I've escalated this directly to our dispatch operations team so we can confirm your request right away. A dispatcher will be with you in a moment! 👍";

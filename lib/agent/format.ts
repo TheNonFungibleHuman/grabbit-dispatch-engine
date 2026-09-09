@@ -10,18 +10,20 @@ export function sanitizeWhatsAppText(raw: string): string {
   text = text.replace(/^\[(?:Today|\d{4}-\d{2}-\d{2})[^\]]*\]\s*(?:Support|Customer|Agent|Grabbit|Grabbit Express)?:\s*/i, "");
   text = text.replace(/^(?:Support|Agent|Grabbit Express|Grabbit):\s*/i, "");
 
-  // 1. If there is a clear customer-facing greeting preceded by internal thinking paragraphs, slice to the greeting
-  const greetingMatch = text.match(/\n+(?:(?:\*|\b)(?:hello|hi|hey|good morning|good afternoon|good evening|thanks|greetings|dear|welcome|trip confirmed|order confirmed|booking confirmed)\b[\s\S]*)$/i);
-  if (greetingMatch && greetingMatch.index !== undefined) {
+  // 1. If there is a clear customer-facing greeting preceded by internal thinking, slice to the greeting
+  const greetingMatch = text.match(/(?:[\n.!?]|^)\s*(?:(?:\*|\b)(?:hello|hi|hey|good morning|good afternoon|good evening|thanks|greetings|dear|welcome|trip confirmed|order confirmed|booking confirmed)\b[\s\S]*)$/i);
+  if (greetingMatch && greetingMatch.index !== undefined && greetingMatch.index > 0) {
     const beforeGreeting = text.slice(0, greetingMatch.index).trim();
-    if (/^(?:i'll|i will|let me|the customer|the user|customer wants|we need to|first,|thinking|thought|reasoning|internal note|plan|i need to|i should|i must)/i.test(beforeGreeting)) {
-      text = text.slice(greetingMatch.index).trim();
+    if (/^(?:actually|i'll|i will|let me|the customer|the user|customer wants|we need to|first,|thinking|thought|reasoning|internal note|plan|i need to|i should|i must|hmm|wait,|the intake|trip fare)/i.test(beforeGreeting)) {
+      const matchText = greetingMatch[0];
+      text = matchText.replace(/^[\n.!?\s]+/, "").trim();
     }
   }
 
   // 2. Strip standard thought/reasoning prefixes
   text = text.replace(/^(?:(?:Thinking|Thought|Reasoning|Internal Note|Plan):\s*[\s\S]*?\n+)/i, "");
-  text = text.replace(/^(?:(?:I'll|I will|Let me|The customer|The user|We need to|I need to|I should|I must)\s+[\s\S]*?\n\n+)/i, "");
+  text = text.replace(/^(?:(?:I'll|I will|Let me|The customer|The user|We need to|I need to|I should|I must|Actually|Hmm|Wait,|The intake|Trip fare)\s+[\s\S]*?\n\n+)/i, "");
+  text = text.replace(/^(?:(?:Actually|Hmm|Wait,|The intake|Trip fare).*?\n+)/i, "");
   text = text.replace(/^(?:Let me (?:clarify|check|confirm|ask|look|see|tell|verify|proceed).*?\n+)/i, "");
   text = text.replace(/^(?:I (?:don't|do not|need to|should|will|must|have to) (?:have access|clarify|check|confirm|ask|look|see|verify).*?\n+)/i, "");
 

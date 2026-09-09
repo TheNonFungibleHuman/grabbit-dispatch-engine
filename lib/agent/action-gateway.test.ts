@@ -111,5 +111,41 @@ describe("action-gateway", () => {
     assert.ok(lastMsg);
     assert.match(lastMsg.text, /Rs 100/i);
   });
+
+  it("does NOT treat admin inquiry 'Tell me what time is Peace's booking?' as a customer relay", async () => {
+    // Seed a customer whose name contains "me" (like James Sanga)
+    await savePreBooking({
+      id: "pb_gateway_test_james",
+      customerPhone: "+99900000073",
+      customerName: "James Sanga",
+      serviceKind: "trip",
+      pickupAddress: "ALCHE Campus",
+      deliveryAddress: "Mahogany Promenade",
+      scheduledDate: "2026-09-09",
+      scheduledTime: "4:00 pm",
+      slotKey: "2026-09-09_16:00-17:00",
+      assignedRider: "Sherif",
+      status: "confirmed",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+
+    const res = await enforceAdminActionInvariants({
+      senderPhone: "+999000000008",
+      isAdmin: true,
+      incomingText: "Tell me what time is Peace's booking?",
+      assistantText: "Peace has a booking at 5:30 PM today.",
+      calledTools: new Set<string>(),
+      messageId: "test_gateway_msg_4",
+    });
+
+    // Must NOT execute any relay action to James Sanga or any customer
+    assert.equal(res.actionsExecuted.length, 0);
+    assert.equal(res.text, "Peace has a booking at 5:30 PM today.");
+
+    // Verify James Sanga's transcript was never touched
+    const jamesTranscript = await loadTranscript("99900000073");
+    assert.equal(jamesTranscript.entries.length, 0);
+  });
 });
 
