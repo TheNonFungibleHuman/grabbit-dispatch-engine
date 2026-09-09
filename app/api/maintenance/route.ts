@@ -7,6 +7,9 @@ import {
 } from "@/lib/riders/commands";
 
 export async function GET() {
+  if (!(await isAdminAuthed())) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
   const status = await getFleetMaintenanceStatus();
   return NextResponse.json({ ok: true, maintenance: status });
 }

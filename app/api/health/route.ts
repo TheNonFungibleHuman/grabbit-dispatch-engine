@@ -12,7 +12,6 @@ export async function GET() {
     kiloApiKey: Boolean(process.env.KILO_API_KEY?.trim()),
     supabaseUrl: Boolean(process.env.SUPABASE_URL?.trim()),
     supabaseServiceRoleKey: Boolean(process.env.SUPABASE_SERVICE_ROLE_KEY?.trim()),
-    testRiderPhone: process.env.TEST_RIDER_PHONE || "none",
   };
 
   let checks;
@@ -20,7 +19,7 @@ export async function GET() {
     checks = await runHealthChecks();
   } catch {
     return NextResponse.json(
-      { status: "error", allConfigured: false, environment: envCheck },
+      { status: "error", allConfigured: false },
       { status: 500 },
     );
   }
@@ -41,6 +40,5 @@ export async function GET() {
     status: !allReady ? "missing_configuration" : degraded ? "degraded" : "healthy",
     allConfigured: allReady,
     checks,
-    environment: envCheck,
   });
 }

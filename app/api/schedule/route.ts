@@ -8,6 +8,9 @@ import {
 } from "@/lib/schedule/availability";
 
 export async function GET() {
+  if (!(await isAdminAuthed())) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
   clearScheduleCache();
   const snapshot = await getAvailabilitySnapshot();
   return NextResponse.json({
