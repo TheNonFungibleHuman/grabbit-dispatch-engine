@@ -2,8 +2,8 @@
 
 [![Next.js](https://img.shields.io/badge/Next.js-16.2.4-black?logo=next.js)](https://nextjs.org/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.x-blue?logo=typescript)](https://www.typescriptlang.org/)
-[![Tests](https://img.shields.io/badge/Tests-142%20Passing-brightgreen?logo=node.js)](https://nodejs.org/)
-[![DeepSeek](https://img.shields.io/badge/AI%20Brain-DeepSeek--Chat-purple)](https://deepseek.com/)
+[![Tests](https://img.shields.io/badge/Tests-192%20Passing-brightgreen?logo=node.js)](https://nodejs.org/)
+[![DeepSeek](https://img.shields.io/badge/AI%20Brain-DeepSeek%20V3%20%2B%20Vision-purple)](https://deepseek.com/)
 [![Storage](https://img.shields.io/badge/Storage-Supabase%20Blob-emerald?logo=supabase)](https://supabase.com/)
 
 > Autonomous WhatsApp Dispatcher, Fleet Operations Engine, and Live Admin Dashboard for **Grabbit Express** — Mauritius' first 100% electric on-demand delivery, errand, and passenger ride-hailing service.
@@ -15,12 +15,18 @@
 **Grabbit Express** primarily serves the **ALCHE Campus (African Leadership College)**, **Mahogany Shopping Promenade**, **Pamplemousses**, **SSRN Hospital**, and **Grand Baie** corridors.
 
 This repository (`grabbit-agent`) powers the 24/7 intelligent operations backbone:
-1. **Conversational WhatsApp Dispatcher**: Books passenger rides, food deliveries (Eaters, KFC, Pappagallo, PanAsian), and custom errands with zero friction.
-2. **Deterministic Anti-Double-Booking Guard**: Mathematically enforces 15m/30m safety buffer rules and capacity limits across 7-day rider schedules in pure TypeScript.
-3. **100% Fleet Space Visibility**: Automatically dispatches rich booking cards to Google Chat space webhooks for every confirmed run while alerting riders on WhatsApp.
-4. **Zero-Token Fleet Rider Commands**: Riders manage active runs via simple 1-word WhatsApp texts (`Done`, `Break 15m`, `Back`) requiring 0 LLM tokens.
-5. **PDF & Document Payment Receipt Ingress**: Gracefully handles bank transfer receipts (Juice, MCB, ABSA) and enforces strict anti-hallucination verification rules.
-6. **Admin Dashboard & Superpowers**: Real-time slots calendar, walk-in quick dispatch with custom fare allocation, live chat transcript viewer, and safe audience broadcast campaigns.
+1. **Conversational WhatsApp Dispatcher**: Books passenger rides, food deliveries (Eaters, KFC, Pappagallo, PanAsian), and custom errands with clean context separation and zero prompt leaks.
+2. **Multimodal Vision & Native PDF Ingress**: 
+   - **DeepSeek Multimodal Vision** (`deepseek-v4-flash-vision-exp`): Analyzes food menus, handwritten shopping lists, parcel photos, and payment screenshots.
+   - **Native 0-Token PDF Stream Decompressor**: Extracts MCB Juice, SBM, and Absa transfer receipts in ~5ms using native `node:zlib` streams with 0 LLM token cost.
+3. **Advance Payment Proof Memory**: Auto-detects and preserves receipts sent *before* ride details are provided, auto-confirming the booking once scheduled.
+4. **Multi-Booking Receipt Matching**: Disambiguates multiple active bookings on the same day by matching receipt amounts against specific booking fares.
+5. **Deterministic Anti-Double-Booking Guard**: Mathematically enforces 15m/30m safety buffers and hourly capacity limits across 7-day rider schedules in pure TypeScript.
+6. **Distributed Cross-Container Session Lock**: Serializes rapid-fire WhatsApp bursts across parallel serverless instances so the bot never talks over itself.
+7. **Zero-Token Fleet Rider Commands**: Riders manage active runs via simple 1-word WhatsApp texts (`Done`, `Break 15m`, `Back`) requiring 0 LLM tokens.
+8. **Admin-First Operations & Pending Actions**: the admin is isolated as Admin-First; rundown and weekly report approvals execute deterministically with 0 tokens.
+9. **Fleet Visibility & Space Alerts**: Automatically dispatches rich booking cards to Google Chat space webhooks for every confirmed run while alerting riders on WhatsApp.
+10. **Admin Web Dashboard**: Real-time slots calendar, walk-in quick dispatch with custom fare allocation, live chat transcript viewer, and safe audience broadcast campaigns.
 
 ---
 
@@ -32,25 +38,33 @@ flowchart TD
     Admin["Admin (+999000000008 / +9990000000003)"] -->|"Webhook POST"| Ingress
     Rider["Rider (Thierry / Sherif / Moses)"] -->|"Webhook POST"| Ingress
 
-    Ingress --> Verify["HMAC Signature Verification & Inbound Dedup"]
-    Verify --> Handler["lib/wasender/handlers.ts"]
+    Ingress --> Verify["HMAC Signature Verification & Inbound Claim Store"]
+    Verify --> SessionLock["lib/wasender/session-lock.ts<br>(Distributed Cross-Container Lock)"]
+    SessionLock --> Handler["lib/wasender/handlers.ts"]
+
+    Handler --> CheckAdminAction{"Is Pending Admin Action?<br>(Rundown / Report Approval)"}
+    CheckAdminAction -->|"YES (0 Tokens)"| AdminActionEngine["lib/admin/admin-actions.ts<br>(Posts to Google Chat & Confirms)"]
 
     Handler --> CheckRiderCmd{"Is Rider 1-Word Command?<br>(Done / Break / Back)"}
     CheckRiderCmd -->|"YES (0 Tokens)"| RiderCmdEngine["lib/riders/commands.ts<br>(Completes Run & Frees Rider)"]
 
-    CheckRiderCmd -->|"NO"| HumanTakeoverCheck{"Is Human Admin Active?<br>(Kill Switch / Manual Reply)"}
-    HumanTakeoverCheck -->|"Agent Paused"| RecordOnly["Append Transcript & Log Ops"]
+    Handler --> MediaCheck{"Is Image or PDF Document?"}
+    MediaCheck -->|"YES"| MediaEngine["lib/media/ (Vision & PDF Inspector)<br>• Native zlib PDF extractor (0 Tokens)<br>• DeepSeek Vision (Menus & Receipts)"]
+    MediaEngine -->|"Valid Receipt"| PaymentProof["lib/orders/pre-booking.ts<br>• Match Fare to Booking<br>• Or Save Advance Proof (30m TTL)"]
 
-    HumanTakeoverCheck -->|"Agent Active"| Agent["lib/agent/deepseek.ts<br>(DeepSeek LLM Dispatch Brain)"]
+    MediaCheck -->|"NO / Text Turn"| AgentCheck{"Is Human Admin Active?<br>(Kill Switch / Manual Takeover)"}
+    AgentCheck -->|"Agent Paused"| RecordOnly["Append Transcript & Log Ops"]
 
-    Agent --> ContextBuilder["lib/agent/tools.ts: buildAgentContextNote<br>• 7-Day Live Availability Header<br>• Verified Customer Profile Memory<br>• Active Rider Shifts & Escalations"]
-    ContextBuilder --> Tools["DEEPSEEK_AGENT_TOOLS<br>• schedule_trip_or_delivery<br>• match_service_location<br>• admin_reply_to_customer<br>• preview/execute_broadcast"]
+    AgentCheck -->|"Agent Active"| Agent["lib/agent/deepseek.ts<br>(DeepSeek LLM Dispatch Brain)"]
 
-    Tools --> PreBooking["lib/orders/pre-booking.ts<br>• Anti-Double Booking Guard<br>• Hourly Capacity Limit (3 max)<br>• Buffer Rules (15m one-way / 30m round-trip)<br>• Smart Route Batching (ALCHE ⇄ Mahogany)"]
+    Agent --> ContextBuilder["lib/agent/tools.ts: buildAgentContextNote<br>• System Context Injection (Pure User Turns)<br>• 7-Day Live Availability Matrix<br>• Customer Profile Memory"]
+    ContextBuilder --> Tools["DEEPSEEK_AGENT_TOOLS<br>• schedule_trip_or_delivery<br>• add_item_to_active_booking<br>• reschedule_trip_or_delivery<br>• admin_reply_to_customer"]
+
+    Tools --> PreBooking["lib/orders/pre-booking.ts<br>• Anti-Double Booking Guard<br>• Hourly Capacity Limit (3 max)<br>• Buffer Rules (15m one-way / 30m round-trip)<br>• Auto-Link Advance Payment Proofs"]
 
     PreBooking --> Dispatcher["lib/riders/notify-rider.ts<br>• WhatsApp to Assigned Rider<br>• Live Card to Google Chat Space<br>• WhatsApp Live Tracking to Customer"]
 
-    Agent --> Sanitizer["lib/agent/format.ts: sanitizeWhatsAppText<br>• Strips Chain-of-Thought Leaks<br>• Strips Timestamp & Role Prefixes<br>• Formats WhatsApp *bold* & lists"]
+    Agent --> Sanitizer["lib/agent/format.ts: sanitizeWhatsAppText<br>• Strips Chain-of-Thought Leaks<br>• Strips Role & Timestamp Prefixes<br>• Formats WhatsApp *bold* & lists"]
 
     Sanitizer --> DispatchOut["lib/wasender/send-tracked.ts<br>Dispatches WhatsApp Reply & Logs Outbound ID"]
 ```
@@ -60,20 +74,22 @@ flowchart TD
 ## ⚡ Core Subsystems & Features
 
 ### 1. WhatsApp Booking & Anti-Double-Booking Guard (`lib/orders/`)
-* **Deterministic Capacity**: Max 3 deliveries + 1 passenger trip per hour (or up to 3 passenger trips if 0 deliveries exist).
+* **Deterministic Capacity**: Max 3 deliveries + 1 passenger trip per hour (or up to 3 passenger trips if 0 deliveries exist). Max 3 total bookings per hour per rider.
 * **Buffer Safety Rules**:
   * **One-Way Trips & Deliveries**: Enforces a strict minimum **15-minute gap** for the same rider.
   * **Round-Trips**: Enforces a strict **30-minute gap** before and after (15 min travel + 15 min customer waiting time).
 * **Smart Route Batching**: Orders along the same corridor (e.g. both picking up from Mahogany within 15 minutes) are grouped to the same rider without triggering safety buffer violations.
+* **Advance Payment Memory**: Auto-detects and preserves receipts sent before booking, linking them into newly created orders.
 
-### 2. Fleet Notifications & Space Visibility (`lib/riders/`)
-* **Google Chat Space Webhook**: Every single booked trip and delivery (whether assigned to Thierry, Sherif, or Moses) **always** posts a rich card to the fleet Google Chat space for 100% dispatch team visibility.
+### 2. Multimodal Vision & Native PDF Processing (`lib/media/`)
+* **DeepSeek Vision (`deepseek-v4-flash-vision-exp`)**: Classifies images into receipts, food menus, parcel items, or maps using structured JSON output. Extracts dishes and grocery items directly into the dispatch conversation.
+* **Zero-Token PDF Text Extractor**: Uses Node's built-in `node:zlib` to extract and parse MCB Juice, SBM, and Absa transfer receipts in **~5ms** with **0 LLM tokens**.
+* **TrueType CID Fallback**: Automatically checks for embedded image streams and passes them to visual OCR if print-to-PDF text contains unmapped font glyphs.
+
+### 3. Fleet Notifications & Space Visibility (`lib/riders/`)
+* **Google Chat Space Webhook**: Every booked trip and delivery **always** posts a rich card to the fleet Google Chat space for 100% dispatch team visibility.
 * **Direct Rider Alerts**: Sherif and Thierry receive instant WhatsApp assignment notifications with customer details and route information.
 * **Live Tracking Links**: Customers receive instant links to track their assigned rider in real time.
-
-### 3. PDF & Payment Proof Ingress (`lib/wasender/` & `lib/agent/`)
-* **Document Attachment Handling**: Detects incoming PDF receipts, screenshots, and bank transfer documents (`documentMessage`).
-* **Strict Anti-Hallucination Guard**: Prohibits the AI from fabricating bank verification or claiming an admin has approved the transfer before verification.
 
 ### 4. Admin Web Dashboard (`app/admin/`)
 * **Slots Calendar (`/admin/slots`)**: Filterable 4-day view (Today, Tomorrow, Yesterday, 2 Days Ago) with live status badges.
@@ -96,9 +112,11 @@ flowchart TD
 | **Framework** | **Next.js 16 (App Router)** | TypeScript, Turbopack, Server Actions, API Routes |
 | **WhatsApp Ingress / Egress** | **WasenderAPI** | Webhook receiver (`/webhook`) & message tracker |
 | **AI LLM Brain** | **DeepSeek API** (`deepseek-chat`) | High-speed reasoning with structured tool calling |
+| **Multimodal Vision** | **DeepSeek Vision** (`deepseek-v4-flash-vision-exp`) | Menu parsing, parcel inspection, receipt OCR |
+| **PDF Stream Engine** | **Node.js `node:zlib`** | Native 5ms zero-token digital PDF receipt extraction |
 | **Database & JSON Store** | **Supabase JSON Store** | Persistent booking records, transcripts, and fleet status |
 | **Fleet Notifications** | **WhatsApp & Google Chat Webhook** | Dispatches to riders on WhatsApp and space alerts to Google Chat |
-| **Testing** | **Node.js Native Test Runner** | 142 automated unit and integration tests |
+| **Testing** | **Node.js Native Test Runner** | 192 automated unit and integration tests (6.5s runtime) |
 
 ---
 
@@ -140,7 +158,7 @@ RESEND_API_KEY=
 # Install dependencies
 npm install
 
-# Run complete test suite (142 unit & integration tests)
+# Run complete test suite (192 unit & integration tests in ~6.5 seconds)
 npm test
 
 # Run Next.js production build (Turbopack + TypeScript validation)
@@ -168,18 +186,19 @@ grabbit-agent/
 │   │   ├── schedule/          # Admin API for updating availability schedule
 │   │   ├── slots/             # Admin API for pre-booking creation and cancellation
 │   │   └── test-dispatch/     # Sandbox dispatch endpoint
-│   └── webhook/route.ts       # Main WASender WhatsApp webhook ingress
+│   └── webhook/route.ts       # Main WASender WhatsApp webhook ingress (maxDuration = 60)
 ├── lib/
-│   ├── admin/                 # Admin auth, sessions, knowledge base, broadcast engine
+│   ├── admin/                 # Admin auth, pending actions store, sessions, broadcast engine
 │   ├── agent/                 # DeepSeek agent core, system prompt, tools, sanitizers
 │   ├── blob/                  # Supabase persistent JSON document store
 │   ├── kilo/                  # Kilo API client, location discovery, webhook parsers
+│   ├── media/                 # DeepSeek Vision inspector, native PDF zlib extractor, Wasender media
 │   ├── ops/                   # Operations event store and escalation manager
-│   ├── orders/                # Pre-booking engine, capacity rules, customer profile memory
+│   ├── orders/                # Pre-booking engine, advance payment proofs, dialog state FSM
 │   ├── pricing/               # Canonical fare pricing engine and zone calculator
 │   ├── riders/                # Fleet configuration (Thierry, Sherif, Moses), 1-word commands
 │   ├── schedule/              # 7-day availability evaluator, morning briefings, weekly reports
-│   └── wasender/              # WASender client, HMAC verification, message tracking
+│   └── wasender/              # WASender client, HMAC verification, distributed session lock
 ├── data/
 │   └── rider-schedule.csv     # Default weekly rider shift matrix
 ├── AGENTS.md                  # Complete technical architecture & agent guide
