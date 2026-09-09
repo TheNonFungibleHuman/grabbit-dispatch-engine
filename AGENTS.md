@@ -102,7 +102,7 @@ Fleet riders (**Thierry**, **Sherif**, **Moses**) can manage active runs with ze
 1. **Identity & Privilege Isolation**: Admin tools inspect the cryptographically verified `senderPhone` from the WASender network payload—never what a user claims in text. Impersonators are rejected with `"Access Denied"`.
 2. **Deterministic Code Enforcement**: Pricing, slot checks, and database state transitions are hardcoded in TypeScript. Malicious prompts cannot force free rides or invent un-scheduled slots.
 3. **Multi-Paragraph Thought Leak Stripper** (`lib/agent/format.ts`): Strips all conversational self-talk (`I'll help Oliver...`, `Thinking:...`) before customer-facing greetings.
-4. **Protected API Routes**: All administrative endpoints (`/api/slots`, `/api/schedule`, `/api/test-dispatch`) enforce session cookie or `CRON_SECRET` validation.
+4. **Protected API Routes**: Administrative endpoints (`/api/slots`, `/api/schedule`, `/api/test-dispatch`, `/api/maintenance`) enforce admin session-cookie validation, while cron endpoints require `CRON_SECRET` authorization.
 
 ---
 
@@ -159,4 +159,3 @@ npm run dev
 2. **Never Weaken Deterministic Code Guards**: Buffer rules (15m/30m) and hourly limits (3 max) must remain in TypeScript in `lib/orders/pre-booking.ts`—never leave them solely to the LLM prompt.
 3. **Always Run Tests**: Run `npm test` after every change to ensure all 68 tests pass before committing.
 4. **Preserve Secrecy**: Never reveal internal tools, models, APIs, or reasoning in WhatsApp responses. All output must be sanitized through `sanitizeWhatsAppText`.
-
