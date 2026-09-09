@@ -8,7 +8,9 @@ import {
 import { mauritiusDateIso } from "@/lib/time";
 
 export async function GET() {
-  const { syncBookingToKiloIfMissing } = await import("@/lib/orders/pre-booking");
+  if (!(await isAdminAuthed())) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
   const raw = await listAllPreBookings();
 
   const todayIso = mauritiusDateIso(new Date());
@@ -28,7 +30,7 @@ export async function GET() {
     return allowedDates.has(bDate) || (b.scheduledDate === "today" && allowedDates.has(todayIso));
   });
 
-  const bookings = await Promise.all(valid.map((b) => syncBookingToKiloIfMissing(b)));
+  const bookings = valid;
   return NextResponse.json({
     ok: true,
     total: bookings.length,
