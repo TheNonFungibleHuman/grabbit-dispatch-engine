@@ -145,17 +145,17 @@ export async function processIncomingUserMessage(
           }
 
           const { recordPaymentProofReceived } = await import("../orders/pre-booking.ts");
-          const bank = pdfAnalysis.paymentDetails?.bank || "Bank Transfer";
-          const amountPart = pdfAnalysis.paymentDetails?.amount ? ` of Rs ${pdfAnalysis.paymentDetails.amount}` : "";
-          const refPart = pdfAnalysis.paymentDetails?.referenceId ? ` (Ref: ${pdfAnalysis.paymentDetails.referenceId})` : "";
-
-          await recordPaymentProofReceived({
+          const proofRes = await recordPaymentProofReceived({
             customerPhone: message.sender,
+            bank: pdfAnalysis.paymentDetails?.bank,
+            amount: pdfAnalysis.paymentDetails?.amount,
+            currency: pdfAnalysis.paymentDetails?.currency,
+            referenceId: pdfAnalysis.paymentDetails?.referenceId,
+            status: pdfAnalysis.paymentDetails?.status,
             notes: `${pdfAnalysis.summary} (File: ${doc.fileName || "receipt.pdf"})`,
           });
 
-          const confirmText = `Thank you! 📄 We've received and verified your ${bank} payment receipt${amountPart}${refPart}.`;
-          await sendAndRecord({ to, sender: message.sender, text: confirmText, messageId: message.messageId });
+          await sendAndRecord({ to, sender: message.sender, text: proofRes.message, messageId: message.messageId });
           return;
         }
 
@@ -210,17 +210,17 @@ export async function processIncomingUserMessage(
             }
 
             const { recordPaymentProofReceived } = await import("../orders/pre-booking.ts");
-            const bank = vision.paymentDetails?.bank || "Payment";
-            const amountPart = vision.paymentDetails?.amount ? ` of Rs ${vision.paymentDetails.amount}` : "";
-            const refPart = vision.paymentDetails?.referenceId ? ` (Ref: ${vision.paymentDetails.referenceId})` : "";
-
-            await recordPaymentProofReceived({
+            const proofRes = await recordPaymentProofReceived({
               customerPhone: message.sender,
+              bank: vision.paymentDetails?.bank,
+              amount: vision.paymentDetails?.amount,
+              currency: vision.paymentDetails?.currency,
+              referenceId: vision.paymentDetails?.referenceId,
+              status: vision.paymentDetails?.status,
               notes: vision.summary,
             });
 
-            const confirmText = `Thank you! 📄 We've received your ${bank} payment screenshot${amountPart}${refPart}.`;
-            await sendAndRecord({ to, sender: message.sender, text: confirmText, messageId: message.messageId });
+            await sendAndRecord({ to, sender: message.sender, text: proofRes.message, messageId: message.messageId });
             return;
           }
 

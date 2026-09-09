@@ -1,4 +1,4 @@
-﻿import zlib from "node:zlib";
+import zlib from "node:zlib";
 import { formatError, logInfo, logWarn } from "../log.ts";
 import { inspectImageWithDeepSeekVision, type VisionAnalysisResult } from "./vision-inspector.ts";
 
@@ -150,6 +150,26 @@ export async function inspectPdfDocument(
         },
         summary: `Digital ${bank} receipt of MUR ${amount || "unknown"} (Ref: ${referenceId || "unknown"})`,
       };
+    }
+
+    // If text streams were extracted but did NOT match receipt keywords:
+    // Check if the PDF contains an embedded JPEG image (common in scanned documents or photo-PDFs with non-standard CID fonts).
+    const embeddedImage = extractFirstImageFromPdfBuffer(pdfBuffer);
+    if (embeddedImage) {
+      logInfo("pdf_inspector", "text stream did not match receipt keywords; attempting vision inspection on embedded image");
+      const visionRes = await inspectImageWithDeepSeekVision({
+        imageBuffer: embeddedImage,
+        mimeType: "image/jpeg",
+      });
+      if (visionRes.isPaymentReceipt || visionRes.category !== "other") {
+        return {
+          isTextPdf: false,
+          extractedText: visionRes.summary,
+          isPaymentReceipt: visionRes.isPaymentReceipt,
+          paymentDetails: visionRes.paymentDetails,
+          summary: visionRes.summary,
+        };
+      }
     }
 
     return {

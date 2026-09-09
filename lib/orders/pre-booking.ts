@@ -45,6 +45,7 @@ export interface PreBooking {
   paymentStatus?: "unpaid" | "paid";
   paymentMethod?: string;
   fareAmount?: number | string;
+  notes?: string;
   reminderSent?: boolean;
   createdAt: string;
   updatedAt: string;
@@ -940,6 +941,44 @@ export async function createPreBookingRequest(args: {
     logWarn("prebooking", "draft reset or profile update failed after booking", formatError(draftErr));
   }
 
+  // Auto-link any advance payment proof (screenshot/PDF) sent before booking creation
+  try {
+    const { getAndConsumePendingPaymentProof } = await import("./pending-proofs.ts");
+    const advanceProof = await getAndConsumePendingPaymentProof(args.customerPhone);
+    if (advanceProof) {
+      booking.paymentMethod = "transfer";
+      booking.notes = (booking.notes ? `${booking.notes} | ` : "") +
+        `Auto-linked advance payment (${advanceProof.bank || "Transfer"} Rs ${advanceProof.amount || "N/A"}, Ref: ${advanceProof.referenceId || "N/A"})`;
+      booking.updatedAt = new Date().toISOString();
+      await savePreBooking(booking);
+
+      try {
+        const { notifyAdminPaymentVerification } = await import("../riders/notify-rider.ts");
+        void notifyAdminPaymentVerification({
+          bookingId: booking.id,
+          customerName: booking.customerName,
+          customerPhone: booking.customerPhone,
+          serviceKind: booking.serviceKind,
+          scheduledDate: booking.scheduledDate,
+          scheduledTime: booking.scheduledTime,
+          amountRs: advanceProof.amount,
+          paymentMethod: `Juice / Bank Transfer (Auto-linked: Ref ${advanceProof.referenceId || "N/A"})`,
+          assignedRider: booking.assignedRider,
+        });
+      } catch (payAlertErr) {
+        logWarn("prebooking", "failed to alert admin of auto-linked advance payment", formatError(payAlertErr));
+      }
+
+      logInfo("prebooking", "auto-linked advance payment proof to newly created booking", {
+        bookingId: booking.id,
+        ref: advanceProof.referenceId,
+        amount: advanceProof.amount,
+      });
+    }
+  } catch (proofErr) {
+    logWarn("prebooking", "failed to check/link advance payment proof", formatError(proofErr));
+  }
+
   try {
     const { resolvePendingEscalation } = await import("../ops/store.ts");
     await resolvePendingEscalation({
@@ -1626,6 +1665,11 @@ export async function recordPaymentProofReceived(args: {
   customerPhone: string;
   bookingId?: string;
   notes?: string;
+  bank?: string;
+  amount?: number;
+  currency?: string;
+  referenceId?: string;
+  status?: "successful" | "failed" | "pending";
 }): Promise<{
   ok: boolean;
   booking?: PreBooking;
@@ -1635,7 +1679,7 @@ export async function recordPaymentProofReceived(args: {
   const all = await listAllPreBookings();
   const todayIso = mauritiusDateIso(new Date());
 
-  const activeSummary = all.slice().reverse().find((b) => {
+  const candidates = all.slice().reverse().filter((b) => {
     if (args.bookingId && b.id === args.bookingId) return true;
     if (b.customerPhone.replace(/\D/g, "") !== phoneClean) return false;
     if (b.status !== "confirmed" && b.status !== "pending_rider" && b.status !== "dispatched") return false;
@@ -1645,11 +1689,32 @@ export async function recordPaymentProofReceived(args: {
     return bDate >= todayIso;
   });
 
+  let activeSummary = candidates[0];
+  // Multi-booking disambiguation: if customer has multiple active orders, match on fare amount
+  if (candidates.length > 1 && typeof args.amount === "number") {
+    const matched = candidates.find((c) => {
+      const fare =
+        typeof c.fareAmount === "number"
+          ? c.fareAmount
+          : typeof c.fareAmount === "string"
+            ? parseFloat(c.fareAmount)
+            : null;
+      return fare !== null && !isNaN(fare) && Math.abs(fare - args.amount!) <= 10;
+    });
+    if (matched) {
+      activeSummary = matched;
+    }
+  }
+
   let activeBooking: PreBooking | undefined;
   if (activeSummary) {
     const fullBooking = await readBookingFile<PreBooking>(activeSummary.id);
     activeBooking = fullBooking || activeSummary;
     activeBooking.paymentMethod = "transfer";
+    if (args.notes || args.referenceId) {
+      const noteAddition = `Payment verified (${args.bank || "Transfer"} Rs ${args.amount || "N/A"}, Ref: ${args.referenceId || "N/A"})`;
+      activeBooking.notes = activeBooking.notes ? `${activeBooking.notes} | ${noteAddition}` : noteAddition;
+    }
     activeBooking.updatedAt = new Date().toISOString();
     await savePreBooking(activeBooking);
 
@@ -1663,7 +1728,8 @@ export async function recordPaymentProofReceived(args: {
         serviceKind: activeBooking.serviceKind,
         scheduledDate: activeBooking.scheduledDate || todayIso,
         scheduledTime: activeBooking.scheduledTime,
-        paymentMethod: "Juice / Bank Transfer Receipt",
+        amountRs: args.amount,
+        paymentMethod: `${args.bank || "Juice / Bank Transfer"} Receipt (Ref: ${args.referenceId || "N/A"})`,
         assignedRider: activeBooking.assignedRider,
       });
     } catch (e) {
@@ -1680,12 +1746,40 @@ export async function recordPaymentProofReceived(args: {
     } catch {
       // Non-blocking
     }
+
+    const bankPart = args.bank ? `${args.bank} ` : "";
+    const amountStr = args.amount ? ` of Rs ${args.amount}` : "";
+    const refStr = args.referenceId ? ` (Ref: ${args.referenceId})` : "";
+    return {
+      ok: true,
+      booking: activeBooking,
+      message: `Thank you! 📄 We've received your ${bankPart}payment screenshot${amountStr}${refStr}.`,
+    };
   }
 
+  // If customer sent payment receipt before having an active booking, save as pending advance proof
+  try {
+    const { savePendingPaymentProof } = await import("./pending-proofs.ts");
+    await savePendingPaymentProof({
+      customerPhone: args.customerPhone,
+      bank: args.bank,
+      amount: args.amount,
+      currency: args.currency,
+      referenceId: args.referenceId,
+      status: args.status,
+      notes: args.notes,
+    });
+  } catch (saveErr) {
+    logWarn("prebooking", "failed to record advance payment proof", formatError(saveErr));
+  }
+
+  const bankPart = args.bank ? `${args.bank} ` : "";
+  const amountStr = args.amount ? ` of Rs ${args.amount}` : "";
+  const refStr = args.referenceId ? ` (Ref: ${args.referenceId})` : "";
   return {
     ok: true,
-    booking: activeBooking,
-    message: "Thank you! 📄 We've received your payment screenshot.",
+    booking: undefined,
+    message: `Thank you! 📄 We've recorded your ${bankPart}receipt${amountStr}${refStr}. Whenever you're ready with your ride or delivery details, your booking will be confirmed automatically!`,
   };
 }
 
