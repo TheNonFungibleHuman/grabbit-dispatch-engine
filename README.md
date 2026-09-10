@@ -1,9 +1,9 @@
 # 🛵 Grabbit Express — AI Dispatch & Fleet Operations Engine
 
-[![Next.js](https://img.shields.io/badge/Next.js-16.2.4-black?logo=next.js)](https://nextjs.org/)
+[![Next.js](https://img.shields.io/badge/Next.js-16.3.4-black?logo=next.js)](https://nextjs.org/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.x-blue?logo=typescript)](https://www.typescriptlang.org/)
 [![Tests](https://img.shields.io/badge/Tests-192%20Passing-brightgreen?logo=node.js)](https://nodejs.org/)
-[![DeepSeek](https://img.shields.io/badge/AI%20Brain-DeepSeek%20V3%20%2B%20Vision-purple)](https://deepseek.com/)
+[![DeepSeek](https://img.shields.io/badge/AI%20Brain-DeepSeek%20V4.1%20Flash-purple)](https://deepseek.com/)
 [![Storage](https://img.shields.io/badge/Storage-Supabase%20Blob-emerald?logo=supabase)](https://supabase.com/)
 
 > Autonomous WhatsApp Dispatcher, Fleet Operations Engine, and Live Admin Dashboard for **Grabbit Express** — Mauritius' first 100% electric on-demand delivery, errand, and passenger ride-hailing service.
@@ -15,9 +15,9 @@
 **Grabbit Express** primarily serves the **ALCHE Campus (African Leadership College)**, **Mahogany Shopping Promenade**, **Pamplemousses**, **SSRN Hospital**, and **Grand Baie** corridors.
 
 This repository (`grabbit-agent`) powers the 24/7 intelligent operations backbone:
-1. **Conversational WhatsApp Dispatcher**: Books passenger rides, food deliveries (Eaters, KFC, Pappagallo, PanAsian), and custom errands with clean context separation and zero prompt leaks.
+1. **Conversational WhatsApp Dispatcher**: Books passenger rides, food deliveries (Eaters, KFC, Pappagallo, PanAsian), and custom errands powered by **DeepSeek V4.1 Flash** with clean context separation and zero prompt leaks.
 2. **Multimodal Vision & Native PDF Ingress**: 
-   - **DeepSeek Multimodal Vision** (`deepseek-v4-flash-vision-exp`): Analyzes food menus, handwritten shopping lists, parcel photos, and payment screenshots.
+   - **DeepSeek V4.1 Flash Native Vision** (`deepseek-flash`): Unified multimodal understanding that visually parses restaurant menus, food lists, parcels, and payment screenshots with separate `reasoning_content`.
    - **Native 0-Token PDF Stream Decompressor**: Extracts MCB Juice, SBM, and Absa transfer receipts in ~5ms using native `node:zlib` streams with 0 LLM token cost.
 3. **Advance Payment Proof Memory**: Auto-detects and preserves receipts sent *before* ride details are provided, auto-confirming the booking once scheduled.
 4. **Multi-Booking Receipt Matching**: Disambiguates multiple active bookings on the same day by matching receipt amounts against specific booking fares.
@@ -82,7 +82,7 @@ flowchart TD
 * **Advance Payment Memory**: Auto-detects and preserves receipts sent before booking, linking them into newly created orders.
 
 ### 2. Multimodal Vision & Native PDF Processing (`lib/media/`)
-* **DeepSeek Vision (`deepseek-v4-flash-vision-exp`)**: Classifies images into receipts, food menus, parcel items, or maps using structured JSON output. Extracts dishes and grocery items directly into the dispatch conversation.
+* **DeepSeek V4.1 Flash Native Vision (`deepseek-flash`)**: Classifies images into receipts, food menus, parcel items, or maps using structured JSON output. Extracts dishes and grocery items directly into the dispatch conversation with separated `reasoning_content`.
 * **Zero-Token PDF Text Extractor**: Uses Node's built-in `node:zlib` to extract and parse MCB Juice, SBM, and Absa transfer receipts in **~5ms** with **0 LLM tokens**.
 * **TrueType CID Fallback**: Automatically checks for embedded image streams and passes them to visual OCR if print-to-PDF text contains unmapped font glyphs.
 
@@ -111,8 +111,8 @@ flowchart TD
 | :--- | :--- | :--- |
 | **Framework** | **Next.js 16 (App Router)** | TypeScript, Turbopack, Server Actions, API Routes |
 | **WhatsApp Ingress / Egress** | **WasenderAPI** | Webhook receiver (`/webhook`) & message tracker |
-| **AI LLM Brain** | **DeepSeek API** (`deepseek-chat`) | High-speed reasoning with structured tool calling |
-| **Multimodal Vision** | **DeepSeek Vision** (`deepseek-v4-flash-vision-exp`) | Menu parsing, parcel inspection, receipt OCR |
+| **AI LLM Brain** | **DeepSeek V4.1 Flash** (`deepseek-flash`) | Unified CED MoE model: high-speed text reasoning with native tool calling |
+| **Multimodal Vision** | **DeepSeek V4.1 Flash** (`deepseek-flash`) | Native visual menu parsing, parcel inspection, receipt OCR |
 | **PDF Stream Engine** | **Node.js `node:zlib`** | Native 5ms zero-token digital PDF receipt extraction |
 | **Database & JSON Store** | **Supabase JSON Store** | Persistent booking records, transcripts, and fleet status |
 | **Fleet Notifications** | **WhatsApp & Google Chat Webhook** | Dispatches to riders on WhatsApp and space alerts to Google Chat |
@@ -125,8 +125,11 @@ flowchart TD
 Create a `.env.local` file in the root directory:
 
 ```ini
-# --- AI Engine ---
+# --- AI Engine (DeepSeek V4.1 Flash) ---
 DEEPSEEK_API_KEY=your_deepseek_api_key
+# Optional overrides (defaults to deepseek-flash)
+DEEPSEEK_MODEL=deepseek-flash
+DEEPSEEK_VISION_MODEL=deepseek-flash
 
 # --- WhatsApp Ingress & Egress (WASender) ---
 WASENDER_API_KEY=your_wasender_api_key
