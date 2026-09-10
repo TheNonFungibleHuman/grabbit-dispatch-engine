@@ -46,7 +46,7 @@ describe("pappagallo-pdf-booking", () => {
         customerName: "Alex",
         customerPhone: "+99900000022",
         scheduledDate: "today",
-        scheduledTime: "6:00 pm",
+        scheduledTime: "12:00 pm",
         packageDescription: "1x Bucket for one",
       },
       senderPhone: "+99900000022",

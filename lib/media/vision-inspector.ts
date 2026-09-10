@@ -1,4 +1,4 @@
-﻿import { formatError, logError, logInfo, logWarn } from "../log.ts";
+import { formatError, logError, logInfo, logWarn } from "../log.ts";
 
 export interface VisionAnalysisResult {
   category: "payment_receipt" | "food_menu" | "package_item" | "location_map" | "other";
@@ -16,7 +16,7 @@ export interface VisionAnalysisResult {
 }
 
 const DEEPSEEK_API_BASE = process.env.DEEPSEEK_BASE_URL || "https://api.deepseek.com";
-const VISION_MODEL = "deepseek-v4-flash-vision-exp";
+const VISION_MODEL = process.env.DEEPSEEK_VISION_MODEL || "deepseek-flash";
 
 function getApiKey(): string {
   const key = process.env.DEEPSEEK_API_KEY?.trim();

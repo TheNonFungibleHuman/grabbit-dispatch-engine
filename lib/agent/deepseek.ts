@@ -14,7 +14,7 @@ import {
 } from "./tools.ts";
 import { loadTranscript } from "./transcript.ts";
 
-const DEFAULT_MODEL = "deepseek-chat";
+const DEFAULT_MODEL = "deepseek-flash";
 const DEFAULT_BASE_URL = "https://api.deepseek.com";
 const MAX_TOOL_ROUNDS = 4;
 
@@ -56,6 +56,7 @@ interface DeepSeekChatCompletionResponse {
     message: {
       role: "assistant";
       content: string | null;
+      reasoning_content?: string | null;
       tool_calls?: DeepSeekToolCall[];
     };
     finish_reason: string;
