@@ -253,7 +253,11 @@ export function evaluateSlotRules(
   const targetDate = args.scheduledDate || "";
   const reqDate = targetDate || args.slotKey?.split("_")[0] || "";
 
-  // 1. Strict gap buffer per rider on the same date/slot (30 mins if round-trip, 15 mins for one-way)
+  // 1. Strict gap buffer per rider on the same date/slot.
+  //    30-min buffer applies ONLY to new round-trip requests (15 min travel +
+  //    15 min free customer waiting). One-way trips and deliveries always use
+  //    the 15-min gap — an existing nearby round-trip must never inflate the
+  //    requirement for a one-way request (Uwase 8:45 am incident, 2026-09-17).
   if (targetMin !== null) {
     const isNewRoundTrip = args.tripType === "round_trip";
     for (const b of riderActiveCandidates) {
@@ -262,8 +266,7 @@ export function evaluateSlotRules(
       if (isSameDay) {
         const existingMin = parseTimeToMinutes(b.scheduledTime);
         if (existingMin !== null) {
-          const isExistingRoundTrip = b.tripType === "round_trip";
-          const requiredGap = isNewRoundTrip || isExistingRoundTrip
+          const requiredGap = isNewRoundTrip
             ? MIN_BOOKING_GAP_MINUTES_ROUND_TRIP
             : MIN_BOOKING_GAP_MINUTES_ONE_WAY;
 
@@ -271,13 +274,12 @@ export function evaluateSlotRules(
           if (diff < requiredGap) {
             const canBatch = isCompatibleRouteBatch(b, args);
             if (!canBatch) {
-              const nextAvailableMin = existingMin + (isExistingRoundTrip ? MIN_BOOKING_GAP_MINUTES_ROUND_TRIP : (isNewRoundTrip ? MIN_BOOKING_GAP_MINUTES_ROUND_TRIP : MIN_BOOKING_GAP_MINUTES_ONE_WAY));
-              const suggestedTime = formatMinutesToTime(nextAvailableMin);
+              const nextAvailableMin = existingMin + requiredGap;
               return {
                 available: false,
                 conflictingBooking: b,
                 reason: "gap_violation",
-                suggestedTime,
+                suggestedTime: formatMinutesToTime(nextAvailableMin),
               };
             }
           }

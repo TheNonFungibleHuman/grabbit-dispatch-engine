@@ -11,7 +11,7 @@ import { formatError, logError, logInfo, logWarn } from "../log.ts";
 import { getOrderDraft } from "../orders/store.ts";
 import { getAvailabilitySnapshot } from "../schedule/availability.ts";
 import { getKnowledgeBundle } from "../admin/knowledge.ts";
-import { mauritiusDateIso } from "../time.ts";
+import { mauritiusDateIso, resolveRelativeDateWord } from "../time.ts";
 import {
   formatTranscriptForAgent,
   loadTranscript,
@@ -1207,16 +1207,36 @@ export async function executeAgentTool(args: {
 
       const value = parseToolArguments(args.toolArguments);
       const identifier = String(value.identifier || "").trim().toLowerCase();
-      const { listAllPreBookings, savePreBooking } = await import("../orders/pre-booking.ts");
+      const { listAllPreBookings, savePreBooking, isActiveStatus } = await import("../orders/pre-booking.ts");
       const bookings = await listAllPreBookings();
 
-      const found = bookings.find(
+      const cleanId = identifier.replace(/\D/g, "");
+      const candidates = bookings.filter(
         (b) =>
           b.id.toLowerCase() === identifier ||
           (b.kiloDeliveryId && b.kiloDeliveryId.toLowerCase() === identifier) ||
-          b.customerPhone.replace(/\D/g, "").includes(identifier.replace(/\D/g, "")) ||
-          (b.customerName && b.customerName.toLowerCase().includes(identifier)),
+          (cleanId.length > 4 && b.customerPhone.replace(/\D/g, "").includes(cleanId)) ||
+          (identifier.length > 2 && b.customerName && b.customerName.toLowerCase().includes(identifier)),
       );
+      if (candidates.length === 0) {
+        return { ok: false, error: `No booking found matching "${value.identifier}".` };
+      }
+
+      // Prefer ACTIVE + upcoming bookings; stale/completed and test records
+      // must never win a name/phone match by accident.
+      // (Sept 2026 incident: marking Customer A's Rs 50 payment resolved to an
+      // old "Test Customer" booking instead of his actual trip.)
+      const paidScore = (b: (typeof candidates)[number]): number => {
+        let s = 0;
+        if (isActiveStatus(b.status)) s += 40;
+        if (b.paymentStatus !== "paid") s += 30; // don't re-mark already-paid records
+        if (b.scheduledDate && b.scheduledDate >= (mauritiusDateIso() || "")) s += 50;
+        else s -= 20;
+        s += Date.parse(b.createdAt || "") / 1e13;
+        return s;
+      };
+      candidates.sort((a, b) => paidScore(b) - paidScore(a));
+      const found = candidates[0];
 
       if (!found) {
         return { ok: false, error: `No booking found matching "${value.identifier}".` };
@@ -1248,10 +1268,28 @@ export async function executeAgentTool(args: {
       const message = String(value.message || "");
 
       const rider = findRiderByName(target);
-      let channelUsed = "google_chat";
+      let channelUsed = "none";
 
-      // If target is a specific WhatsApp rider (Sherif, Thierry)
-      if (rider && rider.channel === "whatsapp" && rider.phone) {
+      const mirrorToGoogleChat = async (label: string): Promise<boolean> => {
+        const webhookUrl = process.env.GOOGLE_CHAT_WEBHOOK_URL?.trim();
+        if (!webhookUrl) return false;
+        try {
+          await fetch(webhookUrl, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              text: `📢 *ADMIN INSTRUCTION for ${label.toUpperCase()}*\nFrom Admin: ${message}\n_Grabbit Dispatch Team_`,
+            }),
+          });
+          return true;
+        } catch (err) {
+          logError("admin", "failed to dispatch rider instruction to google chat", err);
+          return false;
+        }
+      };
+
+      // WhatsApp is primary for every rider with a phone (Sherif, Thierry, Moses)
+      if (rider && rider.phone) {
         const cleanSender = args.senderPhone.replace(/\D/g, "");
         const cleanRider = rider.phone.replace(/\D/g, "");
         if (cleanSender === cleanRider) {
@@ -1259,10 +1297,12 @@ export async function executeAgentTool(args: {
             admin: rider.name,
             phone: rider.phone,
           });
+          // Still mirror to Google Chat for team visibility
+          const mirroredSelf = await mirrorToGoogleChat(rider.name);
           return {
             ok: true,
             target: rider.name,
-            channel: "self_admin",
+            channel: mirroredSelf ? "self_admin+google_chat" : "self_admin",
             message: `Acknowledged! You are the sender (${rider.name}), no redundant WhatsApp message sent to yourself.`,
           };
         }
@@ -1281,22 +1321,15 @@ export async function executeAgentTool(args: {
           text: `📢 *Admin Instruction*:\n${message}`,
         });
         channelUsed = `whatsapp (${rider.name} at ${rider.phone})`;
-      } else {
-        // Send to Google Chat (Moses, Google Chat space, or broadcast to all)
-        const webhookUrl = process.env.GOOGLE_CHAT_WEBHOOK_URL?.trim();
-        if (webhookUrl) {
-          try {
-            await fetch(webhookUrl, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                text: `📢 *ADMIN INSTRUCTION for ${target.toUpperCase()}*\nFrom Admin: ${message}\n_Grabbit Dispatch Team_`,
-              }),
-            });
-          } catch (err) {
-            logError("admin", "failed to dispatch broadcast to google chat", err);
-          }
-        }
+      }
+
+      // Google Chat mirror — ALWAYS, so the whole dispatch team stays in sync
+      const mirrored = await mirrorToGoogleChat(rider ? rider.name : target);
+      if (mirrored) {
+        channelUsed =
+          channelUsed === "none" ? "google_chat" : `${channelUsed}+google_chat`;
+      }
+      if (channelUsed === "none") {
         channelUsed = "google_chat";
       }
 
@@ -1341,17 +1374,34 @@ export async function executeAgentTool(args: {
 
       if (!bookingId && (value.customerNameOrPhone || value.customerName)) {
         const query = String(value.customerNameOrPhone || value.customerName).toLowerCase().trim();
-        const { listAllPreBookings } = await import("../orders/pre-booking.ts");
+        const { listAllPreBookings, isActiveStatus } = await import("../orders/pre-booking.ts");
         const all = await listAllPreBookings();
-        const match = all.find(
+        const candidates = all.filter(
           (b) =>
-            b.id === query ||
+            b.id.toLowerCase() === query ||
             (b.customerName && b.customerName.toLowerCase().includes(query)) ||
-            (b.customerPhone && b.customerPhone.includes(query)) ||
-            (b.kiloDeliveryId && b.kiloDeliveryId.toLowerCase().includes(query))
+            (b.customerPhone && query.replace(/\D/g, "").length > 4 && b.customerPhone.replace(/\D/g, "").includes(query.replace(/\D/g, ""))) ||
+            (b.kiloDeliveryId && b.kiloDeliveryId.toLowerCase().includes(query)),
         );
-        if (match) {
-          bookingId = match.id;
+        if (candidates.length > 0) {
+          // Admin updates overwhelmingly target ACTIVE, upcoming bookings.
+          // Never let a stale completed booking from an earlier date win by accident.
+          // (Sept 2026 incident: "Reassign Customer A to Moses" matched his Sept-1
+          // 12:45 pm booking instead of tomorrow's 8:15 am leg.)
+          const todayIso = mauritiusDateIso();
+          const dateHint = value.scheduledDate ? String(value.scheduledDate).trim() : "";
+          const hintIso = resolveRelativeDateWord(dateHint) || (/^\d{4}-\d{2}-\d{2}$/.test(dateHint) ? dateHint : undefined);
+          const score = (b: (typeof candidates)[number]): number => {
+            let s = 0;
+            if (isActiveStatus(b.status)) s += 40;
+            if (hintIso && b.scheduledDate === hintIso) s += 100;
+            if (b.scheduledDate && b.scheduledDate >= (todayIso || "")) s += 50; // today/future first
+            else s -= 20; // past bookings rank last
+            s += Date.parse(b.createdAt || "") / 1e13; // recency tie-break
+            return s;
+          };
+          candidates.sort((a, b) => score(b) - score(a));
+          bookingId = candidates[0].id;
         }
       }
 

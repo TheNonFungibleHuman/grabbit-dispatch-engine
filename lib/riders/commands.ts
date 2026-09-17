@@ -3,7 +3,7 @@ import { findLatestActiveBookingForRider, savePreBooking, type PreBooking } from
 import { sendCustomerText } from "../wasender/send-tracked.ts";
 import { readJson, writeJson } from "../blob/json-store.ts";
 import { formatError, logInfo, logWarn } from "../log.ts";
-import { mauritiusClockLabel } from "../time.ts";
+import { mauritiusClockLabel, parseTimeToMinutes } from "../time.ts";
 
 export interface RiderStatusState {
   breaks: Record<string, { onBreak: boolean; untilIso?: string; untilTimeStr?: string; startedAt: string }>;
@@ -12,6 +12,8 @@ export interface RiderStatusState {
     untilTimeStr: string;
     reason?: string;
     startedAt: string;
+    /** Hard epoch-ms deadline — maintenance can NEVER outlive this (phantom-pause guard). */
+    expiresAtMs?: number;
   };
 }
 
@@ -43,17 +45,49 @@ export async function getRiderBreakStatus(riderName: string): Promise<boolean> {
   }
 }
 
+/** Maintenance windows can never outlive this — phantom-pause hard cap. */
+const MAX_MAINTENANCE_WINDOW_MS = 12 * 60 * 60 * 1000; // 12 hours
+
+/**
+ * Converts a Mauritius wall-clock "until" label into a hard epoch-ms deadline.
+ * If the target time has already passed today, the window is treated as already
+ * expired (0 duration) — we never roll it forward into a day-long phantom pause.
+ */
+function computeMaintenanceExpiryMs(untilTimeStr: string, from = new Date()): number {
+  const targetMin = parseTimeToMinutes(untilTimeStr);
+  if (targetMin === null) {
+    return from.getTime() + 4 * 60 * 60 * 1000; // unparseable → bounded 4h fallback
+  }
+  const nowMin = from.getUTCHours() * 60 + from.getUTCMinutes() + 4 * 60; // Mauritius = UTC+4 (no DST)
+  const nowMinOfDay = nowMin % (24 * 60);
+  const deltaMin = targetMin - nowMinOfDay;
+  if (deltaMin <= 0) {
+    // "until 5:00 pm" requested after 5:00 pm — expired on arrival, no pause.
+    return from.getTime() - 1;
+  }
+  return from.getTime() + Math.min(deltaMin, 12 * 60) * 60 * 1000;
+}
+
 export async function setFleetMaintenanceWindow(untilTimeStr: string, reason?: string): Promise<void> {
   try {
+    const startedAt = new Date();
+    const rawExpiry = computeMaintenanceExpiryMs(untilTimeStr.trim(), startedAt);
+    const expiresAtMs = Math.min(rawExpiry, startedAt.getTime() + MAX_MAINTENANCE_WINDOW_MS);
     const state = (await readJson<RiderStatusState>(RIDER_STATUS_PATH)) || { breaks: {} };
     state.maintenance = {
-      active: true,
+      active: rawExpiry > Date.now(),
       untilTimeStr: untilTimeStr.trim(),
       reason: reason?.trim() || "Fleet maintenance",
-      startedAt: new Date().toISOString(),
+      startedAt: startedAt.toISOString(),
+      expiresAtMs: expiresAtMs,
     };
     await writeJson(RIDER_STATUS_PATH, state);
-    logInfo("riders", "set fleet maintenance window", { untilTimeStr, reason });
+    logInfo("riders", "set fleet maintenance window", {
+      untilTimeStr,
+      reason,
+      expiresAtMs: expiresAtMs,
+      maxWindowMs: MAX_MAINTENANCE_WINDOW_MS,
+    });
   } catch (err) {
     logWarn("riders", "failed to set fleet maintenance window", formatError(err));
   }
@@ -75,10 +109,36 @@ export async function clearFleetMaintenanceWindow(): Promise<void> {
 export async function getFleetMaintenanceStatus(): Promise<{ active: boolean; untilTimeStr?: string; reason?: string }> {
   try {
     const state = (await readJson<RiderStatusState>(RIDER_STATUS_PATH)) || { breaks: {} };
-    if (state.maintenance?.active) {
-      return { active: true, untilTimeStr: state.maintenance.untilTimeStr, reason: state.maintenance.reason };
+    const maint = state.maintenance;
+    if (!maint?.active) return { active: false };
+
+    // Phantom-pause guard: a maintenance window MUST auto-expire. Legacy
+    // entries without expiresAtMs fall back to startedAt + 12h hard cap.
+    // (Sept 2026 incidents: windows set by the agent lingered for days,
+    // rejecting real customers until an admin manually cleared them.)
+    const nowMs = Date.now();
+    const startedMs = Date.parse(maint.startedAt || "") || 0;
+    let expiresAt =
+      typeof maint.expiresAtMs === "number" && Number.isFinite(maint.expiresAtMs)
+        ? maint.expiresAtMs
+        : startedMs + MAX_MAINTENANCE_WINDOW_MS;
+    if (!Number.isFinite(expiresAt) || expiresAt <= 0) expiresAt = nowMs; // corrupt record → expire now
+    if (!Number.isFinite(startedMs) || startedMs <= 0) {
+      // No valid startedAt: only honour an explicit future expiry
+      if (expiresAt <= nowMs) expiresAt = nowMs;
     }
-    return { active: false };
+
+    if (nowMs >= expiresAt) {
+      maint.active = false;
+      await writeJson(RIDER_STATUS_PATH, state);
+      logInfo("riders", "maintenance window auto-expired", {
+        untilTimeStr: maint.untilTimeStr,
+        expiresAtMs: expiresAt,
+      });
+      return { active: false };
+    }
+
+    return { active: true, untilTimeStr: maint.untilTimeStr, reason: maint.reason };
   } catch {
     return { active: false };
   }

@@ -192,32 +192,9 @@ export async function notifyRiderOfReschedule(
     newTime: payload.newScheduledTime,
   });
 
-  // 1. Google Chat
-  if (rider.channel === "google_chat") {
-    const webhookUrl = process.env.GOOGLE_CHAT_WEBHOOK_URL?.trim();
-    if (webhookUrl) {
-      try {
-        const res = await fetch(webhookUrl, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            text: `*Grabbit Dispatch Update for ${rider.name}*\n${messageText}`,
-          }),
-        });
-        if (res.ok) {
-          logInfo("riders", "google chat webhook reschedule notification sent", {
-            rider: rider.name,
-          });
-          return { ok: true, channel: "google_chat" };
-        }
-      } catch (err) {
-        logError("riders", "failed to send google chat webhook", err);
-      }
-    }
-  }
-
-  // 2. WhatsApp
+  // 1. WhatsApp (primary for Thierry, Sherif, Moses)
   const targetPhone = process.env.TEST_RIDER_PHONE?.trim() || rider.phone;
+  let whatsappSent = false;
   if (targetPhone && rider.channel === "whatsapp") {
     try {
       await sendCustomerText({
@@ -225,13 +202,29 @@ export async function notifyRiderOfReschedule(
         text: messageText,
         messageId: `rider_reschedule_${payload.bookingId}_${Date.now()}`,
       });
-      return { ok: true, channel: "whatsapp" };
+      whatsappSent = true;
     } catch (err) {
-      return { ok: false, channel: "whatsapp", error: String(formatError(err).message || err) };
+      logError("riders", "failed to send reschedule whatsapp to rider", err);
     }
   }
 
-  return { ok: true, channel: "logged" };
+  // 2. Google Chat mirror — ALWAYS, so the whole dispatch team stays in sync
+  const webhookUrl = process.env.GOOGLE_CHAT_WEBHOOK_URL?.trim();
+  if (webhookUrl) {
+    try {
+      await fetch(webhookUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          text: `*Grabbit Dispatch Update for ${rider.name}*\n${messageText}`,
+        }),
+      });
+    } catch (err) {
+      logError("riders", "failed to send reschedule mirror to google chat", err);
+    }
+  }
+
+  return { ok: true, channel: whatsappSent ? "whatsapp+google_chat" : "google_chat" };
 }
 
 export interface RiderOrderUpdatePayload {
@@ -277,29 +270,9 @@ export async function notifyRiderOfOrderUpdate(
     addedItem: payload.addedItem,
   });
 
-  // 1. Google Chat
-  if (rider.channel === "google_chat") {
-    const webhookUrl = process.env.GOOGLE_CHAT_WEBHOOK_URL?.trim();
-    if (webhookUrl) {
-      try {
-        const res = await fetch(webhookUrl, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            text: `*Grabbit Order Update for ${rider.name}*\n${messageText}`,
-          }),
-        });
-        if (res.ok) {
-          return { ok: true, channel: "google_chat" };
-        }
-      } catch (err) {
-        logError("riders", "failed to send google chat update", err);
-      }
-    }
-  }
-
-  // 2. WhatsApp
+  // 1. WhatsApp (primary for Thierry, Sherif, Moses)
   const targetPhone = process.env.TEST_RIDER_PHONE?.trim() || rider.phone;
+  let whatsappSent = false;
   if (targetPhone && rider.channel === "whatsapp") {
     try {
       await sendCustomerText({
@@ -307,13 +280,29 @@ export async function notifyRiderOfOrderUpdate(
         text: messageText,
         messageId: `rider_item_update_${payload.bookingId}_${Date.now()}`,
       });
-      return { ok: true, channel: "whatsapp" };
+      whatsappSent = true;
     } catch (err) {
-      return { ok: false, channel: "whatsapp", error: String(formatError(err).message || err) };
+      logError("riders", "failed to send order-update whatsapp to rider", err);
     }
   }
 
-  return { ok: true, channel: "logged" };
+  // 2. Google Chat mirror — ALWAYS, so the whole dispatch team stays in sync
+  const webhookUrl = process.env.GOOGLE_CHAT_WEBHOOK_URL?.trim();
+  if (webhookUrl) {
+    try {
+      await fetch(webhookUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          text: `*Grabbit Order Update for ${rider.name}*\n${messageText}`,
+        }),
+      });
+    } catch (err) {
+      logError("riders", "failed to send order-update mirror to google chat", err);
+    }
+  }
+
+  return { ok: true, channel: whatsappSent ? "whatsapp+google_chat" : "google_chat" };
 }
 
 
@@ -341,40 +330,37 @@ export async function notifyRiderCustomerInquiry(args: {
 
   logInfo("riders", "dispatching customer inquiry to rider", { rider: rider.name, inquiry: args.inquiry });
 
-  if (rider.channel === "google_chat") {
-    const webhookUrl = process.env.GOOGLE_CHAT_WEBHOOK_URL?.trim();
-    if (webhookUrl) {
-      try {
-        await fetch(webhookUrl, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ text: `*Grabbit Customer Alert for ${rider.name}*\n${messageText}` }),
-        });
-        return { ok: true, channel: "google_chat" };
-      } catch (err) {
-        logError("riders", "failed to send inquiry to google chat", err);
-      }
+  // 1. WhatsApp (primary for Thierry, Sherif, Moses)
+  const targetPhone = process.env.TEST_RIDER_PHONE?.trim() || rider.phone;
+  let whatsappSent = false;
+  if (targetPhone && rider.channel === "whatsapp") {
+    try {
+      await sendCustomerText({
+        to: targetPhone,
+        text: messageText,
+        messageId: `inquiry_${args.bookingId || Date.now()}`,
+      });
+      whatsappSent = true;
+    } catch (err) {
+      logError("riders", "failed to send inquiry ping to whatsapp rider", err);
     }
   }
 
-  if (rider.channel === "whatsapp") {
-    const targetPhone = process.env.TEST_RIDER_PHONE?.trim() || rider.phone;
-    if (targetPhone) {
-      try {
-        await sendCustomerText({
-          to: targetPhone,
-          text: messageText,
-          messageId: `inquiry_${args.bookingId || Date.now()}`,
-        });
-        logInfo("riders", "whatsapp customer-inquiry ping sent to rider", { rider: rider.name });
-        return { ok: true, channel: "whatsapp" };
-      } catch (err) {
-        logError("riders", "failed to send inquiry ping to whatsapp rider", err);
-      }
+  // 2. Google Chat mirror — ALWAYS, so the whole dispatch team stays in sync
+  const webhookUrl = process.env.GOOGLE_CHAT_WEBHOOK_URL?.trim();
+  if (webhookUrl) {
+    try {
+      await fetch(webhookUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: `*Grabbit Customer Alert for ${rider.name}*\n${messageText}` }),
+      });
+    } catch (err) {
+      logError("riders", "failed to send inquiry mirror to google chat", err);
     }
   }
 
-  return { ok: true, channel: "logged" };
+  return { ok: true, channel: whatsappSent ? "whatsapp+google_chat" : "google_chat" };
 
 }
 
@@ -528,21 +514,9 @@ export async function notifyRiderRideReminder(args: {
 
   logInfo("riders", "dispatching 25-min reminder to rider", { rider: rider.name, time: args.scheduledTime });
 
-  if (rider.channel === "google_chat") {
-    const webhookUrl = process.env.GOOGLE_CHAT_WEBHOOK_URL?.trim();
-    if (webhookUrl) {
-      try {
-        await fetch(webhookUrl, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ text: `*Reminder for ${rider.name}*\n${messageText}` }),
-        });
-      } catch (err) {
-        logError("riders", "failed to send reminder to google chat", err);
-      }
-    }
-  } else if (rider.channel === "whatsapp" && rider.phone) {
-    // Send 25-min reminder to WhatsApp riders (Thierry, Sherif)
+  // 1. WhatsApp (primary for Thierry, Sherif, Moses)
+  let whatsappSent = false;
+  if (rider.phone && rider.channel === "whatsapp") {
     try {
       const { sendCustomerText } = await import("../wasender/send-tracked.ts");
       await sendCustomerText({
@@ -550,10 +524,29 @@ export async function notifyRiderRideReminder(args: {
         text: messageText,
         messageId: `reminder_${rider.name.toLowerCase()}_${Date.now()}`,
       });
+      whatsappSent = true;
       logInfo("riders", "dispatched 25-min reminder via whatsapp", { rider: rider.name });
     } catch (err) {
       logError("riders", "failed to send reminder to whatsapp rider", err);
     }
+  }
+
+  // 2. Google Chat mirror — ALWAYS, so the whole dispatch team stays in sync
+  const webhookUrl = process.env.GOOGLE_CHAT_WEBHOOK_URL?.trim();
+  if (webhookUrl) {
+    try {
+      await fetch(webhookUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: `*Reminder for ${rider.name}*\n${messageText}` }),
+      });
+    } catch (err) {
+      logError("riders", "failed to send reminder mirror to google chat", err);
+    }
+  }
+
+  if (!whatsappSent && !webhookUrl) {
+    logWarn("riders", "25-min reminder could not be delivered on any channel", { rider: rider.name });
   }
 
   return { ok: true };

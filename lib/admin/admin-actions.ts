@@ -27,7 +27,7 @@ export async function setPendingAdminAction(
   adminPhone: string,
   type: AdminActionType,
   payload: Record<string, unknown> = {},
-  ttlMinutes = 240, // 4 hours valid
+  ttlMinutes = 30, // 30 min — stale previews must never hijack unrelated admin replies
 ): Promise<void> {
   const cleanPhone = normalizePhone(adminPhone);
   const store = (await readJson<AdminActionsStore>(PENDING_ACTIONS_PATH)) || { actions: {} };
@@ -79,6 +79,20 @@ export async function consumePendingAdminAction(
 
   const cleanText = text.trim().toLowerCase().replace(/[^a-z0-9 ]/g, "");
 
+  // Guard: if the admin's message clearly carries booking/dispatch intent, it is
+  // NOT a report confirmation — never consume it here; let the agent handle it.
+  // (Uwase incident 2026-09-17: admin's "Yes" meant "book the 8:45 am trip" but
+  // a stale rundown preview swallowed it and posted the revenue rundown.)
+  const hasBookingIntent =
+    /\b(book|booking|reassign|reschedule|trip|ride|delivery|slot|rider|customer)\b/i.test(text) ||
+    /\d{1,2}[:.]?\d{0,2}\s*(am|pm)/i.test(text);
+  if (hasBookingIntent) {
+    await clearPendingAdminAction(adminPhone);
+    return { handled: false };
+  }
+
+  // Bare affirmative tokens ONLY. Prefix matching (e.g. startsWith("yes")) made
+  // any admin sentence beginning with "yes" act as a report approval.
   const isAffirmative =
     cleanText === "yes" ||
     cleanText === "y" ||
@@ -88,9 +102,8 @@ export async function consumePendingAdminAction(
     cleanText === "ok" ||
     cleanText === "looks good" ||
     cleanText === "go ahead" ||
-    cleanText.startsWith("yes") ||
-    cleanText.startsWith("send it") ||
-    cleanText.startsWith("post it");
+    cleanText === "send it" ||
+    cleanText === "post it";
 
   const isNegative =
     cleanText === "no" ||
@@ -100,6 +113,23 @@ export async function consumePendingAdminAction(
     cleanText.startsWith("cancel");
 
   if (!isAffirmative && !isNegative) {
+    return { handled: false };
+  }
+
+  // Recency guard: only treat a bare confirmation as a report approval while the
+  // pending action is FRESH (<=15 min old). A stale preview must never hijack a
+  // "Yes" that actually answers an unrelated question — the agent has full
+  // conversation context and should handle it instead.
+  // (Uwase incident 2026-09-17: the 17:13 rundown preview swallowed the admin's
+  // 18:13 "Yes", which was meant to approve booking her 8:45 am trip.)
+  const actionAgeMs = Date.now() - (Date.parse(action.createdAt) || 0);
+  const isStale = actionAgeMs > 15 * 60 * 1000 || actionAgeMs < 0;
+  if (isAffirmative && isStale) {
+    await clearPendingAdminAction(adminPhone);
+    logInfo("admin_actions", "stale pending admin action ignored — deferring to agent", {
+      type: action.type,
+      ageMinutes: Math.round(actionAgeMs / 60_000),
+    });
     return { handled: false };
   }
 

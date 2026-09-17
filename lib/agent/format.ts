@@ -74,7 +74,9 @@ export function isShortAcknowledgement(text: string): boolean {
   return (
     /^(nice|ok|okay|k|kk|cool|great|perfect|thanks|thank you|thank u|thx|ty|noted|cheers|appreciate it|much appreciated)$/i.test(
       cleaned,
-    ) || /^(thanks|thank you|thx|ty)\b/.test(cleaned)
+    ) ||
+    /^(thanks|thank you|thx|ty)\b/i.test(cleaned) ||
+    /^(?:ok|okay)\s+(?:thanks|thank you|thx|ty|noted)\b/i.test(cleaned)
   );
 }
 
@@ -120,5 +122,46 @@ export function isBareGreeting(text: string): boolean {
   }
 
   return false;
+}
+
+/**
+ * Sanitizes a customer pushName for natural WhatsApp greetings.
+ * Rejects internet handles, usernames with digits/underscores (e.g. "jwangirl07"),
+ * and extracts a clean, title-cased first name.
+ */
+export function cleanCustomerGreetingName(pushName?: string): string | undefined {
+  if (!pushName || !pushName.trim()) return undefined;
+
+  const raw = pushName.trim();
+
+  // 1. Reject handles containing digits, underscores, or handle symbols (e.g. "jwangirl07", "@john", "rider_01")
+  if (/\d/.test(raw) || /[_@\\/]/.test(raw) || raw.startsWith("@")) {
+    return undefined;
+  }
+
+  // 2. Strip emojis and pictographic symbols
+  let cleaned = raw
+    .replace(/[\p{Emoji_Presentation}\p{Extended_Pictographic}]/gu, "")
+    .trim();
+
+  // 3. Strip surrounding non-alphanumeric decoration (e.g. "🌸 Sadia 🌸" -> "Sadia")
+  cleaned = cleaned.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, "").trim();
+
+  // 4. Strip common prefixes like "Emp."
+  cleaned = cleaned.replace(/^(?:emp|dr|mr|mrs|ms)[.\s]+/i, "").trim();
+
+  // 5. Take first name token
+  const first = cleaned.split(/\s+/)[0];
+  if (!first || first.length < 2 || first.length > 25) {
+    return undefined;
+  }
+
+  // 6. Ensure token is purely alphabetical
+  if (!/^[a-zA-ZÀ-ÿ'-]+$/.test(first)) {
+    return undefined;
+  }
+
+  // 7. Normalize casing: Title Case (e.g. "felicia" -> "Felicia", "SADIA" -> "Sadia")
+  return first.charAt(0).toUpperCase() + first.slice(1).toLowerCase();
 }
 

@@ -30,8 +30,11 @@ export const FLEET_RIDERS: RiderProfile[] = [
     name: "Moses",
     aliases: ["moses", "moses kolaan"],
     kiloRiderId: "00000000-0000-0000-0000-0000000000a3",
+    phone: "+999000000007",
     email: "rider.three@example.com",
-    channel: "google_chat",
+    // Primary delivery is now WhatsApp; Google Chat remains as a mirror for
+    // full dispatch-team visibility (notification senders always post there).
+    channel: "whatsapp",
   },
 ];
 

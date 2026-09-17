@@ -1,5 +1,10 @@
 import { generateAgentReply } from "./deepseek.ts";
-import { isBareGreeting, isShortAcknowledgement, sanitizeWhatsAppText } from "./format.ts";
+import {
+  cleanCustomerGreetingName,
+  isBareGreeting,
+  isShortAcknowledgement,
+  sanitizeWhatsAppText,
+} from "./format.ts";
 import { formatError, logError, logInfo, logWarn } from "../log.ts";
 import { persistIncomingPackageImage } from "../media/wasender.ts";
 import { addPackageImageToDraft } from "../orders/store.ts";
@@ -318,7 +323,8 @@ export async function processIncomingUserMessage(
 
 
       if (!hasRecentActiveFlow) {
-        const namePart = message.pushName?.trim() ? ` ${message.pushName.trim()}` : "";
+        const cleanName = cleanCustomerGreetingName(message.pushName);
+        const namePart = cleanName ? ` ${cleanName}` : "";
         const greetingText = `👋 Welcome to Grabbit Express${namePart}! ⚡\nMauritius' on-demand electric delivery & passenger ride service.\n\nHow can we help you today? Let us know if you need a passenger ride, food delivery, or errand/package pickup! 😊`;
 
         // Record customer message if not already recorded by webhook handler
@@ -358,6 +364,7 @@ export async function processIncomingUserMessage(
           sender: message.sender,
           messageId: message.messageId,
           pushName: message.pushName,
+          cleanName,
         });
         return;
       }
@@ -372,7 +379,27 @@ export async function processIncomingUserMessage(
     try {
       const transcript = await loadTranscript(message.sender);
       const hadPauseGap = recentDisabledCustomerMessages(transcript).length > 0;
-      if (isInQuietWindow(transcript) || hadPauseGap) {
+
+      // CRITICAL CHECK: Never fire "You're welcome!" if there is an active escalation
+      // or if the dispatcher/agent just asked a question or sent an escalation notice.
+      const { getOpenCustomerEscalation } = await import("../ops/store.ts");
+      const openEscalation = await getOpenCustomerEscalation(message.sender);
+
+      const agentEntries = transcript.entries.filter((e) => e.role === "agent");
+      const lastAgentText = (agentEntries[agentEntries.length - 1]?.text || "").toLowerCase();
+      const isAwaitingResolution = Boolean(
+        openEscalation ||
+        lastAgentText.includes("escalated") ||
+        lastAgentText.includes("reviewing your request") ||
+        lastAgentText.includes("dispatcher will be with you") ||
+        lastAgentText.includes("?") ||
+        lastAgentText.includes("which exact") ||
+        lastAgentText.includes("mind sending") ||
+        lastAgentText.includes("what time") ||
+        lastAgentText.includes("cash or transfer")
+      );
+
+      if (!isAwaitingResolution && (isInQuietWindow(transcript) || hadPauseGap)) {
         await sendAndRecord({
           to,
           sender: message.sender,
@@ -389,6 +416,57 @@ export async function processIncomingUserMessage(
     } catch (error) {
       logWarn("agent", "short-ack path failed; continuing normal reply", formatError(error));
     }
+  }
+
+  // Rapid post-booking follow-up handler:
+  // If a booking was confirmed in the last 90s and the customer immediately sends
+  // a short message confirming payment method or reassurance (e.g. "Payment in cash", "Cash", "Please"),
+  // acknowledge concisely rather than regenerating a duplicate full-page confirmation card.
+  try {
+    const transcript = await loadTranscript(message.sender);
+    const lastBookingTs = transcript.lastBookingAt ? Date.parse(transcript.lastBookingAt) : 0;
+    const isRecentBooking = Number.isFinite(lastBookingTs) && now - lastBookingTs < 90_000;
+    if (isRecentBooking) {
+      const cleaned = (message.text || "")
+        .trim()
+        .toLowerCase()
+        .replace(/[!?.,👋✨⚡😊🛵☀🙏👍👌]+/gu, "")
+        .trim();
+
+      const isPaymentAck = /^(?:payment\s+(?:in\s+)?(?:cash|transfer|juice)|(?:in\s+)?cash|juice|transfer|by\s+cash|cash\s+payment|cash\s+please)$/i.test(cleaned);
+      const isUrgencyAck = /^(?:please|pls|please\s+book\s+it|confirm\s+it)$/i.test(cleaned);
+
+      if (isPaymentAck) {
+        const isTransfer = /juice|transfer/i.test(cleaned);
+        const paymentLabel = isTransfer ? "transfer via Juice / MCB" : "cash to the rider";
+        await sendAndRecord({
+          to,
+          sender: message.sender,
+          text: `Noted, payment in ${paymentLabel}! Have a great ride 🛵⚡`,
+          messageId: message.messageId,
+        });
+        logInfo("agent", "acknowledged post-booking payment method follow-up concisely", {
+          sender: message.sender,
+          paymentLabel,
+        });
+        return;
+      }
+
+      if (isUrgencyAck) {
+        await sendAndRecord({
+          to,
+          sender: message.sender,
+          text: "Already locked in for you! Your rider is confirmed. See you soon! 🛵⚡",
+          messageId: message.messageId,
+        });
+        logInfo("agent", "acknowledged post-booking urgency follow-up concisely", {
+          sender: message.sender,
+        });
+        return;
+      }
+    }
+  } catch (burstErr) {
+    logWarn("agent", "post-booking burst follow-up check skipped", formatError(burstErr));
   }
 
   const reply = await generateAgentReply({

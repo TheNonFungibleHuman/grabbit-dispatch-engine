@@ -108,7 +108,8 @@ export async function sendDailyMorningBriefings(now = new Date()): Promise<{
 
       state.riderSummaries[rider.name] = schedule.briefingText;
 
-      if (rider.channel === "whatsapp" && rider.phone) {
+      // WhatsApp is primary for all riders (Thierry, Sherif, Moses)
+      if (rider.phone) {
         await sendCustomerText({
           to: rider.phone,
           text: schedule.briefingText,
@@ -116,21 +117,25 @@ export async function sendDailyMorningBriefings(now = new Date()): Promise<{
         results[rider.name] = true;
         sentCount++;
         logInfo("briefing", "dispatched morning briefing via whatsapp", { rider: rider.name });
-      } else {
-        // Google Chat webhook for Moses / Group
-        const webhookUrl = process.env.GOOGLE_CHAT_WEBHOOK_URL?.trim();
-        if (webhookUrl) {
-          const gchatText = `*MORNING SHIFT BRIEFING: ${rider.name.toUpperCase()}*\n\n${schedule.briefingText}`;
-          await fetch(webhookUrl, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ text: gchatText }),
-          });
-        }
-        results[rider.name] = true;
-        sentCount++;
-        logInfo("briefing", "dispatched morning briefing via google chat", { rider: rider.name });
       }
+
+      // Google Chat mirror — ALWAYS, so the whole dispatch team stays in sync
+      const webhookUrl = process.env.GOOGLE_CHAT_WEBHOOK_URL?.trim();
+      if (webhookUrl) {
+        const gchatText = `*MORNING SHIFT BRIEFING: ${rider.name.toUpperCase()}*\n\n${schedule.briefingText}`;
+        await fetch(webhookUrl, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text: gchatText }),
+        });
+      }
+      results[rider.name] = true;
+      sentCount++;
+      logInfo("briefing", "dispatched morning briefing", {
+        rider: rider.name,
+        whatsapp: Boolean(rider.phone),
+        googleChatMirror: Boolean(webhookUrl),
+      });
     } catch (err) {
       logWarn("briefing", "failed to send morning briefing to rider", {
         rider: rider.name,

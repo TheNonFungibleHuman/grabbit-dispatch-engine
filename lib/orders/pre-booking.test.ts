@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { FLEET_RIDERS, findRiderByName, findRiderByPhone, getCustomTrackingUrl } from "../riders/config.ts";
-import { checkSlotAvailability, classifyRiderAcceptDecline, createPreBookingRequest, handleRiderReply, listAllPreBookings } from "./pre-booking.ts";
+import { checkSlotAvailability, classifyRiderAcceptDecline, createPreBookingRequest, evaluateSlotRules, handleRiderReply, listAllPreBookings } from "./pre-booking.ts";
 
 describe("rider directory & custom tracking", () => {
   it("resolves riders by name, alias, and phone", () => {
@@ -1107,3 +1107,65 @@ describe("Goodie Incident Regressions: addItemToActiveBooking, recordPaymentProo
 });
 
 
+
+
+describe("30-min gap scope (Uwase regression, 2026-09-17)", () => {
+  const existingRoundTrip = {
+    id: "pb_round_9am",
+    status: "confirmed",
+    assignedRider: "Moses",
+    scheduledDate: "2026-09-18",
+    scheduledTime: "9:00 am",
+    serviceKind: "trip",
+    tripType: "round_trip",
+  };
+
+  it("allows a one-way trip 15 minutes before an existing round trip", () => {
+    const res = evaluateSlotRules([existingRoundTrip], {
+      slotKey: "2026-09-18_08:00-09:00",
+      assignedRider: "Moses",
+      scheduledDate: "2026-09-18",
+      scheduledTime: "8:45 am",
+      serviceKind: "trip",
+      tripType: "one_way",
+    });
+    assert.equal(res.available, true, "one-way at 8:45 vs round-trip at 9:00 must be bookable (15-min gap)");
+  });
+
+  it("still enforces the 30-min buffer for round-trip requests", () => {
+    const res = evaluateSlotRules([existingRoundTrip], {
+      slotKey: "2026-09-18_09:00-10:00",
+      assignedRider: "Moses",
+      scheduledDate: "2026-09-18",
+      scheduledTime: "9:15 am",
+      serviceKind: "trip",
+      tripType: "round_trip",
+    });
+    assert.equal(res.available, false);
+    assert.equal(res.reason, "gap_violation");
+    assert.equal(res.suggestedTime, "9:30 am");
+  });
+
+  it("enforces the 15-min gap for one-way vs one-way", () => {
+    const res = evaluateSlotRules(
+      [
+        {
+          ...existingRoundTrip,
+          id: "pb_one_9am",
+          tripType: "one_way",
+        },
+      ],
+      {
+        slotKey: "2026-09-18_09:00-10:00",
+        assignedRider: "Moses",
+        scheduledDate: "2026-09-18",
+        scheduledTime: "9:10 am",
+        serviceKind: "trip",
+        tripType: "one_way",
+      },
+    );
+    assert.equal(res.available, false);
+    assert.equal(res.reason, "gap_violation");
+    assert.equal(res.suggestedTime, "9:15 am");
+  });
+});

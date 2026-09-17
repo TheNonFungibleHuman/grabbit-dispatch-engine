@@ -47,8 +47,8 @@ export async function POST(request: Request) {
       googleChatWebhookConfigured: Boolean(process.env.GOOGLE_CHAT_WEBHOOK_URL),
       testResult,
       message: testResult.ok
-        ? `Successfully sent Google Chat notification to Moses!`
-        : `Notification failed: ${testResult.error || "Check GOOGLE_CHAT_WEBHOOK_URL"}`,
+        ? `Successfully sent Moses a WhatsApp notification (+999000000007) and mirrored it to Google Chat!`
+        : `Notification failed: ${testResult.error || "Check WASENDER_API_KEY / GOOGLE_CHAT_WEBHOOK_URL"}`,
     });
   }
 

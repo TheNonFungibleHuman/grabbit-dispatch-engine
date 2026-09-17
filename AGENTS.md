@@ -32,7 +32,7 @@ This repository (`grabbit-agent`) is the **fully autonomous WhatsApp Dispatcher 
 | **AI LLM Brain** | **DeepSeek API** (`deepseek-chat`) | High-speed, token-lean reasoning with structured tool calling (`DEEPSEEK_AGENT_TOOLS`). |
 | **Logistics / Deliveries** | **Kilo Business API** + Internal Engine | Kilo delivery creation (`KILO_API_KEY`) & custom pre-booking store. |
 | **Database & State Store** | **Supabase JSON Store** / **Vercel Blob** | Persistent storage for bookings, transcripts, customer memory, and fleet statuses. |
-| **Fleet Notifications** | **WhatsApp & Google Chat Webhook** | Dispatches to Thierry/Sherif via WhatsApp; Moses & Space alerts via Google Chat. |
+| **Fleet Notifications** | **WhatsApp & Google Chat Webhook** | Dispatches to Thierry/Sherif/Moses via WhatsApp; every notice is mirrored to the Google Chat space for full team visibility. |
 | **Testing** | **Node.js Native Test Runner** | 68 automated unit & integration tests (`npm test`). |
 
 ---

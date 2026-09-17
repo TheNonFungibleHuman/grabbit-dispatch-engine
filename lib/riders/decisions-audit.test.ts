@@ -10,7 +10,7 @@ import {
 } from "./commands.ts";
 import { getRiderForTargetSlot } from "../schedule/availability.ts";
 import { handleWasenderEvent } from "../wasender/handlers.ts";
-import { mauritiusDateIso } from "../time.ts";
+import { mauritiusDateIso, mauritiusMinutesOfDay, formatMinutesToTime } from "../time.ts";
 
 describe("Decision A2: WhatsApp Interactive Buttons & Poll Voting for Rider Dispatch", () => {
   it("correctly classifies interactive button strings with emojis", () => {
@@ -100,11 +100,13 @@ describe("Decision A4: Fleet Maintenance Window & Emergency Pause", () => {
     const now = new Date();
     const todayIso = mauritiusDateIso(now);
 
-    // 1. Set maintenance window until 11:59 pm
-    await setFleetMaintenanceWindow("11:59 pm", "Heavy Rain & Flooding");
+    // 1. Set maintenance window until 1 hour from now (dynamic so the
+    //    hard-expiry guard can never expire it mid-test)
+    const windowMin = Math.min(mauritiusMinutesOfDay(now) + 60, 23 * 60 + 58);
+    await setFleetMaintenanceWindow(formatMinutesToTime(windowMin), "Heavy Rain & Flooding");
     const status = await getFleetMaintenanceStatus();
     assert.equal(status.active, true);
-    assert.equal(status.untilTimeStr, "11:59 pm");
+    assert.equal(status.untilTimeStr, formatMinutesToTime(windowMin));
     assert.equal(status.reason, "Heavy Rain & Flooding");
 
     // 2. Query target slot for today during maintenance window
@@ -722,5 +724,33 @@ describe("Poll Eradication & Repetitive Question Loop Breaker", () => {
     assert.ok(loopFix, "must detect repetitive question loop and return circuit breaker fix");
     assert.match(loopFix, /Aksum|drop-off/i);
     assert.doesNotMatch(loopFix, /could you share the specific gate/i);
+  });
+});
+
+
+describe("Fleet Maintenance Phantom-Pause Guard (Sept 2026 incidents)", () => {
+  it("auto-expires a window whose deadline has passed", async () => {
+    const pastLabel = formatMinutesToTime(Math.max(mauritiusMinutesOfDay(new Date()) - 2, 0));
+    await setFleetMaintenanceWindow(pastLabel, "Already-passed window");
+    const status = await getFleetMaintenanceStatus();
+    assert.equal(status.active, false, "a window set for a past time must not pause the fleet");
+    await clearFleetMaintenanceWindow();
+  });
+
+  it("auto-expires legacy entries with no explicit expiry (started > 12h ago)", async () => {
+    const { writeJson } = await import("../blob/json-store.ts");
+    await clearFleetMaintenanceWindow();
+    await writeJson("grabbit/riders/status.json", {
+      breaks: {},
+      maintenance: {
+        active: true,
+        untilTimeStr: "5:00 pm",
+        reason: "phantom pause from Sept 14",
+        startedAt: new Date(Date.now() - 13 * 60 * 60 * 1000).toISOString(),
+      },
+    });
+    const status = await getFleetMaintenanceStatus();
+    assert.equal(status.active, false, "legacy window older than 12h must auto-expire");
+    await clearFleetMaintenanceWindow();
   });
 });
