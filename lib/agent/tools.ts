@@ -769,6 +769,72 @@ function asBookArgs(value: unknown): BookDeliveryToolArgs {
   return args as unknown as BookDeliveryToolArgs;
 }
 
+// Shared booking-resolution helpers: production lookups must not resolve to sandbox records.
+
+/** Test/sandbox records that must never win a production booking lookup. */
+const TEST_BOOKING_MARKERS = [/^test\b/i, /\btest customer\b/i, /\btest trip\b/i];
+
+/**
+ * True for sandbox/test bookings such as "Test Customer" or TEST Kilo records.
+ * Production lookups deprioritize these so an admin instruction about a real
+ * customer can never resolve to a test record when a live booking also matches.
+ * Test-record deletion still works through admin_cancel_or_delete_booking, which
+ * intentionally matches those records.
+ */
+export function isTestBookingRecord(input: {
+  customerName?: string | null;
+  kiloDeliveryId?: string | null;
+  id?: string | null;
+}): boolean {
+  const haystack = [input.customerName, input.kiloDeliveryId, input.id]
+    .filter(Boolean)
+    .join(" | ");
+  if (!haystack) return false;
+  return TEST_BOOKING_MARKERS.some((pattern) => pattern.test(haystack));
+}
+
+function rankProductionBookingCandidates<T extends {
+  status?: string;
+  scheduledDate?: string | null;
+  createdAt?: string | null;
+}>(candidates: T[], hintIso?: string | null): T[] {
+  const todayIso = mauritiusDateIso();
+  return [...candidates]
+    .map((candidate, index) => {
+      let score = 0;
+      if (candidate.status === "confirmed" || candidate.status === "active") score += 2;
+      if (hintIso && candidate.scheduledDate === hintIso) score += 3;
+      if (candidate.scheduledDate && candidate.scheduledDate >= todayIso) score += 2;
+      const createdMs = Date.parse(candidate.createdAt || "");
+      return { candidate, index, score, createdMs };
+    })
+    .sort((a, b) => {
+      if (b.score !== a.score) return b.score - a.score;
+      const aTime = Number.isFinite(a.createdMs) ? a.createdMs : 0;
+      const bTime = Number.isFinite(b.createdMs) ? b.createdMs : 0;
+      if (aTime !== bTime) return bTime - aTime;
+      return a.index - b.index;
+    })
+    .map((entry) => entry.candidate);
+}
+
+function pickProductionBooking<T extends {
+  id?: string | null;
+  customerName?: string | null;
+  kiloDeliveryId?: string | null;
+  status?: string;
+  scheduledDate?: string | null;
+  createdAt?: string | null;
+}>(candidates: T[], hintIso?: string | null): T | null {
+  if (candidates.length === 0) return null;
+  const liveCandidates = candidates.filter((candidate) => !isTestBookingRecord(candidate));
+  const ranked = rankProductionBookingCandidates(
+    liveCandidates.length > 0 ? liveCandidates : candidates,
+    hintIso,
+  );
+  return ranked[0] || null;
+}
+
 export async function executeAgentTool(args: {
   name: string;
   toolArguments: unknown;
@@ -1226,17 +1292,7 @@ export async function executeAgentTool(args: {
       // must never win a name/phone match by accident.
       // (Sept 2026 incident: marking Customer A's Rs 50 payment resolved to an
       // old "Test Customer" booking instead of his actual trip.)
-      const paidScore = (b: (typeof candidates)[number]): number => {
-        let s = 0;
-        if (isActiveStatus(b.status)) s += 40;
-        if (b.paymentStatus !== "paid") s += 30; // don't re-mark already-paid records
-        if (b.scheduledDate && b.scheduledDate >= (mauritiusDateIso() || "")) s += 50;
-        else s -= 20;
-        s += Date.parse(b.createdAt || "") / 1e13;
-        return s;
-      };
-      candidates.sort((a, b) => paidScore(b) - paidScore(a));
-      const found = candidates[0];
+      const found = pickProductionBooking(candidates);
 
       if (!found) {
         return { ok: false, error: `No booking found matching "${value.identifier}".` };
@@ -1374,7 +1430,7 @@ export async function executeAgentTool(args: {
 
       if (!bookingId && (value.customerNameOrPhone || value.customerName)) {
         const query = String(value.customerNameOrPhone || value.customerName).toLowerCase().trim();
-        const { listAllPreBookings, isActiveStatus } = await import("../orders/pre-booking.ts");
+        const { listAllPreBookings } = await import("../orders/pre-booking.ts");
         const all = await listAllPreBookings();
         const candidates = all.filter(
           (b) =>
@@ -1388,20 +1444,12 @@ export async function executeAgentTool(args: {
           // Never let a stale completed booking from an earlier date win by accident.
           // (Sept 2026 incident: "Reassign Customer A to Moses" matched his Sept-1
           // 12:45 pm booking instead of tomorrow's 8:15 am leg.)
-          const todayIso = mauritiusDateIso();
           const dateHint = value.scheduledDate ? String(value.scheduledDate).trim() : "";
           const hintIso = resolveRelativeDateWord(dateHint) || (/^\d{4}-\d{2}-\d{2}$/.test(dateHint) ? dateHint : undefined);
-          const score = (b: (typeof candidates)[number]): number => {
-            let s = 0;
-            if (isActiveStatus(b.status)) s += 40;
-            if (hintIso && b.scheduledDate === hintIso) s += 100;
-            if (b.scheduledDate && b.scheduledDate >= (todayIso || "")) s += 50; // today/future first
-            else s -= 20; // past bookings rank last
-            s += Date.parse(b.createdAt || "") / 1e13; // recency tie-break
-            return s;
-          };
-          candidates.sort((a, b) => score(b) - score(a));
-          bookingId = candidates[0].id;
+          const match = pickProductionBooking(candidates, hintIso ?? undefined);
+          if (match?.id) {
+            bookingId = match.id;
+          }
         }
       }
 

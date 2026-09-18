@@ -282,7 +282,7 @@ export function evaluateAvailability(
     `today weekday key: ${weekday}`,
     openNow
       ? `status: OPEN now (${currentSlot?.label}) riders: ${ridersNow.join(", ")}`
-      : "status: CLOSED for on-demand booking right now (no rider in this slot)",
+      : "status: NO RIDER ON DUTY right now (on-demand needs the next open slot below; customers CAN still pre-book)",
     nextOpenSlots.length
       ? `next options later today: ${nextOpenSlots.map((r) => `${r.label} (${r.riders.join(",")})`).join(" | ")}`
       : "next options later today: none left",

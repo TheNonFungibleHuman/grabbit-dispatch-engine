@@ -2,6 +2,7 @@ import { generateAgentReply } from "./deepseek.ts";
 import {
   cleanCustomerGreetingName,
   isBareGreeting,
+  isContentFreeMessage,
   isShortAcknowledgement,
   sanitizeWhatsAppText,
 } from "./format.ts";
@@ -65,6 +66,22 @@ async function sendAndRecord(args: {
   }
   recentSentReplies.set(args.to, { text, at: now });
 
+  // Cross-instance duplicate guard: per-process maps cannot de-duplicate webhook
+  // retries or retries that land on parallel serverless instances.
+  try {
+    const { shouldSuppressDuplicateReply } = await import("./reply-guard.ts");
+    if (await shouldSuppressDuplicateReply(args.to, text, now)) {
+      logWarn("agent", "suppressing cross-instance duplicate outbound reply", {
+        to: args.to,
+        messageId: args.messageId,
+        preview: text.slice(0, 80),
+      });
+      return;
+    }
+  } catch (guardErr) {
+    logWarn("agent", "reply-guard duplicate check failed; continuing send", formatError(guardErr));
+  }
+
   if (recentSentReplies.size > 200) {
     for (const [k, v] of recentSentReplies.entries()) {
       if (now - v.at > 60_000) recentSentReplies.delete(k);
@@ -76,6 +93,12 @@ async function sendAndRecord(args: {
     text,
     messageId: args.messageId,
   });
+  try {
+    const { rememberSentReply } = await import("./reply-guard.ts");
+    await rememberSentReply(args.to, text, now);
+  } catch (recordErr) {
+    logWarn("agent", "reply-guard record failed after send", formatError(recordErr));
+  }
   await appendTranscriptEntry(args.sender, {
     role: "agent",
     text,
@@ -108,6 +131,42 @@ export async function processIncomingUserMessage(
     return;
   }
   recentInboundTurns.set(message.sender, { text: message.text || "", at: now });
+
+  // Content-free inbound messages ("…", ".", emoji-only) carry no request and must
+  // never trigger a full LLM turn on their own. Mid-burst they are continuation
+  // nudges; answer only if the bot has NOT replied recently, otherwise stay silent.
+  // (Pacifique incident, 2026-09-14: a lone "…" earned a full duplicate 60-word
+  // reply 5.6s after the real answer.)
+  if (isContentFreeMessage(message.text)) {
+    try {
+      const transcript = await loadTranscript(message.sender);
+      const agentEntries = transcript.entries.filter((e) => e.role === "agent");
+      const lastAgentAt = agentEntries.length
+        ? Date.parse(agentEntries[agentEntries.length - 1].at)
+        : 0;
+      if (Number.isFinite(lastAgentAt) && now - lastAgentAt < 90_000) {
+        logInfo("agent", "skipping reply for content-free message (recent reply exists)", {
+          sender: message.sender,
+          messageId: message.messageId,
+          text: message.text,
+        });
+        return;
+      }
+      await sendAndRecord({
+        to,
+        sender: message.sender,
+        text: "Still with you! 😊 Just tell me what you need — a ride, a delivery, or an errand — and I will sort it out.",
+        messageId: message.messageId,
+      });
+      logInfo("agent", "brief nudge ack for stale content-free message", {
+        sender: message.sender,
+        messageId: message.messageId,
+      });
+      return;
+    } catch (error) {
+      logWarn("agent", "content-free path failed; continuing normal reply", formatError(error));
+    }
+  }
 
   logInfo("agent", "process start", {
     messageId: message.messageId,

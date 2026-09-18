@@ -125,6 +125,28 @@ export function isBareGreeting(text: string): boolean {
 }
 
 /**
+ * Detects messages that carry no request, question, or intent:
+ * bare ellipses ("…", "..."), punctuation-only strings (".", "?", "!!"),
+ * or emoji-only texts ("👍", "😊🙏").
+ *
+ * These must never trigger a full LLM reply on their own — the customer almost
+ * certainly typed them as a continuation nudge while the bot was already
+ * answering. (Pacifique incident, 2026-09-14: a lone "…" earned a full
+ * duplicate 60-word reply 5.6s after the real answer.)
+ *
+ * Digits and letters are intentionally preserved: "2", "9am", "cash" are
+ * meaningful mid-order inputs, not filler.
+ */
+export function isContentFreeMessage(text?: string | null): boolean {
+  const raw = (text || "").trim();
+  if (!raw) return true;
+  const stripped = raw
+    .replace(/[\p{Extended_Pictographic}\u200d\ufe0f]/gu, "")
+    .replace(/[\p{P}\p{S}\s]/gu, "");
+  return stripped.length === 0;
+}
+
+/**
  * Sanitizes a customer pushName for natural WhatsApp greetings.
  * Rejects internet handles, usernames with digits/underscores (e.g. "jwangirl07"),
  * and extracts a clean, title-cased first name.
