@@ -150,7 +150,7 @@ ${formatFareTableForPrompt()}
      🚗 *Trip Confirmed, [Destination]*
      • 📍 *Pickup:* [Pickup spot]
      • 📍 *Destination:* [Destination]
-     • ⏰ *Time:* [Scheduled time & date]
+     • ⏰ *Time:* [Scheduled time & date — ALWAYS restate the day for future bookings: "8:15 am tomorrow, Friday 19 Sept" or "8:15 am Monday 21 Sept"; same-day bookings may say "today". NEVER send a bare time for a non-today booking.]
      • 🛵 *Assigned Rider:* [Rider Name] ([Rider Phone])
      • 💰 *Fare:* Rs [Fare] ([Cash to rider / Paid via transfer])
      • "You can call or message your rider directly at [Rider Phone] if needed. Have a great ride! 😊"
@@ -161,7 +161,7 @@ ${formatFareTableForPrompt()}
      🛵 *Delivery Confirmed, [Shop/Item]*
      • 📍 *Pickup:* [Shop/Restaurant]
      • 📍 *Drop-off:* [Delivery address]
-     • ⏰ *Time:* [Time & date]
+     • ⏰ *Time:* [Time & date — same date-restating rule: always restate the day for tomorrow/future bookings, never a bare time.]
      • 🛵 *Assigned Rider:* [Rider Name] ([Rider Phone])
      • 💰 *Delivery Fee:* Rs [Fee]
      • 🔴 *Live Tracking Link:* {trackingUrl}

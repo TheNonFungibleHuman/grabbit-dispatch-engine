@@ -76,6 +76,27 @@ export function mauritiusWeekday(instant: Date = new Date()): number {
   return WEEKDAY_INDEX[label] ?? 0;
 }
 
+const WEEKDAY_LONG = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+const MONTH_SHORT = [
+  "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+  "Jul", "Aug", "Sept", "Oct", "Nov", "Dec",
+];
+
+/**
+ * Customer-facing date label for confirmation messages. Same-day bookings say
+ * "today"; future bookings restate the day so a bare time is never ambiguous
+ * (e.g. "tomorrow, Friday 19 Sept" or "Monday 21 Sept").
+ */
+export function customerDateLabel(dateIso: string, now: Date = new Date()): string {
+  const todayIso = mauritiusDateIso(now);
+  if (dateIso === todayIso) return "today";
+  const [y, m, d] = dateIso.split("-").map(Number);
+  if (!y || !m || !d) return dateIso;
+  const weekday = WEEKDAY_LONG[mauritiusWeekday(new Date(Date.UTC(y, m - 1, d, 8)))];
+  const label = `${weekday} ${d} ${MONTH_SHORT[m - 1]}`;
+  return dateIso === addDaysIso(todayIso, 1) ? `tomorrow, ${label}` : label;
+}
+
 export function parseTimeToMinutes(timeStr: string): number | null {
   if (!timeStr) return null;
   const clean = timeStr.toLowerCase().trim().replace(/(\d{1,2})\.(\d{2})/, "$1:$2");

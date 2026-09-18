@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   addDaysIso,
+  customerDateLabel,
   mauritiusClockLabel,
   mauritiusDateIso,
   mauritiusMinutesOfDay,
@@ -56,6 +57,39 @@ describe("resolveRelativeDateWord", () => {
     assert.equal(resolveRelativeDateWord("today", now), "2026-08-11");
     assert.equal(resolveRelativeDateWord("tomorrow", now), "2026-08-12");
     assert.equal(resolveRelativeDateWord("nonsense", now), null);
+  });
+});
+
+describe("customerDateLabel", () => {
+  it("says 'today' for same-day bookings in Mauritius terms", () => {
+    const now = new Date("2026-09-18T06:00:00.000Z"); // 10:00 MUT, Fri 18 Sept
+    assert.equal(customerDateLabel("2026-09-18", now), "today");
+  });
+
+  it("restates weekday and date for tomorrow bookings", () => {
+    const now = new Date("2026-09-18T06:00:00.000Z"); // Fri 18 Sept MUT
+    assert.equal(customerDateLabel("2026-09-19", now), "tomorrow, Saturday 19 Sept");
+  });
+
+  it("uses Mauritius midnight, not UTC, when deciding 'tomorrow'", () => {
+    const now = new Date("2026-09-18T21:30:00.000Z"); // already Sat 19 Sept 01:30 MUT
+    assert.equal(customerDateLabel("2026-09-19", now), "today");
+    assert.equal(customerDateLabel("2026-09-20", now), "tomorrow, Sunday 20 Sept");
+  });
+
+  it("restates plain weekday + date for bookings beyond tomorrow", () => {
+    const now = new Date("2026-09-18T06:00:00.000Z");
+    assert.equal(customerDateLabel("2026-09-21", now), "Monday 21 Sept");
+  });
+
+  it("crosses month boundaries safely", () => {
+    const now = new Date("2026-09-30T06:00:00.000Z"); // Wed 30 Sept MUT
+    assert.equal(customerDateLabel("2026-10-01", now), "tomorrow, Thursday 1 Oct");
+  });
+
+  it("falls back to the raw string for malformed dates", () => {
+    const now = new Date("2026-09-18T06:00:00.000Z");
+    assert.equal(customerDateLabel("not-a-date", now), "not-a-date");
   });
 });
 

@@ -9,7 +9,7 @@ import {
   type BookingSummary,
 } from "./booking-store.ts";
 import { formatError, logError, logInfo, logWarn } from "../log.ts";
-import { mauritiusDateIso, resolveRelativeDateWord, parseTimeToMinutes, formatMinutesToTime } from "../time.ts";
+import { mauritiusDateIso, resolveRelativeDateWord, parseTimeToMinutes, formatMinutesToTime, customerDateLabel } from "../time.ts";
 import { FLEET_RIDERS, findRiderByName, findRiderByPhone, getCustomTrackingUrl, isAuthorizedRiderOrAdmin, type RiderProfile } from "../riders/config.ts";
 
 export { parseTimeToMinutes, formatMinutesToTime };
@@ -1257,7 +1257,7 @@ export async function handleRiderReply(args: {
     const isRoundTrip = pending.tripType === "round_trip";
     const customerLines = [
       `🚗 *Your ${isRoundTrip ? "Round Trip" : "Trip"} is confirmed!*`,
-      `Rider *${actualRider.name}* has accepted and is scheduled for *${pending.scheduledTime}*.`,
+      `Rider *${actualRider.name}* has accepted and is scheduled for *${pending.scheduledTime} ${customerDateLabel(pending.scheduledDate)}*.`,
       ``,
       `📍 Pickup: ${pending.pickupAddress}`,
       `📍 Drop-off: ${pending.deliveryAddress}`,
@@ -1372,7 +1372,7 @@ export async function handleRiderReply(args: {
     // Send tracking link to customer for delivery
     const customerLines = [
       `🛵 *Your Delivery is confirmed!*`,
-      `Rider *${actualRider.name}* has accepted and is scheduled for *${pending.scheduledTime}*.`,
+      `Rider *${actualRider.name}* has accepted and is scheduled for *${pending.scheduledTime} ${customerDateLabel(pending.scheduledDate)}*.`,
       ``,
       `📍 Pickup: ${pending.pickupAddress}`,
       `📍 Drop-off: ${pending.deliveryAddress}`,

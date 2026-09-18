@@ -974,6 +974,10 @@ export async function executeAgentTool(args: {
       const riderProf = findRiderByName(riderName);
       const riderPhoneStr = riderProf?.phone ? ` (${riderProf.phone})` : "";
       const trackingUrl = prebookResult.trackingUrl || "https://delivery.grabbit-express.com";
+      const { customerDateLabel } = await import("../time.ts");
+      const bookingDateLabel = customerDateLabel(
+        prebookResult.booking?.scheduledDate || scheduledDate,
+      );
 
       const { quoteTripFare, quoteDeliveryFee } = await import("../pricing/fares.ts");
       let priceLine = "";
@@ -1034,7 +1038,7 @@ export async function executeAgentTool(args: {
           status: "confirmed",
           fareRs,
           paymentMethod,
-          message: `Your passenger trip for ${scheduledDate} at ${scheduledTime} is confirmed and assigned to rider ${riderName}${riderPhoneStr}! Fare: Rs ${fareRs} (${paymentMethod === "cash" ? "pay rider in cash" : "pre-paid via transfer, receipt logged for dispatch verification"}). Contact your rider directly if needed.`,
+          message: `Your passenger trip for ${bookingDateLabel} at ${scheduledTime} is confirmed and assigned to rider ${riderName}${riderPhoneStr}! Fare: Rs ${fareRs} (${paymentMethod === "cash" ? "pay rider in cash" : "pre-paid via transfer, receipt logged for dispatch verification"}). Contact your rider directly if needed.`,
         };
       }
 
@@ -1053,7 +1057,7 @@ export async function executeAgentTool(args: {
         deliveryFeeRs,
         pricePending,
         paymentMethod,
-        message: `Your ${serviceKind} request for ${scheduledDate} at ${scheduledTime} is confirmed and assigned to rider ${riderName}${riderPhoneStr}! Live Tracking Link: ${trackingUrl}${priceLine}${paymentNote}`,
+        message: `Your ${serviceKind} request for ${bookingDateLabel} at ${scheduledTime} is confirmed and assigned to rider ${riderName}${riderPhoneStr}! Live Tracking Link: ${trackingUrl}${priceLine}${paymentNote}`,
       };
     }
 
@@ -1103,6 +1107,10 @@ export async function executeAgentTool(args: {
       const { findRiderByName } = await import("../riders/config.ts");
       const riderProf = findRiderByName(assignedRider);
       const riderPhoneStr = riderProf?.phone ? ` (${riderProf.phone})` : "";
+      const { customerDateLabel } = await import("../time.ts");
+      const newDateLabel = customerDateLabel(
+        result.booking?.scheduledDate || newScheduledDate,
+      );
 
       if (result.booking?.serviceKind === "trip") {
         return {
@@ -1112,7 +1120,7 @@ export async function executeAgentTool(args: {
           newScheduledTime,
           assignedRider,
           riderPhone: riderProf?.phone || undefined,
-          message: `Your passenger trip is now rescheduled to ${newScheduledDate} at ${newScheduledTime} with rider ${assignedRider}${riderPhoneStr}!`,
+          message: `Your passenger trip is now rescheduled to ${newDateLabel} at ${newScheduledTime} with rider ${assignedRider}${riderPhoneStr}!`,
         };
       }
 
@@ -1126,7 +1134,7 @@ export async function executeAgentTool(args: {
         assignedRider: result.booking?.assignedRider || assignedRider,
         kiloDeliveryId: result.booking?.kiloDeliveryId,
         trackingUrl,
-        message: `Your booking is now rescheduled to ${newScheduledDate} at ${newScheduledTime} with rider ${result.booking?.assignedRider || assignedRider}! Live Tracking Link: ${trackingUrl}`,
+        message: `Your booking is now rescheduled to ${newDateLabel} at ${newScheduledTime} with rider ${result.booking?.assignedRider || assignedRider}! Live Tracking Link: ${trackingUrl}`,
       };
     }
 
