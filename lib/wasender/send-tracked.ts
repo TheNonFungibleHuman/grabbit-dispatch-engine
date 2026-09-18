@@ -58,6 +58,19 @@ export async function sendCustomerText(input: {
       messageId: input.messageId,
       preview: input.text,
     });
+
+    // Register the send in the cross-instance reply guard so that side-effect
+    // confirmation cards (rider-accept, admin dispatch, Kilo status) that
+    // bypass lib/agent/index.ts are still visible to near-duplicate
+    // suppression when a paraphrased card follows seconds later.
+    try {
+      const { rememberSentReply } = await import("../agent/reply-guard.ts");
+      const digits = input.to.replace(/\D/g, "");
+      if (digits) await rememberSentReply(`+${digits}`, input.text);
+    } catch {
+      // reply-guard bookkeeping must never break sends
+    }
+
     await noteSendMetrics(true);
     return result;
   } catch (error) {
