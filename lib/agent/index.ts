@@ -16,6 +16,7 @@ import {
   isInQuietWindow,
   loadTranscript,
   recentDisabledCustomerMessages,
+  type ChatTranscript,
 } from "./transcript.ts";
 
 function toE164(phone: string): string {
@@ -93,12 +94,9 @@ async function sendAndRecord(args: {
     text,
     messageId: args.messageId,
   });
-  try {
-    const { rememberSentReply } = await import("./reply-guard.ts");
-    await rememberSentReply(args.to, text, now);
-  } catch (recordErr) {
-    logWarn("agent", "reply-guard record failed after send", formatError(recordErr));
-  }
+  // NOTE: sendCustomerText already records the send in the cross-instance
+  // reply guard (lib/wasender/send-tracked.ts) — recording again here would
+  // double the guard-store writes per reply.
   await appendTranscriptEntry(args.sender, {
     role: "agent",
     text,
@@ -114,6 +112,18 @@ export async function processIncomingUserMessage(
 ): Promise<void> {
   const to = toE164(message.sender);
   const now = Date.now();
+
+  // Per-invocation transcript single-flight: the fast-path guards and the LLM
+  // turn used to re-read the same transcript document 3–4 times per message.
+  // This closure loads it at most once per message, scoped strictly to this
+  // invocation — no cross-message staleness, no cross-customer leakage.
+  let turnTranscript: ChatTranscript | null = null;
+  const getTurnTranscript = async (): Promise<ChatTranscript> => {
+    if (turnTranscript) return turnTranscript;
+    turnTranscript = await loadTranscript(message.sender);
+    return turnTranscript;
+  };
+
   const lastInbound = recentInboundTurns.get(message.sender);
 
   // Suppress rapid duplicate webhook triggers (e.g. duplicate webhook deliveries for emojis/acks within 5s)
@@ -139,7 +149,7 @@ export async function processIncomingUserMessage(
   // reply 5.6s after the real answer.)
   if (isContentFreeMessage(message.text)) {
     try {
-      const transcript = await loadTranscript(message.sender);
+      const transcript = await getTurnTranscript();
       const agentEntries = transcript.entries.filter((e) => e.role === "agent");
       const lastAgentAt = agentEntries.length
         ? Date.parse(agentEntries[agentEntries.length - 1].at)
@@ -482,7 +492,7 @@ export async function processIncomingUserMessage(
   // a short message confirming payment method or reassurance (e.g. "Payment in cash", "Cash", "Please"),
   // acknowledge concisely rather than regenerating a duplicate full-page confirmation card.
   try {
-    const transcript = await loadTranscript(message.sender);
+    const transcript = await getTurnTranscript();
     const lastBookingTs = transcript.lastBookingAt ? Date.parse(transcript.lastBookingAt) : 0;
     const isRecentBooking = Number.isFinite(lastBookingTs) && now - lastBookingTs < 90_000;
     if (isRecentBooking) {
@@ -533,6 +543,7 @@ export async function processIncomingUserMessage(
     text: message.text,
     messageId: message.messageId,
     pushName: message.pushName,
+    transcript: turnTranscript ?? undefined,
   });
 
   await sendAndRecord({

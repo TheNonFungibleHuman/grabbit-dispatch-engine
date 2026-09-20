@@ -7,7 +7,7 @@ export const OUTBOUND_AI_ID_STORE_PATH =
 
 const MAX_IDS = 5000;
 const ID_TTL_MS = 24 * 60 * 60 * 1000;
-const CLAIM_STALE_MS = 60_000;
+const CLAIM_STALE_MS = 20_000;
 
 interface InboundEntry {
   s: "p" | "d";

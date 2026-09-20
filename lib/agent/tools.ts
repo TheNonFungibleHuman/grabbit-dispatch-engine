@@ -504,34 +504,150 @@ export const DEEPSEEK_AGENT_TOOLS = AGENT_TOOLS.map((tool) => ({
 export async function buildAgentContextNote(args: {
   senderPhone: string;
   pushName?: string;
+  /**
+   * Optional pre-loaded transcript (per-turn single-flight: the caller may
+   * already have it from earlier fast-path checks). When omitted, the
+   * customer-scope block loads it itself.
+   */
+  transcript?: import("./transcript.ts").ChatTranscript;
 }): Promise<string> {
-  let photoCount = 0;
-  try {
-    const draft = await getOrderDraft(args.senderPhone);
-    photoCount = draft.packageImages.length;
-  } catch (error) {
-    logWarn("agent", "draft lookup failed", formatError(error));
-  }
-
   const phone = args.senderPhone.replace(/\D/g, "");
   const e164 = args.senderPhone.startsWith("+")
     ? `+${phone}`
     : `+${phone}`;
 
-  let discoveryNote =
-    "[kilo discovery unavailable this turn — continue carefully and retry booking later]";
-  try {
-    const bundle = await getDiscoveryBundle();
-    discoveryNote = summarizeDiscoveryForAgent(bundle);
+  const { isAuthorizedRiderOrAdmin } = await import("../riders/config.ts");
+  const auth = isAuthorizedRiderOrAdmin(args.senderPhone);
+
+  // ── Parallel context loading ──────────────────────────────────────────
+  // Every block below was previously awaited serially, adding ~1–1.5s of
+  // Supabase/Blob latency to every turn. They only read independent store
+  // paths, so we settle them all concurrently and format afterwards.
+  const listBookings = async (): Promise<
+    Awaited<ReturnType<typeof import("../orders/pre-booking.ts").listAllPreBookings>>
+  > => {
+    const { listAllPreBookings } = await import("../orders/pre-booking.ts");
+    return listAllPreBookings();
+  };
+  const loadTranscriptForContext = async () => {
+    if (args.transcript) return args.transcript;
+    const { loadTranscript } = await import("./transcript.ts");
+    return loadTranscript(args.senderPhone);
+  };
+
+  const draftP = (async () => {
+    try {
+      return await getOrderDraft(args.senderPhone);
+    } catch (error) {
+      logWarn("agent", "draft lookup failed", formatError(error));
+      return null;
+    }
+  })();
+  const discoveryP = (async () => {
+    try {
+      return await getDiscoveryBundle();
+    } catch (error) {
+      logWarn("agent", "discovery failed", formatError(error));
+      return null;
+    }
+  })();
+  const availabilityP = (async () => {
+    try {
+      return await getAvailabilitySnapshot();
+    } catch (error) {
+      logWarn("agent", "availability lookup failed", formatError(error));
+      return null;
+    }
+  })();
+  const bookingsP = listBookings().catch((e) => {
+    logWarn("agent", "failed to load bookings for context", formatError(e));
+    return null;
+  });
+  const escalationsP = auth.isAdmin
+    ? (async () => {
+        const { listOpenEscalations } = await import("../ops/store.ts");
+        return listOpenEscalations();
+      })().catch((e) => {
+        logWarn("agent", "failed to load open escalations", formatError(e));
+        return null;
+      })
+    : Promise.resolve(null);
+  const profileP =
+    !auth.isAdmin && !auth.rider
+      ? (async () => {
+          const { getCustomerProfile } = await import("../orders/store.ts");
+          return getCustomerProfile(args.senderPhone);
+        })().catch((e) => {
+          logWarn("agent", "failed to load customer profile", formatError(e));
+          return null;
+        })
+      : Promise.resolve(null);
+  const transcriptP =
+    !auth.isAdmin && !auth.rider
+      ? loadTranscriptForContext().catch((e) => {
+          logWarn("agent", "failed to load transcript for context note", formatError(e));
+          return null;
+        })
+      : Promise.resolve(null);
+  const learnedP = (async () => {
+    const { getLearnedGuidelinesContextNote } = await import("../ops/self-improve.ts");
+    return getLearnedGuidelinesContextNote();
+  })().catch((e) => {
+    logWarn("agent", "failed to load learned guidelines", formatError(e));
+    return "";
+  });
+  const maintP = (async () => {
+    const { getFleetMaintenanceStatus } = await import("../riders/commands.ts");
+    return getFleetMaintenanceStatus();
+  })().catch((e) => {
+    logWarn("agent", "failed to load fleet maintenance status for context", formatError(e));
+    return null;
+  });
+  const resolutionP = (async () => {
+    const { getLatestResolvedEscalationInstruction } = await import("../ops/store.ts");
+    return getLatestResolvedEscalationInstruction(args.senderPhone);
+  })().catch((e) => {
+    logWarn("agent", "failed to load admin resolution note", formatError(e));
+    return null;
+  });
+
+  const [
+    draft,
+    discoveryBundle,
+    availability,
+    allBookings,
+    openEscalations,
+    customerProfile,
+    contextTranscript,
+    learnedGuidelinesNote,
+    maint,
+    resolvedInstruction,
+  ] = await Promise.all([
+    draftP,
+    discoveryP,
+    availabilityP,
+    bookingsP,
+    escalationsP,
+    profileP,
+    transcriptP,
+    learnedP,
+    maintP,
+    resolutionP,
+  ]);
+
+  const photoCount = draft?.packageImages.length ?? 0;
+
+  const discoveryNote = discoveryBundle
+    ? summarizeDiscoveryForAgent(discoveryBundle)
+    : "[kilo discovery unavailable this turn — continue carefully and retry booking later]";
+  if (discoveryBundle) {
     logInfo("agent", "discovery loaded for context", {
       sender: args.senderPhone,
-      serviceKinds: bundle.capabilities.enabledServiceKinds,
-      warehouses: bundle.warehouses.length,
-      serviceLocations: bundle.serviceLocations.length,
-      locationNames: bundle.serviceLocations.slice(0, 20).map((l) => l.name),
+      serviceKinds: discoveryBundle.capabilities.enabledServiceKinds,
+      warehouses: discoveryBundle.warehouses.length,
+      serviceLocations: discoveryBundle.serviceLocations.length,
+      locationNames: discoveryBundle.serviceLocations.slice(0, 20).map((l) => l.name),
     });
-  } catch (error) {
-    logWarn("agent", "discovery failed", formatError(error));
   }
 
   const photoNote =
@@ -542,12 +658,9 @@ export async function buildAgentContextNote(args: {
   let callerRoleNote = "role: CUSTOMER";
   let riderBookingsNote = "";
   let adminEscalationNote = "";
-  const { isAuthorizedRiderOrAdmin } = await import("../riders/config.ts");
-  const auth = isAuthorizedRiderOrAdmin(args.senderPhone);
 
   let availabilityNote = "";
-  try {
-    const availability = await getAvailabilitySnapshot();
+  if (availability) {
     if (auth.isAdmin) {
       availabilityNote = `[Fleet schedule overview for Admin dispatch only — do not pitch booking slots to admin]:\n${availability.summaryForAgent}`;
     } else if (auth.rider) {
@@ -555,18 +668,14 @@ export async function buildAgentContextNote(args: {
     } else {
       availabilityNote = availability.summaryForAgent;
     }
-  } catch (error) {
-    logWarn("agent", "availability lookup failed", formatError(error));
   }
 
   let adminBookingsNote = "";
   if (auth.isAdmin) {
     callerRoleNote = "role: AUTHORIZED DISPATCH ADMIN (+999000000008 / +9990000000003)";
     const todayIso = mauritiusDateIso(new Date());
-    try {
-      const { listAllPreBookings } = await import("../orders/pre-booking.ts");
-      const all = await listAllPreBookings();
-      const upcomingBookings = all.filter((b) => {
+    if (allBookings) {
+      const upcomingBookings = allBookings.filter((b) => {
         const bDate = (b.scheduledDate && b.scheduledDate !== "today" && b.scheduledDate !== "tomorrow")
           ? b.scheduledDate
           : (b.slotKey?.split("_")[0] || b.createdAt.slice(0, 10));
@@ -582,32 +691,22 @@ export async function buildAgentContextNote(args: {
       } else {
         adminBookingsNote = `📋 THIS WEEK'S BOOKINGS (${todayIso} onwards): No trips or deliveries currently booked.`;
       }
-    } catch (e) {
-      logWarn("agent", "failed to load upcoming bookings for admin context", formatError(e));
     }
 
-    try {
-      const { listOpenEscalations } = await import("../ops/store.ts");
-      const openEscalations = await listOpenEscalations();
-      if (openEscalations.length > 0) {
-        adminEscalationNote = [
-          `🚨 ACTIVE ESCALATIONS AWAITING ADMIN FEEDBACK TODAY (${todayIso}) [Auto-cleared at End of Day]:`,
-          ...openEscalations.map(
-            (e) => `• Customer: ${e.customerName} (+${e.customerPhone})\n  Request: "${e.reason}" (Escalated: ${e.createdAt.slice(0, 10)} ${e.createdAt.slice(11, 16)} UTC)`,
-          ),
-          "CRITICAL ADMIN DISPATCH RULE: If the admin provides a decision, instruction, price, or refusal for any customer above (e.g. 'refuse order', 'tell Hanif Rs 150', 'not in our coverage'), YOU MUST CALL `admin_reply_to_customer` with their customerIdentifier (+phone or name) to message the customer directly and resolve the escalation.",
-        ].join("\n");
-      }
-    } catch (e) {
-      logWarn("agent", "failed to load open escalations", formatError(e));
+    if (openEscalations && openEscalations.length > 0) {
+      adminEscalationNote = [
+        `🚨 ACTIVE ESCALATIONS AWAITING ADMIN FEEDBACK TODAY (${todayIso}) [Auto-cleared at End of Day]:`,
+        ...openEscalations.map(
+          (e) => `• Customer: ${e.customerName} (+${e.customerPhone})\n  Request: "${e.reason}" (Escalated: ${e.createdAt.slice(0, 10)} ${e.createdAt.slice(11, 16)} UTC)`,
+        ),
+        "CRITICAL ADMIN DISPATCH RULE: If the admin provides a decision, instruction, price, or refusal for any customer above (e.g. 'refuse order', 'tell Hanif Rs 150', 'not in our coverage'), YOU MUST CALL `admin_reply_to_customer` with their customerIdentifier (+phone or name) to message the customer directly and resolve the escalation.",
+      ].join("\n");
     }
   } else if (auth.rider) {
     callerRoleNote = `role: FLEET RIDER (${auth.rider.name})`;
-    try {
+    if (allBookings) {
       const todayIso = mauritiusDateIso(new Date());
-      const { listAllPreBookings } = await import("../orders/pre-booking.ts");
-      const all = await listAllPreBookings();
-      const active = all.filter((b) => {
+      const active = allBookings.filter((b) => {
         if (!b.assignedRider.toLowerCase().includes(auth.rider!.name.toLowerCase())) return false;
         if (b.status !== "confirmed" && b.status !== "pending_rider" && b.status !== "dispatched") return false;
         const bDate = (b.scheduledDate && b.scheduledDate !== "today" && b.scheduledDate !== "tomorrow")
@@ -624,30 +723,21 @@ export async function buildAgentContextNote(args: {
           "RIDER CHAT INSTRUCTION: If rider is giving an arrival notice, delay update, or status (e.g. 'I am at the gate', 'Arrived', '5 mins away'), CALL `notify_customer_of_rider_update` to instantly message the customer!",
         ].join("\n");
       }
-    } catch (e) {
-      logWarn("agent", "failed to load rider active bookings for context", formatError(e));
     }
   }
 
   let customerProfileNote = "";
   let customerActiveBookingsNote = "";
   if (!auth.isAdmin && !auth.rider) {
-    try {
-      const { getCustomerProfile } = await import("../orders/store.ts");
-      const prof = await getCustomerProfile(args.senderPhone);
-      if (prof.lastDeliveryAddress || prof.lastPickupAddress) {
-        customerProfileNote = `customer_profile: Frequent/Last pickup=${prof.lastPickupAddress || "ALCHE"}, Last dropoff=${prof.lastDeliveryAddress || "Mahogany"}, PrefPay=${prof.preferredPaymentMethod || "cash"}${prof.tripCount ? `, History=${prof.tripCount} booking(s)` : ""}${prof.lastBookingAt ? `, LastBooked=${prof.lastBookingAt.slice(0, 10)}` : ""}`;
-      }
-    } catch (e) {
-      logWarn("agent", "failed to load customer profile", formatError(e));
+    if (customerProfile && (customerProfile.lastDeliveryAddress || customerProfile.lastPickupAddress)) {
+      const prof = customerProfile;
+      customerProfileNote = `customer_profile: Frequent/Last pickup=${prof.lastPickupAddress || "ALCHE"}, Last dropoff=${prof.lastDeliveryAddress || "Mahogany"}, PrefPay=${prof.preferredPaymentMethod || "cash"}${prof.tripCount ? `, History=${prof.tripCount} booking(s)` : ""}${prof.lastBookingAt ? `, LastBooked=${prof.lastBookingAt.slice(0, 10)}` : ""}`;
     }
 
-    try {
-      const { listAllPreBookings } = await import("../orders/pre-booking.ts");
+    if (allBookings) {
       const todayIso = mauritiusDateIso(new Date());
-      const all = await listAllPreBookings();
       const phoneDigits = args.senderPhone.replace(/\D/g, "");
-      const customerBookings = all.filter((b) => {
+      const customerBookings = allBookings.filter((b) => {
         if (b.customerPhone.replace(/\D/g, "") !== phoneDigits) return false;
         if (b.status === "cancelled" || b.status === "declined" || b.status === "completed") return false;
         const bDate = (b.scheduledDate && b.scheduledDate !== "today" && b.scheduledDate !== "tomorrow")
@@ -665,53 +755,29 @@ export async function buildAgentContextNote(args: {
           `NOTE: When customer asks about their upcoming ride or schedule, confirm these exact details! If customer asks to add an item/grocery to their active order, call \`add_item_to_active_booking\`. If customer sends a payment receipt or screenshot for their active booking, call \`confirm_payment_receipt\`. DO NOT call booking tools for already confirmed trips!`,
         ].join("\n");
       }
-    } catch (e) {
-      logWarn("agent", "failed to load customer active bookings for context", formatError(e));
     }
-  }
-
-  let learnedGuidelinesNote = "";
-  try {
-    const { getLearnedGuidelinesContextNote } = await import("../ops/self-improve.ts");
-    learnedGuidelinesNote = await getLearnedGuidelinesContextNote();
-  } catch (e) {
-    logWarn("agent", "failed to load learned guidelines", formatError(e));
   }
 
   let fleetMaintenanceNote = "";
-  try {
-    const { getFleetMaintenanceStatus } = await import("../riders/commands.ts");
-    const maint = await getFleetMaintenanceStatus();
-    if (maint.active) {
-      fleetMaintenanceNote = `⚠️ FLEET DOWNTIME / MAINTENANCE ACTIVE: On-demand bookings are PAUSED until ${maint.untilTimeStr} due to ${maint.reason || "maintenance"}. Inform customers and offer slots starting after ${maint.untilTimeStr} or on upcoming days!`;
-    }
-  } catch (e) {
-    logWarn("agent", "failed to load fleet maintenance status for context", formatError(e));
+  if (maint?.active) {
+    fleetMaintenanceNote = `⚠️ FLEET DOWNTIME / MAINTENANCE ACTIVE: On-demand bookings are PAUSED until ${maint.untilTimeStr} due to ${maint.reason || "maintenance"}. Inform customers and offer slots starting after ${maint.untilTimeStr} or on upcoming days!`;
   }
 
   let adminResolutionNote = "";
-  try {
-    const { getLatestResolvedEscalationInstruction } = await import("../ops/store.ts");
-    const resolvedInstruction = await getLatestResolvedEscalationInstruction(args.senderPhone);
-    if (resolvedInstruction) {
-      adminResolutionNote = `⚡ HUMAN DISPATCH ADMIN DIRECTIVE / RESOLUTION: "${resolvedInstruction}". You MUST follow and strictly honor this human dispatcher instruction in all conversation with this customer.`;
-    }
-  } catch (e) {
-    logWarn("agent", "failed to load admin resolution note", formatError(e));
+  if (resolvedInstruction) {
+    adminResolutionNote = `⚡ HUMAN DISPATCH ADMIN DIRECTIVE / RESOLUTION: "${resolvedInstruction}". You MUST follow and strictly honor this human dispatcher instruction in all conversation with this customer.`;
   }
 
   let adminInjectedNote = "";
   let intakeStateNote = "";
-  if (!auth.isAdmin && !auth.rider) {
+  if (!auth.isAdmin && !auth.rider && contextTranscript) {
     try {
-      const { loadTranscript } = await import("./transcript.ts");
       const { extractIntakeState } = await import("../orders/intake-state.ts");
-      const transcript = await loadTranscript(args.senderPhone);
-      const lastAgentEntry = transcript.entries.filter((e) => e.role === "agent").at(-1);
+      const lastAgentEntry = contextTranscript.entries.filter((e) => e.role === "agent").at(-1);
       if (lastAgentEntry?.adminInjected) {
         adminInjectedNote = `💬 RECENT ADMIN DIRECTIVE / MESSAGE: Your last message to this customer was directly composed by human Admin/Dispatcher: "${lastAgentEntry.text}". The customer is now replying to that admin message. Continue the conversation naturally as Grabbit Express support, honoring this context without restarting intake or contradicting what Admin said.`;
       }
-      const intake = extractIntakeState(transcript.entries);
+      const intake = extractIntakeState(contextTranscript.entries);
       if (intake.summaryNote) {
         intakeStateNote = intake.summaryNote;
       }

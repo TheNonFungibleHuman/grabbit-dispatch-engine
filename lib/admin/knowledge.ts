@@ -9,7 +9,7 @@ export { prepareKnowledgeForPrompt } from "./knowledge-format.ts";
 export const KNOWLEDGE_BLOB_PATH = "grabbit/admin/knowledge.json";
 
 /** How long a warm instance may reuse knowledge before re-reading Blob. */
-const KNOWLEDGE_FRESH_TTL_MS = 0;
+const KNOWLEDGE_FRESH_TTL_MS = 30_000;
 
 export interface KnowledgeDocument {
   content: string;
@@ -92,8 +92,11 @@ export async function publishKnowledge(content: string): Promise<KnowledgeDocume
 }
 
 /**
- * Fresh knowledge for the agent. Re-reads Blob frequently so an Admin
- * Publish is picked up on the next WhatsApp turn in the same chat.
+ * Fresh knowledge for the agent. Warm instances reuse the prepared bundle for
+ * up to KNOWLEDGE_FRESH_TTL_MS; Admin Publish calls clearKnowledgeCache(), so
+ * edits still land on the next WhatsApp turn in this instance and within the
+ * TTL everywhere else — without paying a Blob read + re-format on every turn
+ * (which also kept busting the LLM provider's prompt-prefix cache).
  */
 export async function getKnowledgeBundle(): Promise<KnowledgeBundle> {
   if (
@@ -103,7 +106,7 @@ export async function getKnowledgeBundle(): Promise<KnowledgeBundle> {
     return freshBundle.bundle;
   }
 
-  const document = await loadKnowledgeDocument({ bypassMemory: true });
+  const document = await loadKnowledgeDocument();
   const bundle: KnowledgeBundle = {
     document,
     prepared: prepareKnowledgeForPrompt(document.content),

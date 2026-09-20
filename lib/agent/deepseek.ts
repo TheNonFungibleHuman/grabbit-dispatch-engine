@@ -17,12 +17,24 @@ import { loadTranscript } from "./transcript.ts";
 const DEFAULT_MODEL = "deepseek-flash";
 const DEFAULT_BASE_URL = "https://api.deepseek.com";
 const MAX_TOOL_ROUNDS = 4;
+/**
+ * Hard time budget for the whole agent turn. The Vercel function gets 60s;
+ * bailing at 45s guarantees the reply is actually sent instead of the lambda
+ * dying mid-turn after side effects (bookings) already landed.
+ */
+const AGENT_TURN_BUDGET_MS = 45_000;
+const DEEPSEEK_MAX_ATTEMPTS = 3;
+const DEEPSEEK_RETRY_BASE_MS = 1_500;
+/** Statuses worth retrying: rate limit, server errors, gateway timeouts. */
+const RETRYABLE_HTTP = new Set([408, 409, 429, 500, 502, 503, 504]);
 
 export interface GenerateAgentReplyInput {
   sender: string;
   text: string;
   messageId: string;
   pushName?: string;
+  /** Optional pre-loaded transcript — per-turn single-flight when the caller already fetched it. */
+  transcript?: import("./transcript.ts").ChatTranscript;
 }
 
 export interface GenerateAgentReplyResult {
@@ -65,6 +77,8 @@ interface DeepSeekChatCompletionResponse {
     prompt_tokens: number;
     completion_tokens: number;
     total_tokens: number;
+    prompt_cache_hit_tokens?: number;
+    prompt_cache_miss_tokens?: number;
   };
   error?: {
     message: string;
@@ -90,6 +104,10 @@ function getModel(): string {
   return process.env.DEEPSEEK_MODEL?.trim() || DEFAULT_MODEL;
 }
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 async function callDeepSeekChat(args: {
   apiKey: string;
   baseUrl: string;
@@ -109,23 +127,52 @@ async function callDeepSeekChat(args: {
     body.tool_choice = "auto";
   }
 
-  const response = await fetch(url, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${args.apiKey}`,
-    },
-    body: JSON.stringify(body),
-  });
+  let lastError: Error | null = null;
+  for (let attempt = 1; attempt <= DEEPSEEK_MAX_ATTEMPTS; attempt += 1) {
+    try {
+      const response = await fetch(url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${args.apiKey}`,
+        },
+        body: JSON.stringify(body),
+      });
 
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(
-      `DeepSeek API error HTTP ${response.status} (${response.statusText}): ${errorText}`,
-    );
+      if (!response.ok) {
+        const errorText = await response.text();
+        const error = new Error(
+          `DeepSeek API error HTTP ${response.status} (${response.statusText}): ${errorText}`,
+        );
+        if (!RETRYABLE_HTTP.has(response.status) || attempt === DEEPSEEK_MAX_ATTEMPTS) {
+          throw error;
+        }
+        lastError = error;
+        logWarn("agent", "deepseek transient error; retrying", {
+          attempt,
+          status: response.status,
+        });
+        await sleep(DEEPSEEK_RETRY_BASE_MS * attempt);
+        continue;
+      }
+
+      return (await response.json()) as DeepSeekChatCompletionResponse;
+    } catch (error) {
+      const err = error instanceof Error ? error : new Error(String(error));
+      // HTTP errors thrown above already decided retryability; only network
+      // failures (fetch rejects) land here and are worth a retry.
+      if (err.message.startsWith("DeepSeek API error HTTP") || attempt === DEEPSEEK_MAX_ATTEMPTS) {
+        throw err;
+      }
+      lastError = err;
+      logWarn("agent", "deepseek network failure; retrying", {
+        attempt,
+        ...formatError(err),
+      });
+      await sleep(DEEPSEEK_RETRY_BASE_MS * attempt);
+    }
   }
-
-  return (await response.json()) as DeepSeekChatCompletionResponse;
+  throw lastError ?? new Error("DeepSeek request failed without a response");
 }
 
 /**
@@ -153,6 +200,7 @@ export async function generateAgentReply(
     contextNote = await buildAgentContextNote({
       senderPhone: input.sender,
       pushName: input.pushName,
+      transcript: input.transcript,
     });
     logInfo("agent", "context note ready", {
       messageId: input.messageId,
@@ -184,14 +232,15 @@ export async function generateAgentReply(
     ? `${systemInstruction}\n\n--- OPERATIONAL CONTEXT ---\n${contextNote}\n\n${senderRoleHeader}`
     : `${systemInstruction}\n\n${senderRoleHeader}`;
 
-  // Assemble message history
+  // Assemble message history (reuse the caller's transcript when provided —
+  // per-turn single-flight instead of a second read of the same document)
   const messages: DeepSeekChatMessage[] = [
     { role: "system", content: fullSystemInstruction },
   ];
 
   try {
-    const { loadTranscript, formatTranscriptMessagesForModel } = await import("./transcript.ts");
-    const transcript = await loadTranscript(input.sender);
+    const { formatTranscriptMessagesForModel } = await import("./transcript.ts");
+    const transcript = input.transcript ?? (await loadTranscript(input.sender));
     const recentEntries = transcript.entries.slice(-20);
     const formattedHistory = formatTranscriptMessagesForModel(recentEntries, { maxHoursOld: 36 });
     messages.push(...formattedHistory);
@@ -210,6 +259,16 @@ export async function generateAgentReply(
   const calledTools = new Set<string>();
 
   for (let round = 0; round < MAX_TOOL_ROUNDS; round += 1) {
+    if (Date.now() - startedAt > AGENT_TURN_BUDGET_MS) {
+      logWarn("agent", "agent turn budget exhausted; forcing final response", {
+        messageId: input.messageId,
+        round,
+        elapsedMs: Date.now() - startedAt,
+        budgetMs: AGENT_TURN_BUDGET_MS,
+      });
+      break;
+    }
+
     logInfo("agent", "deepseek round start", {
       messageId: input.messageId,
       round,
@@ -237,9 +296,13 @@ export async function generateAgentReply(
 
     responseId = completion.id;
     if (completion.usage) {
-      const { addAgentTokenUsage, recordMetric } = await import("../metrics/recorder.ts");
-      void addAgentTokenUsage(completion.usage.prompt_tokens ?? 0, completion.usage.completion_tokens ?? 0);
-      void recordMetric("agent_calls");
+      const { recordAgentCallUsage } = await import("../metrics/recorder.ts");
+      void recordAgentCallUsage({
+        promptTokens: completion.usage.prompt_tokens ?? 0,
+        completionTokens: completion.usage.completion_tokens ?? 0,
+        promptCacheHitTokens: completion.usage.prompt_cache_hit_tokens,
+        promptCacheMissTokens: completion.usage.prompt_cache_miss_tokens,
+      });
     }
     const choice = completion.choices?.[0];
     if (!choice) {
