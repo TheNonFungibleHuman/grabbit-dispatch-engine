@@ -8,6 +8,7 @@
     "start": "next start",
     "lint": "eslint",
     "test": "node --experimental-strip-types --test lib/**/*.test.ts",
+    "eval": "node --experimental-strip-types evals/run.ts",
     "sim": "node --env-file=.env.local scripts/simulate-chat.mjs"
   },
   "dependencies": {

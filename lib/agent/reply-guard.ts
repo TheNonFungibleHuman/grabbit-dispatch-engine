@@ -5,8 +5,11 @@ const GUARD_PATH = "grabbit/ops/outbound-reply-guard.json";
 const IDENTICAL_REPLY_WINDOW_MS = 60_000;
 const MAX_TRACKED_RECIPIENTS = 500;
 const NEAR_DUPLICATE_WINDOW_MS = 10_000;
-const NEAR_DUPLICATE_MIN_SIMILARITY = 0.6;
+const NEAR_DUPLICATE_MIN_SIMILARITY = 0.45;
 const NEAR_DUPLICATE_MIN_TOKENS = 8;
+/** Short-reply escape-hatch ceiling — must comfortably cover the deterministic
+ * post-booking acks ("Noted, payment in cash! Have a great ride" = 9 tokens). */
+const DISTINCT_SHORT_REPLY_MAX_TOKENS = 12;
 
 function tokenCount(text: string): number {
   return normalizeReplyText(text).split(" ").filter((token) => token.length > 0).length;
@@ -102,17 +105,17 @@ export function isNearDuplicateRecentReply(
  * Escape hatch for the near-duplicate guard: short, content-distinct replies
  * (e.g. the deterministic post-booking acks "Noted, payment in cash!" or
  * "Already locked in for you!") must NEVER be suppressed just because they
- * followed a confirmation card within the window.
+ * followed a confirmation card within the window. Any short candidate is
+ * definitionally distinct from a long confirmation card; when BOTH messages
+ * are short the token floor in isNearDuplicateRecentReply already stops the
+ * guard from firing, so this only gates the asymmetric long→short case.
  */
 export function isDistinctShortReply(
   candidate: string,
   previousText?: string | null,
 ): boolean {
   if (!previousText) return false;
-  return (
-    tokenCount(candidate) < NEAR_DUPLICATE_MIN_TOKENS &&
-    textSimilarity(candidate, previousText) < NEAR_DUPLICATE_MIN_SIMILARITY
-  );
+  return tokenCount(candidate) < DISTINCT_SHORT_REPLY_MAX_TOKENS;
 }
 
 function pruneReplies(replies: Record<string, GuardedReplyRecord>, now: number): void {
