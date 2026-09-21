@@ -11,6 +11,7 @@ import {
   DEEPSEEK_AGENT_TOOLS,
   buildAgentContextNote,
   executeAgentTool,
+  getDeepSeekToolsForRole,
 } from "./tools.ts";
 import { loadTranscript } from "./transcript.ts";
 
@@ -220,6 +221,13 @@ export async function generateAgentReply(
   const { isAuthorizedRiderOrAdmin } = await import("../riders/config.ts");
   const callerAuth = isAuthorizedRiderOrAdmin(input.sender);
 
+  // Phase 4: role-scoped tool surface — customers/riders never see admin
+  // tools, riders never see booking tools. Fewer tokens per round, and the
+  // model cannot hallucinate a tool it was never shown.
+  const roleTools = getDeepSeekToolsForRole(
+    callerAuth.isAdmin ? "admin" : callerAuth.rider ? "rider" : "customer",
+  );
+
   const systemInstruction = await buildGrabbitSystemInstruction({ isAdmin: callerAuth.isAdmin });
 
   const senderRoleHeader = callerAuth.isAdmin
@@ -282,7 +290,7 @@ export async function generateAgentReply(
         baseUrl,
         model,
         messages,
-        tools: DEEPSEEK_AGENT_TOOLS,
+        tools: roleTools,
       });
     } catch (error) {
       logError("agent", "deepseek completion failed", error);
@@ -338,14 +346,31 @@ export async function generateAgentReply(
     for (const toolCall of toolCalls) {
       calledTools.add(toolCall.function.name);
       let parsedArgs: Record<string, unknown> = {};
+      let argsMalformed = false;
       try {
         parsedArgs = JSON.parse(toolCall.function.arguments || "{}");
       } catch (parseErr) {
-        logWarn("agent", "failed to parse tool arguments JSON", {
+        argsMalformed = true;
+        logWarn("agent", "failed to parse tool arguments JSON; feeding error back to model", {
           tool: toolCall.function.name,
           args: toolCall.function.arguments,
           err: formatError(parseErr),
         });
+      }
+
+      // Structured tool hygiene: never execute a tool with silently-emptied
+      // arguments — that produces confusing "missing fields" tool results.
+      // Instead return a tool error so the model re-emits valid JSON.
+      if (argsMalformed) {
+        messages.push({
+          role: "tool",
+          tool_call_id: toolCall.id,
+          content: JSON.stringify({
+            ok: false,
+            error: "Tool call arguments were not valid JSON. Re-issue the tool call with a well-formed JSON object matching the schema.",
+          }),
+        });
+        continue;
       }
 
       const result = await executeAgentTool({

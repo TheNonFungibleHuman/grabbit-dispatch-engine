@@ -501,6 +501,36 @@ export const DEEPSEEK_AGENT_TOOLS = AGENT_TOOLS.map((tool) => ({
   },
 }));
 
+// ── Phase 4: role-scoped tool surfaces ─────────────────────────────────────
+// 21 tools (~4.2k tokens) were attached to EVERY call for EVERY caller.
+// Customers got admin broadcast tools, riders got booking tools they never
+// use. Scoping by role cuts input tokens on every round AND removes a whole
+// class of tool-misuse hallucinations. Admin keeps the full surface.
+const CUSTOMER_TOOL_NAMES = new Set([
+  "match_service_location",
+  "book_kilo_delivery",
+  "schedule_trip_or_delivery",
+  "reschedule_trip_or_delivery",
+  "add_item_to_active_booking",
+  "confirm_payment_receipt",
+  "check_with_rider",
+  "escalate_to_admin",
+]);
+
+const RIDER_TOOL_NAMES = new Set([
+  "check_rider_assigned_trips",
+  "notify_customer_of_rider_update",
+  "escalate_to_admin",
+]);
+
+export type CallerRole = "customer" | "rider" | "admin";
+
+export function getDeepSeekToolsForRole(role: CallerRole): typeof DEEPSEEK_AGENT_TOOLS {
+  if (role === "admin") return DEEPSEEK_AGENT_TOOLS;
+  const allowed = role === "rider" ? RIDER_TOOL_NAMES : CUSTOMER_TOOL_NAMES;
+  return DEEPSEEK_AGENT_TOOLS.filter((tool) => allowed.has(tool.function.name));
+}
+
 export async function buildAgentContextNote(args: {
   senderPhone: string;
   pushName?: string;
