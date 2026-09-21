@@ -1,23 +1,49 @@
-name: Grabbit Scheduled Dispatch & Reminders Cron
+name: Grabbit Reminders Heartbeat (5 min)
+
+# The single scheduler for 25-min pre-ride reminders, morning briefings,
+# daily rundowns, and the weekly report. Every ping is idempotent:
+#  - reminders: booking.reminderSent flag (claim-first, revert-on-failure)
+#  - briefing / rundown / weekly: per-day / per-week state guards
+#
+# SETUP (repo Settings -> Secrets and variables -> Actions):
+#   CRON_SECRET      — must match the CRON_SECRET env var on Vercel
+#   GRABBIT_APP_URL  — e.g. https://grabbit-whatsapp-agent.vercel.app
+# Failures are LOUD on purpose (exit 1) so a missing/mismatched secret shows
+# up as a red run in the Actions tab instead of silently never reminding.
+#
+# NOTE: GitHub disables scheduled workflows after 60 days with no repo
+# activity. Any push to main resets the clock.
 
 on:
   schedule:
-    # Runs every 5 minutes (standard UTC cron)
     - cron: "*/5 * * * *"
-  workflow_dispatch: # Allows manual trigger from GitHub Actions UI
+  workflow_dispatch:
+
+concurrency:
+  group: reminders-heartbeat
+  cancel-in-progress: false
 
 jobs:
-  ping-reminders:
+  heartbeat:
     runs-on: ubuntu-latest
     steps:
-      - name: Ping Grabbit Reminders API
+      - name: Ping /api/reminders
         env:
           APP_URL: ${{ secrets.GRABBIT_APP_URL || 'https://grabbit-whatsapp-agent.vercel.app' }}
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
         run: |
-          echo "Pinging ${APP_URL}/api/reminders..."
-          if [ -n "$CRON_SECRET" ]; then
-            curl -s -f -H "Authorization: Bearer ${CRON_SECRET}" "${APP_URL}/api/reminders" || exit 0
-          else
-            curl -s -f "${APP_URL}/api/reminders" || exit 0
+          if [ -z "$CRON_SECRET" ]; then
+            echo "::error::CRON_SECRET is not set in repo secrets — reminders cannot fire."
+            exit 1
           fi
+          HTTP_CODE=$(curl -s -o /tmp/heartbeat.json -w "%{http_code}" -X POST \
+            "${APP_URL}/api/reminders" \
+            -H "Authorization: Bearer ${CRON_SECRET}" \
+            -H "User-Agent: Grabbit-Cron-Runner/1.0")
+          echo "HTTP ${HTTP_CODE}"
+          if [ "$HTTP_CODE" != "200" ]; then
+            echo "::error::Heartbeat failed with HTTP ${HTTP_CODE}: $(cat /tmp/heartbeat.json)"
+            exit 1
+          fi
+          cat /tmp/heartbeat.json
+
