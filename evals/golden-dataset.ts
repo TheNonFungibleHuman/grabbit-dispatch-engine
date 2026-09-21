@@ -74,8 +74,25 @@ const GUARD_SCENARIOS: Scenario[] = [
   ] },
 ];
 
+// Router scenarios omit `now` — the router's freshness guard uses real Date.now().
+const ROUTER_SCENARIOS: Scenario[] = [
+  { id: "router-no-intake-falls-through", title: "Router falls through when no intake exists", incident: "Phase 3", turns: [
+    { label: "bare greeting has no slots", action: "routeCustomerMessage", input: "Hello", history: [["Hello", 0]], expect: { text: [{ matches: "^intake_incomplete" }] } },
+  ] },
+  { id: "router-single-slot-ask", title: "Router answers a single missing slot with zero tokens", incident: "Phase 3", turns: [
+    { label: "payment missing -> targeted ask", action: "routeCustomerMessage", input: "tomorrow at 8:15 am", history: [["I need a ride from ALCHE Campus to Mahogany tomorrow at 8:15 am", 3]], expect: { result: "ask_slot:paymentMethod", text: [{ matches: "cash|juice" }] } },
+  ] },
+  { id: "router-all-slots-arms-booking", title: "Fresh fully-specified conversation reports all_slots_present", incident: "Phase 3", turns: [
+    { label: "all slots fresh", action: "routeCustomerMessage", input: "yes book it", history: [["I need a ride from ALCHE Campus to Mahogany at 2:30 pm, cash", 2]], expect: { result: "all_slots_present" } },
+  ] },
+  { id: "router-stale-intake-refused", title: "Stale intake (2h old) never arms auto-booking", incident: "Phase 3 — freshness guard", turns: [
+    { label: "2h-old slots are stale", action: "routeCustomerMessage", input: "yes", history: [["I need a ride from ALCHE Campus to Mahogany at 2:30 pm, cash", 120]], expect: { result: "intake_stale" } },
+  ] },
+];
+
 export const GOLDEN_DATASET: Scenario[] = [
   ...DATE_LABEL_SCENARIOS,
   ...DUP_CARD_SCENARIOS,
   ...GUARD_SCENARIOS,
+  ...ROUTER_SCENARIOS,
 ];

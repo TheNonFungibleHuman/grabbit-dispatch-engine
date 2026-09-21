@@ -1,4 +1,5 @@
 import { generateAgentReply } from "./deepseek.ts";
+import { isDialogRouterEnabled, routeCustomerMessage, tryDeterministicBooking } from "./dialog-router.ts";
 import {
   cleanCustomerGreetingName,
   isBareGreeting,
@@ -536,6 +537,50 @@ export async function processIncomingUserMessage(
     }
   } catch (burstErr) {
     logWarn("agent", "post-booking burst follow-up check skipped", formatError(burstErr));
+  }
+
+  // ── Phase 3: deterministic dialog router (0 LLM tokens) ─────────────
+  // After the greeting/ack/burst guards, before the LLM. Only customers —
+  // never admins or riders. Books ONLY on an explicit confirmation word when
+  // every slot is already resolved in the transcript; otherwise answers a
+  // single missing slot deterministically. Everything else falls through.
+  if (!auth.isAdmin && !auth.rider && isDialogRouterEnabled() && message.text) {
+    try {
+      const transcript = await getTurnTranscript();
+      const decision = routeCustomerMessage({ text: message.text, transcript });
+
+      if (decision.handled && decision.reply) {
+        await sendAndRecord({ to, sender: message.sender, text: decision.reply, messageId: message.messageId });
+        logInfo("agent", "router handled message deterministically", {
+          sender: message.sender, reason: decision.reason,
+        });
+        return;
+      }
+
+      // All slots present — book only on an explicit confirmation word.
+      if (decision.reason === "all_slots_present") {
+        const isConfirm = /^(?:yes|yeah|yep|confirm|book it|go ahead|sure|ok book|please book)\b/i.test(message.text.trim());
+        if (isConfirm) {
+          const { extractIntakeState } = await import("../orders/intake-state.ts");
+          const intake = extractIntakeState(transcript.entries);
+          const booked = await tryDeterministicBooking({
+            senderPhone: message.sender,
+            customerName: message.pushName,
+            intake,
+          });
+          if (booked.handled && booked.reply) {
+            await sendAndRecord({ to, sender: message.sender, text: booked.reply, messageId: message.messageId });
+            logInfo("agent", "router completed booking deterministically", {
+              sender: message.sender, reason: booked.reason,
+            });
+            return;
+          }
+          logInfo("agent", "router booking fell through to LLM", { reason: booked.reason });
+        }
+      }
+    } catch (routerErr) {
+      logWarn("agent", "dialog router error; continuing to LLM", formatError(routerErr));
+    }
   }
 
   const reply = await generateAgentReply({

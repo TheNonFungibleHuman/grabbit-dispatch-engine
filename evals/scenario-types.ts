@@ -45,13 +45,16 @@ export interface ScenarioTurn {
     | "isNearDuplicateRecentReply"
     | "isDistinctShortReply"
     | "isIdenticalRecentReply"
-    | "normalizeReplyText";
+    | "normalizeReplyText"
+    | "routeCustomerMessage";
   /** Primary input (meaning depends on action). */
   input?: string;
   /** Secondary input (e.g. `previous` text for similarity guards). */
   previous?: string;
   /** Age of the `previous` message relative to `now` (ms). Defaults to 0 (same instant). */
   previousAgeMs?: number;
+  /** Prior conversation entries for the router action: [text, minutesAgo][]. */
+  history?: Array<[string, number]>;
   /** Time context for date-sensitive actions. */
   now?: string; // ISO instant
   dateIso?: string;

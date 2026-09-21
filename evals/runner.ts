@@ -14,6 +14,7 @@ import {
   textSimilarity,
 } from "../lib/agent/reply-guard.ts";
 import { customerDateLabel, resolveRelativeDateWord } from "../lib/time.ts";
+import { routeCustomerMessage } from "../lib/agent/dialog-router.ts";
 
 export interface TurnResult {
   label: string;
@@ -107,6 +108,20 @@ function runTurn(turn: ScenarioTurn): { result: unknown; text: string } {
     }
     case "evaluateSlotRules":
       throw new Error("evaluateSlotRules is exercised through lib/orders/pre-booking.test.ts; use it there.");
+    case "routeCustomerMessage": {
+      const nowMs = now.getTime();
+      const entries = (turn.history ?? []).map(([text, minutesAgo]) => ({
+        at: new Date(nowMs - minutesAgo * 60_000).toISOString(),
+        role: "customer" as const,
+        text,
+      }));
+      entries.push({ at: new Date(nowMs).toISOString(), role: "customer" as const, text: turn.input ?? "" });
+      const decision = routeCustomerMessage({
+        text: turn.input ?? "",
+        transcript: { senderPhone: "99900000012", updatedAt: new Date(nowMs).toISOString(), entries },
+      });
+      return { result: decision.reason, text: `${decision.reason}${decision.reply ? `\n${decision.reply}` : ""}` };
+    }
     default:
       throw new Error(`Unknown action: ${turn.action}`);
   }
