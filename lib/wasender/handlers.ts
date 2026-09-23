@@ -568,6 +568,13 @@ async function onUserMessage(message: IncomingUserMessage): Promise<void> {
       sender: message.sender,
       ms: Date.now() - startedAt,
     });
+    // Dead-man's switch: a successful turn resets the failure streak.
+    try {
+      const { noteAgentResult } = await import("../metrics/recorder.ts");
+      void noteAgentResult(true);
+    } catch {
+      // tripwire bookkeeping must never break processing
+    }
   } catch (error) {
     logError("wasender", "failed to process inbound message", error);
     console.error("[wasender] process failure detail", {
@@ -584,6 +591,14 @@ async function onUserMessage(message: IncomingUserMessage): Promise<void> {
       preview: message.text,
       error: error instanceof Error ? error.message : String(error),
     });
+
+    // Dead-man's switch: consecutive failures pause the agent + alert admins.
+    try {
+      const { noteAgentResult } = await import("../metrics/recorder.ts");
+      void noteAgentResult(false, error instanceof Error ? error.message : String(error));
+    } catch {
+      // tripwire bookkeeping must never break the fallback reply below
+    }
 
     try {
       const to = message.sender.startsWith("+")

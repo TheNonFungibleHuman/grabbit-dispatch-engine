@@ -5,6 +5,13 @@ import { addDaysIso, mauritiusDateIso } from "../time.ts";
 const METRICS_DIR = "grabbit/metrics/";
 const OUTBOUND_ALERT_THRESHOLD = 3;
 const OUTBOUND_ALERT_COOLDOWN_MS = 60 * 60 * 1000;
+/**
+ * Dead-man's switch: after this many consecutive agent turns ending in an
+ * unhandled error, the AI dispatcher pauses itself and alerts the admins.
+ * A broken agent must not silently ignore customers for hours.
+ */
+const AGENT_TRIPWIRE_THRESHOLD = 3;
+const AGENT_TRIPWIRE_COOLDOWN_MS = 60 * 60 * 1000;
 /** Warm instances reuse the day document between writes (write-through). */
 const DAY_CACHE_TTL_MS = 30_000;
 
@@ -14,6 +21,8 @@ export interface DailyMetrics {
   tokens: { prompt: number; completion: number };
   consecutiveOutboundFailures: number;
   lastOutboundAlertAt?: string;
+  consecutiveAgentFailures: number;
+  lastAgentTripwireAt?: string;
 }
 
 function dayPath(dateIso: string): string {
@@ -29,6 +38,8 @@ async function loadDay(dateIso: string): Promise<DailyMetrics> {
     tokens: stored?.tokens ?? { prompt: 0, completion: 0 },
     consecutiveOutboundFailures: stored?.consecutiveOutboundFailures ?? 0,
     lastOutboundAlertAt: stored?.lastOutboundAlertAt,
+    consecutiveAgentFailures: stored?.consecutiveAgentFailures ?? 0,
+    lastAgentTripwireAt: stored?.lastAgentTripwireAt,
   };
 }
 
@@ -126,12 +137,55 @@ export async function noteOutboundResult(ok: boolean): Promise<void> {
   }
 }
 
+/**
+ * Dead-man's switch: record the outcome of an agent turn. After
+ * AGENT_TRIPWIRE_THRESHOLD consecutive failures, pause the AI dispatcher
+ * (inbound messages stop being answered by the AI; admins keep full control)
+ * and alert the admins once per cooldown window.
+ */
+export async function noteAgentResult(ok: boolean, errorSummary?: string): Promise<void> {
+  try {
+    const metrics = await mutateToday((m) => {
+      m.consecutiveAgentFailures = ok ? 0 : m.consecutiveAgentFailures + 1;
+    });
+    if (!metrics || ok) return;
+    const streak = metrics.consecutiveAgentFailures;
+    if (streak < AGENT_TRIPWIRE_THRESHOLD) return;
+
+    const cooledDown =
+      !metrics.lastAgentTripwireAt ||
+      Date.now() - Date.parse(metrics.lastAgentTripwireAt) > AGENT_TRIPWIRE_COOLDOWN_MS;
+    if (!cooledDown) return;
+
+    await mutateToday((m) => {
+      m.lastAgentTripwireAt = new Date().toISOString();
+    });
+
+    logWarn("metrics", "agent failure tripwire triggered; pausing AI dispatcher", { streak });
+    const { setAgentEnabled } = await import("../admin/agent-switch.ts");
+    await setAgentEnabled(false);
+
+    const { notifyAdminEscalation } = await import("../riders/notify-rider.ts");
+    await notifyAdminEscalation({
+      customerPhone: "system",
+      customerName: "AI Dispatcher (auto-pause)",
+      reason: `Dead-man's switch: ${streak} consecutive agent turns failed${
+        errorSummary ? ` (last error: ${errorSummary})` : ""
+      }. The AI dispatcher has been PAUSED so customers are not silently ignored. Inspect the logs, fix, and re-enable the agent from the admin dashboard.`,
+      recentContext: "Automated resilience alert from /lib/metrics",
+    });
+  } catch (err) {
+    logWarn("metrics", "failed to note agent result", formatError(err));
+  }
+}
+
 export interface MetricsSnapshot {
   generatedAt: string;
   windowDays: number;
   totals: Record<string, number>;
   tokens: { prompt: number; completion: number };
   outboundFailureStreak: number;
+  agentFailureStreak: number;
   days: DailyMetrics[];
 }
 
@@ -159,6 +213,7 @@ export async function getMetricsSnapshot(windowDays = 7): Promise<MetricsSnapsho
     totals,
     tokens: { prompt, completion },
     outboundFailureStreak: days[0]?.consecutiveOutboundFailures ?? 0,
+    agentFailureStreak: days[0]?.consecutiveAgentFailures ?? 0,
     days,
   };
 }

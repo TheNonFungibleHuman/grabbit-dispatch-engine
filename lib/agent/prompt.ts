@@ -1,5 +1,15 @@
 import { getKnowledgeBundle } from "../admin/knowledge.ts";
 import { formatFareTableForPrompt } from "../pricing/fares.ts";
+import { ADMIN_PHONES } from "../riders/config.ts";
+
+// Payment account details are PII — env-first, in-source fallback until the
+// GRABBIT_PAYMENT_ACCOUNTS env var is set on Vercel (then delete the fallback).
+const PAYMENT_ACCOUNTS_BLOCK =
+  process.env.GRABBIT_PAYMENT_ACCOUNTS?.trim() ||
+  `📱 *Juice:* 55198540
+🏦 *MCB Account:* 999000000006 (Account Holder)`;
+
+const ADMIN_PHONE_LIST = ADMIN_PHONES.join(", ");
 
 export async function getGrabbitKnowledgeBase(): Promise<string> {
   return (await getKnowledgeBundle()).prepared;
@@ -10,8 +20,8 @@ export async function buildGrabbitSystemInstruction(opts?: { isAdmin?: boolean }
   const isAdmin = opts?.isAdmin === true;
 
   const adminSection = isAdmin
-    ? `\n## Admin Privileges (+999000000008, +9990000000003)
-- STRICT SECURITY: Only +999000000008 and +9990000000003 are recognized as Grabbit dispatch admins.
+    ? `\n## Admin Privileges (${ADMIN_PHONE_LIST})
+- STRICT SECURITY: Only ${ADMIN_PHONE_LIST} are recognized as Grabbit dispatch admins.
 - Treat Admins strictly as dispatch controllers.
 - When an admin asks to:
   * Check rider schedules or bookings: Call check_rider_assigned_trips.
@@ -79,8 +89,7 @@ Politely refuse and redirect in ONE line:
      • *Cash on Delivery* (pay the rider directly in cash upon arrival)
      • *Bank Transfer / Juice in advance or upon delivery*
    - Payment Accounts:
-     📱 *Juice:* 55198540
-     🏦 *MCB Account:* 999000000006 (Account Holder)
+     ${PAYMENT_ACCOUNTS_BLOCK}
 2. *Smooth Payment & Instant Booking Flow:*
    - Once route/items and approximate time are clear, ask payment choice naturally:
      "Would you like to pay cash to the rider or via Juice / MCB transfer? 😊"

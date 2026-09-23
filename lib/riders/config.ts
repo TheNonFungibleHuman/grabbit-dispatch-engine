@@ -8,35 +8,50 @@ export interface RiderProfile {
   channel: "whatsapp" | "email" | "google_chat";
 }
 
+// ── PII policy (Phase 6) ──────────────────────────────────────────────────
+// Rider phone numbers, Kilo rider UUIDs, and the payment account details are
+// personal data. They are read from env first; the literals below are a
+// FALLBACK so the fleet keeps running until the matching env vars are set on
+// Vercel. Once GRABBIT_* env vars are set, delete the fallbacks.
+let warnedPiiFallback = false;
+function warnPiiFallbackOnce(): void {
+  if (warnedPiiFallback) return;
+  warnedPiiFallback = true;
+  console.warn(
+    "[config] PII env vars not set — using in-source fallback values. Set GRABBIT_RIDER_* / GRABBIT_ADMIN_PHONES / GRABBIT_PAYMENT_ACCOUNTS to remove PII from source.",
+  );
+}
+
 export const FLEET_RIDERS: RiderProfile[] = [
   {
     id: "thierry",
     name: "Thierry",
     aliases: ["thierry", "thierry(delivery)"],
-    kiloRiderId: "00000000-0000-0000-0000-0000000000a1",
-    phone: "+999000000009",
+    kiloRiderId: process.env.GRABBIT_RIDER_THIERRY_KILO_ID || "00000000-0000-0000-0000-0000000000a1",
+    phone: process.env.GRABBIT_RIDER_THIERRY_PHONE || "+999000000009",
     channel: "whatsapp",
   },
   {
     id: "sherif",
     name: "Sherif",
     aliases: ["sherif", "sherif deen"],
-    kiloRiderId: "00000000-0000-0000-0000-0000000000a2",
-    phone: "+999000000008",
+    kiloRiderId: process.env.GRABBIT_RIDER_SHERIF_KILO_ID || "00000000-0000-0000-0000-0000000000a2",
+    phone: process.env.GRABBIT_RIDER_SHERIF_PHONE || "+999000000008",
     channel: "whatsapp",
   },
   {
     id: "moses",
     name: "Moses",
     aliases: ["moses", "moses kolaan"],
-    kiloRiderId: "00000000-0000-0000-0000-0000000000a3",
-    phone: "+999000000007",
-    email: "rider.three@example.com",
+    kiloRiderId: process.env.GRABBIT_RIDER_MOSES_KILO_ID || "00000000-0000-0000-0000-0000000000a3",
+    phone: process.env.GRABBIT_RIDER_MOSES_PHONE || "+999000000007",
+    email: process.env.GRABBIT_RIDER_MOSES_EMAIL || "rider.three@example.com",
     // Primary delivery is now WhatsApp; Google Chat remains as a mirror for
     // full dispatch-team visibility (notification senders always post there).
     channel: "whatsapp",
   },
 ];
+if (!process.env.GRABBIT_RIDER_THIERRY_KILO_ID) warnPiiFallbackOnce();
 
 export function findRiderByName(name: string): RiderProfile | null {
   const query = name.trim().toLowerCase();
@@ -72,11 +87,14 @@ export function findRiderByPhone(identifier: string): RiderProfile | null {
   return null;
 }
 
-export const ADMIN_PHONES = [
-  "+999000000008",
-  "+9990000000003",
-  process.env.ADMIN_PHONE,
-].filter(Boolean) as string[];
+export const ADMIN_PHONES = (
+  process.env.GRABBIT_ADMIN_PHONES?.trim() ||
+  "+999000000008,+9990000000003"
+)
+  .split(",")
+  .map((p) => p.trim())
+  .filter(Boolean)
+  .concat(process.env.ADMIN_PHONE?.trim() ? [process.env.ADMIN_PHONE.trim()] : []);
 
 export function isAuthorizedRiderOrAdmin(identifier?: string): {
   isAuthorized: boolean;

@@ -15,6 +15,11 @@ export function OverviewDashboard(props: {
   totalOutbound: number;
   needsTakeoverCount: number;
   maintenance?: { active: boolean; untilTimeStr?: string; reason?: string };
+  health?: {
+    agentFailureStreak: number;
+    outboundFailureStreak: number;
+    agentTripwireAt?: string;
+  };
 }) {
   const [maintenance, setMaintenance] = useState(props.maintenance || { active: false });
   const [showPauseModal, setShowPauseModal] = useState(false);
@@ -459,6 +464,46 @@ export function OverviewDashboard(props: {
 
         {/* Quick Actions & Short Cuts (Right 1 col) */}
         <div className="space-y-5">
+          {/* System Health (Phase 6): live failure streaks + dead-man's switch state */}
+          {props.health && (
+            <div className="rounded-[24px] bg-[var(--bg-card)] border border-[#E8E5DC] dark:border-[#1D2620] p-6 shadow-sm">
+              <h3 className="font-display text-base font-bold text-[#101412] dark:text-[#F6F3EC]">
+                System Health
+              </h3>
+              <p className="text-xs text-[#6C746E] dark:text-[#8E9690] mt-1">
+                Live resilience signals from the dispatch engine.
+              </p>
+
+              <div className="mt-4 space-y-2.5">
+                <HealthStreakRow
+                  label="AI dispatcher failures"
+                  streak={props.health.agentFailureStreak}
+                  threshold={3}
+                />
+                <HealthStreakRow
+                  label="WhatsApp send failures"
+                  streak={props.health.outboundFailureStreak}
+                  threshold={3}
+                />
+              </div>
+
+              {!props.agentEnabled && props.health.agentTripwireAt && (
+                <div className="mt-4 rounded-2xl border border-[#FF6B6B]/40 bg-[#FF6B6B]/10 p-3 text-[11px] font-semibold text-[#8A1F1F] dark:text-[#FF6B6B]">
+                  Dead-man&apos;s switch fired{" "}
+                  {new Date(props.health.agentTripwireAt).toLocaleString("en-GB", {
+                    timeZone: "Indian/Mauritius",
+                    day: "numeric",
+                    month: "short",
+                    hour: "2-digit",
+                    minute: "2-digit",
+                  })}{" "}
+                  — the AI dispatcher was auto-paused after repeated failures so customers are not
+                  silently ignored. Investigate the logs, then re-enable the agent above.
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Action Card */}
           <div className="rounded-[24px] bg-[var(--bg-card)] border border-[#E8E5DC] dark:border-[#1D2620] p-6 shadow-sm">
             <h3 className="font-display text-base font-bold text-[#101412] dark:text-[#F6F3EC]">
@@ -518,6 +563,24 @@ export function OverviewDashboard(props: {
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+function HealthStreakRow(props: { label: string; streak: number; threshold: number }) {
+  const tone = props.streak <= 0 ? "ok" : props.streak < props.threshold ? "warn" : "crit";
+  const badgeClass = {
+    ok: "bg-[#7ed957]/15 text-[#101412] dark:text-[#7ed957] border-[#7ed957]/30",
+    warn: "bg-[#FFC53D]/15 text-[#7A5A00] dark:text-[#FFC53D] border-[#FFC53D]/40",
+    crit: "bg-[#FF6B6B]/15 text-[#8A1F1F] dark:text-[#FF6B6B] border-[#FF6B6B]/40",
+  }[tone];
+  const badgeLabel = tone === "ok" ? "Healthy" : `${props.streak} in a row`;
+  return (
+    <div className="flex items-center justify-between text-xs">
+      <span className="font-semibold text-[#101412] dark:text-[#F6F3EC]">{props.label}</span>
+      <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold border ${badgeClass}`}>
+        {badgeLabel}
+      </span>
     </div>
   );
 }

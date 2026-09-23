@@ -5,6 +5,7 @@ import { getOpsDashboard } from "@/lib/ops/store";
 import { listAllPreBookings } from "@/lib/orders/pre-booking";
 import { getAvailabilitySnapshot } from "@/lib/schedule/availability";
 import { getFleetMaintenanceStatus } from "@/lib/riders/commands";
+import { getMetricsSnapshot } from "@/lib/metrics/recorder";
 import { mauritiusDateIso } from "@/lib/time";
 import { OverviewDashboard } from "./overview-dashboard";
 
@@ -20,6 +21,8 @@ export default async function AdminIndexPage() {
     getOpsDashboard(),
     getFleetMaintenanceStatus(),
   ]);
+
+  const metrics = await getMetricsSnapshot(7).catch(() => null);
 
   const todayIso = mauritiusDateIso(new Date());
   const allowedDates = new Set([
@@ -50,6 +53,15 @@ export default async function AdminIndexPage() {
       totalOutbound={ops.state.stats.outboundSuccess}
       needsTakeoverCount={ops.takeovers.length}
       maintenance={maintenance}
+      health={
+        metrics
+          ? {
+              agentFailureStreak: metrics.agentFailureStreak,
+              outboundFailureStreak: metrics.outboundFailureStreak,
+              agentTripwireAt: metrics.days[0]?.lastAgentTripwireAt,
+            }
+          : undefined
+      }
     />
   );
 }
