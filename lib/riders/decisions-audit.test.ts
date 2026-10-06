@@ -103,6 +103,10 @@ describe("Decision A4: Fleet Maintenance Window & Emergency Pause", () => {
     // 1. Set maintenance window until 1 hour from now (dynamic so the
     //    hard-expiry guard can never expire it mid-test)
     const windowMin = Math.min(mauritiusMinutesOfDay(now) + 60, 23 * 60 + 58);
+    // Query a time strictly inside the window so the assertion is clock-independent
+    // (the previous fixed "12:00 pm" target only fell inside the window late in the morning).
+    const targetMin = Math.max(Math.min(mauritiusMinutesOfDay(now) + 30, windowMin - 1), 1);
+    const targetTimeStr = formatMinutesToTime(targetMin);
     await setFleetMaintenanceWindow(formatMinutesToTime(windowMin), "Heavy Rain & Flooding");
     const status = await getFleetMaintenanceStatus();
     assert.equal(status.active, true);
@@ -112,7 +116,7 @@ describe("Decision A4: Fleet Maintenance Window & Emergency Pause", () => {
     // 2. Query target slot for today during maintenance window
     const slotCheck = await getRiderForTargetSlot({
       targetDate: todayIso,
-      targetTime: "12:00 pm",
+      targetTime: targetTimeStr,
       now,
     });
 
@@ -127,7 +131,7 @@ describe("Decision A4: Fleet Maintenance Window & Emergency Pause", () => {
     // 4. Slot check after clear should restore availability if riders scheduled
     const slotRestored = await getRiderForTargetSlot({
       targetDate: todayIso,
-      targetTime: "12:00 pm",
+      targetTime: targetTimeStr,
       now,
     });
     // Reason should no longer mention maintenance

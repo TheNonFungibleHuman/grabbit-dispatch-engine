@@ -33,7 +33,7 @@ describe("Felicia & Jacenta Incident Audit (Saturday, Sept 12, 2026) Regressions
     });
 
     it("strips common prefix titles and extracts first name", () => {
-      assert.equal(cleanCustomerGreetingName("Emp.Customer D"), "Customer D");
+      assert.equal(cleanCustomerGreetingName("Emp.Kai"), "Kai");
       assert.equal(cleanCustomerGreetingName("Dr. Francois"), "Francois");
       assert.equal(cleanCustomerGreetingName("Cyuzuzo Juliette"), "Cyuzuzo");
     });
@@ -41,7 +41,7 @@ describe("Felicia & Jacenta Incident Audit (Saturday, Sept 12, 2026) Regressions
     it("formats title-cased names from lowercase or uppercase inputs", () => {
       assert.equal(cleanCustomerGreetingName("felicia"), "Felicia");
       assert.equal(cleanCustomerGreetingName("FELICIA"), "Felicia");
-      assert.equal(cleanCustomerGreetingName("Customer A"), "Customer A");
+      assert.equal(cleanCustomerGreetingName("kai"), "Kai");
     });
   });
 

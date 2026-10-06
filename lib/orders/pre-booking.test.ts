@@ -10,7 +10,7 @@ describe("rider directory & custom tracking", () => {
     assert.equal(thierry?.name, "Thierry");
     assert.equal(thierry?.kiloRiderId, "00000000-0000-0000-0000-0000000000a1");
 
-    const sherif = findRiderByPhone("+233 59 723 6608");
+    const sherif = findRiderByPhone("+999 000 000 008");
     assert.ok(sherif);
     assert.equal(sherif?.name, "Sherif");
 

@@ -5,9 +5,9 @@ import { savePreBooking } from "./pre-booking.ts";
 
 describe("customer-resolver", () => {
   it("normalizes 8-digit Mauritian mobile numbers to 2305XXXXXXX", () => {
-    assert.equal(normalizeCustomerPhone("58589448"), "99900000054");
-    assert.equal(normalizeCustomerPhone("59323776"), "99900000065");
-    assert.equal(normalizeCustomerPhone("+230 5858 9448"), "99900000054");
+    assert.equal(normalizeCustomerPhone("50000001"), "23050000001");
+    assert.equal(normalizeCustomerPhone("50000002"), "23050000002");
+    assert.equal(normalizeCustomerPhone("+230 5000 0001"), "23050000001");
     assert.equal(normalizeCustomerPhone("9990000000003"), "9990000000003");
   });
 
@@ -36,7 +36,7 @@ describe("customer-resolver", () => {
   });
 
   it("resolves customer identity from phone number input", async () => {
-    const resolved = await resolveCustomerIdentity("58589448");
+    const resolved = await resolveCustomerIdentity("99900000054");
     assert.ok(resolved);
     assert.equal(resolved.phone, "99900000054");
   });

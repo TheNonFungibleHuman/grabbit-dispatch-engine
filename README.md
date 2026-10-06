@@ -2,7 +2,7 @@
 
 [![Next.js](https://img.shields.io/badge/Next.js-16.3.4-black?logo=next.js)](https://nextjs.org/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.x-blue?logo=typescript)](https://www.typescriptlang.org/)
-[![Tests](https://img.shields.io/badge/Tests-192%20Passing-brightgreen?logo=node.js)](https://nodejs.org/)
+[![Tests](https://img.shields.io/badge/Tests-249%20Passing-brightgreen?logo=node.js)](https://nodejs.org/)
 [![DeepSeek](https://img.shields.io/badge/AI%20Brain-DeepSeek%20V4.1%20Flash-purple)](https://deepseek.com/)
 [![Storage](https://img.shields.io/badge/Storage-Supabase%20Blob-emerald?logo=supabase)](https://supabase.com/)
 
@@ -24,7 +24,7 @@ This repository (`grabbit-agent`) powers the 24/7 intelligent operations backbon
 5. **Deterministic Anti-Double-Booking Guard**: Mathematically enforces 15m/30m safety buffers and hourly capacity limits across 7-day rider schedules in pure TypeScript.
 6. **Distributed Cross-Container Session Lock**: Serializes rapid-fire WhatsApp bursts across parallel serverless instances so the bot never talks over itself.
 7. **Zero-Token Fleet Rider Commands**: Riders manage active runs via simple 1-word WhatsApp texts (`Done`, `Break 15m`, `Back`) requiring 0 LLM tokens.
-8. **Admin-First Operations & Pending Actions**: the admin is isolated as Admin-First; rundown and weekly report approvals execute deterministically with 0 tokens.
+8. **Admin-First Operations & Pending Actions**: the lead admin account is isolated as Admin-First; rundown and weekly report approvals execute deterministically with 0 tokens.
 9. **Fleet Visibility & Space Alerts**: Automatically dispatches rich booking cards to Google Chat space webhooks for every confirmed run while alerting riders on WhatsApp.
 10. **Admin Web Dashboard**: Real-time slots calendar, walk-in quick dispatch with custom fare allocation, live chat transcript viewer, and safe audience broadcast campaigns.
 
@@ -116,7 +116,7 @@ flowchart TD
 | **PDF Stream Engine** | **Node.js `node:zlib`** | Native 5ms zero-token digital PDF receipt extraction |
 | **Database & JSON Store** | **Supabase JSON Store** | Persistent booking records, transcripts, and fleet status |
 | **Fleet Notifications** | **WhatsApp & Google Chat Webhook** | Dispatches to riders on WhatsApp and space alerts to Google Chat |
-| **Testing** | **Node.js Native Test Runner** | 192 automated unit and integration tests (6.5s runtime) |
+| **Testing** | **Node.js Native Test Runner** | 249 automated unit and integration tests |
 
 ---
 
@@ -161,7 +161,7 @@ RESEND_API_KEY=
 # Install dependencies
 npm install
 
-# Run complete test suite (192 unit & integration tests in ~6.5 seconds)
+# Run complete test suite (249 unit & integration tests)
 npm test
 
 # Run Next.js production build (Turbopack + TypeScript validation)
